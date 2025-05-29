@@ -62,8 +62,8 @@ const workerPipe = Pear.worker.pipe()
 console.log('[Worker] Pipe object:', workerPipe ? 'exists' : 'null')
 
 // Helper function to send messages with newline delimiter
-const sendMessage = (message) => {
-  if (workerPipe && !isShuttingDown) {
+const sendMessage = (message, { force = false } = {}) => {
+  if (workerPipe && (!isShuttingDown || force)) {
     const messageStr = JSON.stringify(message) + '\n'
     console.log('[Worker] Sending message:', messageStr.trim())
     try {
@@ -117,11 +117,11 @@ if (workerPipe) {
           switch (message.type) {
             case 'shutdown':
               console.log('[Worker] Shutdown requested')
-              isShuttingDown = true
               sendMessage({
                 type: 'status',
                 message: 'Shutting down...'
               })
+              isShuttingDown = true
               await cleanup()
               process.exit(0)
               break
@@ -274,11 +274,11 @@ Pear.teardown(async () => {
 
 // Cleanup function
 async function cleanup() {
-  if (workerPipe && !isShuttingDown) {
-    sendMessage({ 
-      type: 'status', 
-      message: 'Worker shutting down...' 
-    })
+  if (workerPipe) {
+    sendMessage({
+      type: 'status',
+      message: 'Worker shutting down...'
+    }, { force: true })
   }
   
   if (relayServer && relayServer.shutdownRelayServer) {
