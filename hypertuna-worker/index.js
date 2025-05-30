@@ -35,9 +35,8 @@ function generateDefaultConfig() {
 }
 
 // Load or create configuration
-// Allows passing a directory to override default Pear.config.storage
-async function loadOrCreateConfig(configDirOverride) {
-  const configDir = configDirOverride || Pear.config.storage || __dirname
+async function loadOrCreateConfig() {
+  const configDir = Pear.config.storage || __dirname
   await fs.mkdir(configDir, { recursive: true })
   
   const configPath = join(configDir, 'relay-config.json')
@@ -296,15 +295,16 @@ async function cleanup() {
 async function main() {
   try {
     console.log('[Worker] Hypertuna Relay Worker starting...')
-
-    let parentConfig = null
-
-    // Wait for config from parent if available before loading config
+    
+    // Load or create configuration
+    let config = await loadOrCreateConfig()
+    
+    // Wait for config from parent if available
     if (workerPipe) {
       console.log('[Worker] Waiting for parent config...');
       
       // Create a promise to wait for config
-      parentConfig = await new Promise((resolve) => {
+      const parentConfig = await new Promise((resolve) => {
         const timeout = setTimeout(() => {
           console.log('[Worker] Config timeout - using default config');
           resolve(null);
@@ -333,27 +333,22 @@ async function main() {
         
         workerPipe.on('data', handleData);
       });
-    }
-
-    // Determine user-specific storage directory
-    let storageDir = Pear.config.storage || __dirname
-    if (parentConfig && parentConfig.nostr_nsec_hex) {
-      const hash = crypto.createHash('sha256').update(parentConfig.nostr_nsec_hex).digest('hex')
-      storageDir = join(storageDir, hash)
-      await fs.mkdir(storageDir, { recursive: true })
-      parentConfig.storage = storageDir
-    }
-
-    Pear.config.storage = storageDir
-    // Load or create configuration using the determined storage directory
-    let config = await loadOrCreateConfig(storageDir)
-
-    if (parentConfig) {
-      config = {
-        ...config,
-        ...parentConfig
+      
+      if (parentConfig) {
+        if (parentConfig.nostr_nsec_hex) {
+          const hash = crypto.createHash('sha256').update(parentConfig.nostr_nsec_hex).digest('hex');
+          const userDir = join(Pear.config.storage || __dirname, hash);
+          await fs.mkdir(userDir, { recursive: true });
+          parentConfig.storage = userDir;
+        }
+        // Merge parent config with loaded config
+        config = {
+          ...config,
+          ...parentConfig
+        };
+        Pear.config.storage = config.storage;
+        console.log('[Worker] Merged config with parent data:', config);
       }
-      console.log('[Worker] Merged config with parent data:', config)
     }
     
     if (workerPipe) {
