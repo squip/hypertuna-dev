@@ -6,6 +6,7 @@
 /* global Pear */
 import { promises as fs } from 'fs'
 import { join } from 'path'
+import { HypertunaUtils } from './HypertunaUtils.js'
 
 console.log('[App] app.js loading started at:', new Date().toISOString());
 
@@ -136,10 +137,17 @@ async function startWorker() {
     // Start the worker process
     workerPipe = Pear.worker.run(workerLink, [])
     
-    // Load stored configuration
+    // Load stored configuration for the current user if available
     let storedConfig = {}
     try {
-      const configPath = join(Pear.config.storage || '.', 'relay-config.json')
+      let configPath = join(Pear.config.storage || '.', 'relay-config.json')
+      if (window.App && window.App.currentUser && window.App.currentUser.privateKey) {
+        const dir = await HypertunaUtils.getUserStorageDir(window.App.currentUser.privateKey)
+        if (dir) {
+          await fs.mkdir(dir, { recursive: true })
+          configPath = join(dir, 'relay-config.json')
+        }
+      }
       const file = await fs.readFile(configPath, 'utf8')
       storedConfig = JSON.parse(file)
     } catch (e) {

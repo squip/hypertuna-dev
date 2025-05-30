@@ -26,6 +26,33 @@ export class HypertunaUtils {
      * LocalStorage key for Hypertuna configuration
      */
     static STORAGE_KEY = 'hypertuna_config';
+
+    /**
+     * Compute the storage directory for a specific user based on their private key
+     * @param {string} privateKeyHex - User private key
+     * @returns {Promise<string|null>} - Absolute path to user storage or null
+     */
+    static async getUserStorageDir(privateKeyHex) {
+        if (typeof Pear === 'undefined' || !Pear.config || !Pear.config.storage) {
+            return null;
+        }
+
+        const { join } = await import('path');
+        let hash = privateKeyHex;
+
+        try {
+            const { createHash } = await import('crypto');
+            hash = createHash('sha256').update(privateKeyHex).digest('hex');
+        } catch (e) {
+            if (typeof window !== 'undefined' && window.crypto && window.crypto.subtle) {
+                const data = new TextEncoder().encode(privateKeyHex);
+                const digest = await window.crypto.subtle.digest('SHA-256', data);
+                hash = Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, '0')).join('');
+            }
+        }
+
+        return join(Pear.config.storage, hash);
+    }
     
     /**
      * Decode a base32 NOSTR private key (nsec)
@@ -283,13 +310,22 @@ export class HypertunaUtils {
     static async saveConfig(config) {
         localStorage.setItem(this.STORAGE_KEY, JSON.stringify(config));
 
-        if (typeof Pear !== 'undefined' && Pear.config && Pear.config.storage) {
+        if (
+            typeof Pear !== 'undefined' &&
+            Pear.config &&
+            Pear.config.storage &&
+            config.nostr_nsec_hex
+        ) {
             try {
                 const { promises: fs } = await import('fs');
-                const { join } = await import('path');
-                await fs.mkdir(Pear.config.storage, { recursive: true });
-                const filePath = join(Pear.config.storage, 'relay-config.json');
-                await fs.writeFile(filePath, JSON.stringify(config, null, 2));
+                const dir = await this.getUserStorageDir(config.nostr_nsec_hex);
+                if (dir) {
+                    const { join } = await import('path');
+                    await fs.mkdir(dir, { recursive: true });
+                    const filePath = join(dir, 'relay-config.json');
+                    config.storage = dir;
+                    await fs.writeFile(filePath, JSON.stringify(config, null, 2));
+                }
             } catch (e) {
                 console.error('Failed to persist Hypertuna config to file:', e);
             }
@@ -300,15 +336,23 @@ export class HypertunaUtils {
      * Load Hypertuna configuration from localStorage
      * @returns {Object|null} - Hypertuna configuration or null if not found
      */
-    static async loadConfig() {
+    static async loadConfig(privateKeyHex) {
         let config = null;
-        if (typeof Pear !== 'undefined' && Pear.config && Pear.config.storage) {
+        if (
+            typeof Pear !== 'undefined' &&
+            Pear.config &&
+            Pear.config.storage &&
+            privateKeyHex
+        ) {
             try {
                 const { promises: fs } = await import('fs');
-                const { join } = await import('path');
-                const filePath = join(Pear.config.storage, 'relay-config.json');
-                const data = await fs.readFile(filePath, 'utf8');
-                config = JSON.parse(data);
+                const dir = await this.getUserStorageDir(privateKeyHex);
+                if (dir) {
+                    const { join } = await import('path');
+                    const filePath = join(dir, 'relay-config.json');
+                    const data = await fs.readFile(filePath, 'utf8');
+                    config = JSON.parse(data);
+                }
             } catch {
                 // fall back to localStorage
             }
@@ -330,13 +374,17 @@ export class HypertunaUtils {
         if (!user || !user.privateKey || !user.pubkey) {
             throw new Error('Invalid user object');
         }
-        
+
         const config = await this.generateHypertunaConfig(
             user.privateKey,
             user.pubkey,
             gatewayUrl
         );
-        
+        const storageDir = await this.getUserStorageDir(user.privateKey);
+        if (storageDir) {
+            config.storage = storageDir;
+        }
+
         await this.saveConfig(config);
         return config;
     }

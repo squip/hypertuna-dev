@@ -335,12 +335,18 @@ async function main() {
       });
       
       if (parentConfig) {
+        if (parentConfig.nostr_nsec_hex) {
+          const hash = crypto.createHash('sha256').update(parentConfig.nostr_nsec_hex).digest('hex');
+          const userDir = join(Pear.config.storage || __dirname, hash);
+          await fs.mkdir(userDir, { recursive: true });
+          parentConfig.storage = userDir;
+        }
         // Merge parent config with loaded config
         config = {
           ...config,
-          ...parentConfig,
-          storage: config.storage // Keep storage path
+          ...parentConfig
         };
+        Pear.config.storage = config.storage;
         console.log('[Worker] Merged config with parent data:', config);
       }
     }
