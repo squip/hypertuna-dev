@@ -16,6 +16,7 @@ const __dirname = Pear.config.dir || '.'
 // Variable to store the relay server module
 let relayServer = null
 let isShuttingDown = false
+let initialConfig = null
 
 // Generate a default configuration that matches the expected format
 function generateDefaultConfig() {
@@ -34,11 +35,13 @@ function generateDefaultConfig() {
   }
 }
 
-// Load or create configuration
-async function loadOrCreateConfig() {
-  const configDir = Pear.config.storage || __dirname
+// Load or create configuration in the given directory
+// If no directory is provided, fall back to Pear.config.storage or the
+// application directory.
+async function loadOrCreateConfig(dir) {
+  const configDir = dir || Pear.config.storage || __dirname
   await fs.mkdir(configDir, { recursive: true })
-  
+
   const configPath = join(configDir, 'relay-config.json')
   
   try {
@@ -89,10 +92,12 @@ if (workerPipe) {
     message: 'Relay worker starting...' 
   })
   
-  // Set up a flag to track config receipt
-  let configReceived = false;
-  let parentConfig = null;
-  
+  // Promise resolver for the initial configuration
+  let resolveInitialConfig
+  initialConfig = new Promise((res) => {
+    resolveInitialConfig = res
+  })
+
   // Handle messages from parent
   let buffer = ''
   workerPipe.on('data', async (data) => {
@@ -106,12 +111,12 @@ if (workerPipe) {
           const message = JSON.parse(line)
           console.log('[Worker] Received from parent:', message)
           
-          // Handle config message specially
-          if (message.type === 'config' && !configReceived) {
-            configReceived = true;
-            parentConfig = message.data;
-            console.log('[Worker] Stored parent config:', parentConfig);
-            continue; // Don't process other messages yet
+          // Handle initial config message
+          if (message.type === 'config' && resolveInitialConfig) {
+            resolveInitialConfig(message.data)
+            resolveInitialConfig = null
+            console.log('[Worker] Stored parent config:', message.data)
+            continue
           }
           
           switch (message.type) {
@@ -263,6 +268,9 @@ if (workerPipe) {
     console.error('[Worker] Pipe error:', err)
     isShuttingDown = true
   })
+} else {
+  // When no parent pipe is available resolve config immediately
+  initialConfig = Promise.resolve(null)
 }
 
 // Setup teardown handler
@@ -295,61 +303,35 @@ async function cleanup() {
 async function main() {
   try {
     console.log('[Worker] Hypertuna Relay Worker starting...')
-    
-    // Load or create configuration
-    let config = await loadOrCreateConfig()
-    
+
     // Wait for config from parent if available
+    let parentConfig = null
     if (workerPipe) {
-      console.log('[Worker] Waiting for parent config...');
-      
-      // Create a promise to wait for config
-      const parentConfig = await new Promise((resolve) => {
-        const timeout = setTimeout(() => {
-          console.log('[Worker] Config timeout - using default config');
-          resolve(null);
-        }, 3000);
-        
-        // Temporary listener for config
-        const handleData = (data) => {
-          try {
-            const lines = data.toString().split('\n');
-            for (const line of lines) {
-              if (line.trim()) {
-                const message = JSON.parse(line);
-                if (message.type === 'config' && message.data) {
-                  console.log('[Worker] Received config from parent');
-                  clearTimeout(timeout);
-                  workerPipe.off('data', handleData); // Remove this listener
-                  resolve(message.data);
-                  return;
-                }
-              }
-            }
-          } catch (err) {
-            console.error('[Worker] Error parsing config message:', err);
-          }
-        };
-        
-        workerPipe.on('data', handleData);
-      });
-      
-      if (parentConfig) {
-        if (parentConfig.nostr_nsec_hex) {
-          const hash = crypto.createHash('sha256').update(parentConfig.nostr_nsec_hex).digest('hex');
-          const userDir = join(Pear.config.storage || __dirname, hash);
-          await fs.mkdir(userDir, { recursive: true });
-          parentConfig.storage = userDir;
-        }
-        // Merge parent config with loaded config
-        config = {
-          ...config,
-          ...parentConfig
-        };
-        Pear.config.storage = config.storage;
-        console.log('[Worker] Merged config with parent data:', config);
+      console.log('[Worker] Waiting for parent config...')
+      parentConfig = await Promise.race([
+        initialConfig,
+        new Promise((resolve) => setTimeout(() => resolve(null), 3000))
+      ])
+    }
+
+    let configDir
+    if (parentConfig && parentConfig.nostr_nsec_hex) {
+      const hash = crypto.createHash('sha256').update(parentConfig.nostr_nsec_hex).digest('hex')
+      configDir = join(Pear.config.storage || __dirname, hash)
+    }
+
+    // Load or create configuration in the determined directory
+    let config = await loadOrCreateConfig(configDir)
+
+    if (parentConfig) {
+      if (configDir) parentConfig.storage = configDir
+      config = {
+        ...config,
+        ...parentConfig
       }
     }
+
+    Pear.config.storage = config.storage
     
     if (workerPipe) {
       sendMessage({ 
