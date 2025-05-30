@@ -39,6 +39,8 @@ function integrateNostrRelays(App) {
     // Create nostr integration
     App.nostr = new NostrIntegration(App);
     
+
+    
     /**
      * Enhanced login method with Hypertuna support
      * Generate and store Hypertuna keypair during login
@@ -201,6 +203,16 @@ function integrateNostrRelays(App) {
                 }
                 
                 this.updateProfileDisplay();
+                
+                // Initialize nostr integration for logged-in user
+                if (this.nostr) {
+                    try {
+                        await this.nostr.init(this.currentUser);
+                        console.log('Nostr integration initialized for existing user');
+                    } catch (e) {
+                        console.error('Error initializing nostr integration for existing user:', e);
+                    }
+                }
             } catch (e) {
                 console.error('Error loading user data:', e);
                 localStorage.removeItem('nostr_user');
@@ -336,16 +348,16 @@ function integrateNostrRelays(App) {
             hypertunaSection.id = 'hypertuna-config-section';
             hypertunaSection.className = 'profile-section';
             hypertunaSection.innerHTML = `
-                <h3>Hypertuna Relay Configuration</h3>
+                <h3>Hypertuna Relay Node Configuration</h3>
                 <div class="form-group">
-                    <label>Proxy Public Key</label>
+                    <label>Peer Public Key</label>
                     <div class="key-display">
                         <input type="text" id="hypertuna-pubkey-display" class="form-input" readonly>
                         <button class="copy-btn" data-copy="hypertuna-pubkey-display">Copy</button>
                     </div>
                 </div>
                 <div class="form-group">
-                    <label>Proxy Private Key</label>
+                    <label>Peer Private Key</label>
                     <div class="key-display">
                         <input type="password" id="hypertuna-privkey-display" class="form-input" readonly>
                         <button id="btn-toggle-hypertuna-privkey" class="icon-btn">
@@ -357,7 +369,7 @@ function integrateNostrRelays(App) {
                         <button class="copy-btn" data-copy="hypertuna-privkey-display">Copy</button>
                     </div>
                 </div>
-                <div class="form-group">
+                <div class="form-group hidden">
                     <label>Proxy Seed</label>
                     <div class="key-display">
                         <input type="password" id="hypertuna-seed-display" class="form-input" readonly>
@@ -371,7 +383,7 @@ function integrateNostrRelays(App) {
                     </div>
                 </div>
                 <div class="form-group">
-                    <label for="hypertuna-gateway-url">Default Gateway URL</label>
+                    <label for="hypertuna-gateway-url">Gateway Server Address</label>
                     <input type="text" id="hypertuna-gateway-url" class="form-input" placeholder="https://hypertuna.com">
                 </div>
                 <button id="btn-update-hypertuna" class="btn btn-primary">Update Hypertuna Settings</button>
@@ -1362,11 +1374,45 @@ function integrateNostrRelays(App) {
         }
         
         App.nostr.init(App.currentUser)
-            .then(() => console.log('Nostr integration initialized'))
+            .then(async () => {
+                console.log('Nostr integration initialized');
+                
+                // Auto-connect to default relays for returning users
+                const defaultRelays = [
+                    'wss://relay.damus.io',
+                    'wss://relay.nostr.band',
+                    'wss://nos.lol'
+                ];
+                
+                // Set default relays in the UI
+                const relayListElement = document.getElementById('relay-list');
+                if (relayListElement) {
+                    relayListElement.value = defaultRelays.join('\n');
+                }
+                const profileRelayUrlsElement = document.getElementById('profile-relay-urls');
+                if (profileRelayUrlsElement) {
+                    profileRelayUrlsElement.value = defaultRelays.join('\n');
+                }
+                
+                // Connect to relays
+                await App.nostr.connectRelay();
+                console.log('Connected to default relays for returning user');
+                
+                // Start worker if available
+                if (window.startWorker) {
+                    try {
+                        await window.startWorker();
+                        console.log('Worker started for returning user');
+                    } catch (err) {
+                        console.error('Failed to start worker:', err);
+                    }
+                }
+            })
             .catch(e => console.error('Error initializing nostr integration:', e));
     }
     
     return App;
 }
+
 
 export default integrateNostrRelays;

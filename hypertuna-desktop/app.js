@@ -7,6 +7,8 @@
 import { promises as fs } from 'fs'
 import { join } from 'path'
 
+console.log('[App] app.js loading started at:', new Date().toISOString());
+
 // Application state
 let workerPipe = null
 let workerStatus = 'stopped'
@@ -17,6 +19,9 @@ let healthState = null
 let gatewayRegistered = false
 let relayCreateResolvers = []
 
+// Track initialization state
+let isInitialized = false
+let eventListenersAttached = false
 
 // DOM elements - Initialize after DOM is ready
 let workerStatusIndicator = null
@@ -29,54 +34,6 @@ let relayList = null
 let clearLogsButton = null
 let exportLogsButton = null
 let joinRelayButton = null
-
-// Wait for DOM to be ready
-document.addEventListener('DOMContentLoaded', () => {
-  console.log('[App] DOM loaded, initializing elements...')
-  
-  // Initialize DOM elements
-  workerStatusIndicator = document.getElementById('worker-status-indicator')
-  workerStatusText = document.getElementById('worker-status-text')
-  startButton = document.getElementById('start-worker')
-  stopButton = document.getElementById('stop-worker')
-  createRelayButton = document.getElementById('create-relay')
-  logsContainer = document.getElementById('logs')
-  relayList = document.getElementById('relay-list')
-  clearLogsButton = document.getElementById('clear-logs')
-  exportLogsButton = document.getElementById('export-logs')
-  joinRelayButton = document.getElementById('join-relay')
-  
-  // Verify elements exist
-  const elements = {
-    workerStatusIndicator,
-    workerStatusText,
-    startButton,
-    stopButton,
-    createRelayButton,
-    logsContainer,
-    relayList,
-    clearLogsButton,
-    exportLogsButton,
-    joinRelayButton
-  }
-  
-  for (const [name, element] of Object.entries(elements)) {
-    if (!element) {
-      console.error(`[App] Element not found: ${name}`)
-    }
-  }
-  
-  // Set up event listeners
-  setupEventListeners()
-  
-  // Initialize
-  updateWorkerStatus('stopped', 'Not Started')
-  addLog('Hypertuna Relay Desktop initialized', 'status')
-  addLog('Click "Start" to launch the relay worker', 'info')
-})
-
-// Enable automatic reloading
-// Pear.updates(() => Pear.reload())
 
 // Log functions
 function addLog(message, type = 'info') {
@@ -132,7 +89,7 @@ function updateWorkerStatus(status, text) {
       case 'stopped':
         workerStatusIndicator.classList.add('inactive')
         if (startButton) startButton.disabled = false
-        if (stopButton) stopButton.disabled = true
+        if (stopButton) stopButton.disabled = false
         if (createRelayButton) createRelayButton.disabled = true
         if (joinRelayButton) joinRelayButton.disabled = true
         break
@@ -150,6 +107,14 @@ function updateWorkerStatus(status, text) {
 
 // Start the worker
 async function startWorker() {
+  console.log('[App] startWorker() called at:', new Date().toISOString());
+  
+  // Prevent multiple simultaneous starts
+  if (workerStatus !== 'stopped') {
+    console.log('[App] Worker already starting/running, ignoring duplicate call');
+    return;
+  }
+  
   try {
     addLog('Starting relay worker...', 'status')
     updateWorkerStatus('starting', 'Starting...')
@@ -265,9 +230,14 @@ async function startWorker() {
 
 // Stop the worker
 async function stopWorker() {
+  console.log('[App] stopWorker() called at:', new Date().toISOString());
+  console.log('[App] Current workerPipe status:', workerPipe ? 'exists' : 'null');
+  console.log('[App] Current workerStatus:', workerStatus);
+  
   try {
     if (!workerPipe) {
       addLog('Worker not running', 'error')
+      console.log('[App] stopWorker: Worker not running, returning');
       return
     }
     
@@ -278,11 +248,13 @@ async function stopWorker() {
     stopPolling()
     
     // Send shutdown message
+    console.log('[App] Sending shutdown message to worker');
     workerPipe.write(JSON.stringify({ type: 'shutdown' }) + '\n')
     
     // Give it time to shutdown gracefully, then force close if needed
     setTimeout(() => {
       if (workerPipe) {
+        console.log('[App] Force closing worker after timeout');
         addLog('Force closing worker...', 'status')
         workerPipe.end()
         workerPipe = null
@@ -291,6 +263,7 @@ async function stopWorker() {
     }, 3000)
     
   } catch (error) {
+    console.error('[App] Error in stopWorker:', error);
     addLog(`Error stopping worker: ${error.message}`, 'error')
     updateWorkerStatus('stopped', 'Error')
   }
@@ -652,17 +625,43 @@ function exportLogs() {
   addLog('Logs exported', 'status')
 }
 
-// Setup event listeners
+// Setup event listeners - ONLY CALL ONCE
 function setupEventListeners() {
-  // Button event listeners
+  if (eventListenersAttached) {
+    console.log('[App] Event listeners already attached, skipping');
+    return;
+  }
+  
+  console.log('[App] setupEventListeners called at:', new Date().toISOString());
+  console.log('[App] Current DOM readyState:', document.readyState);
+  
+  eventListenersAttached = true;
+  
+  // Button event listeners with debugging
   if (startButton) {
-    startButton.addEventListener('click', startWorker)
-    console.log('[App] Start button listener added')
+    console.log('[App] Adding listener to startButton:', startButton);
+    startButton.addEventListener('click', (e) => {
+      console.log('[App] Start button clicked event fired');
+      e.preventDefault();
+      e.stopPropagation();
+      startWorker();
+    });
+    console.log('[App] Start button listener added successfully');
+  } else {
+    console.error('[App] Start button not found during setupEventListeners');
   }
   
   if (stopButton) {
-    stopButton.addEventListener('click', stopWorker)
-    console.log('[App] Stop button listener added')
+    console.log('[App] Adding listener to stopButton:', stopButton);
+    stopButton.addEventListener('click', (e) => {
+      console.log('[App] Stop button clicked event fired');
+      e.preventDefault();
+      e.stopPropagation();
+      stopWorker();
+    });
+    console.log('[App] Stop button listener added successfully');
+  } else {
+    console.error('[App] Stop button not found during setupEventListeners');
   }
   
   if (createRelayButton) {
@@ -705,6 +704,90 @@ function setupEventListeners() {
   }
 }
 
+// Debug function to check button state
+function debugButtonState() {
+  console.log('[App Debug] Button state check:');
+  console.log('- startButton:', startButton, 'disabled:', startButton?.disabled);
+  console.log('- stopButton:', stopButton, 'disabled:', stopButton?.disabled);
+  console.log('- workerStatus:', workerStatus);
+  console.log('- workerPipe:', workerPipe ? 'exists' : 'null');
+  console.log('- isInitialized:', isInitialized);
+  console.log('- eventListenersAttached:', eventListenersAttached);
+  
+  // Check event listeners
+  if (typeof getEventListeners !== 'undefined') {
+    console.log('- stopButton listeners:', getEventListeners(stopButton));
+  }
+}
+
+// Initialize DOM elements and setup - ONLY CALL ONCE
+function initializeDOMElements() {
+  if (isInitialized) {
+    console.log('[App] Already initialized, skipping');
+    return;
+  }
+  
+  console.log('[App] Initializing DOM elements at:', new Date().toISOString());
+  isInitialized = true;
+  
+  // Initialize DOM elements
+  workerStatusIndicator = document.getElementById('worker-status-indicator')
+  workerStatusText = document.getElementById('worker-status-text')
+  startButton = document.getElementById('start-worker')
+  stopButton = document.getElementById('stop-worker')
+  createRelayButton = document.getElementById('create-relay')
+  logsContainer = document.getElementById('logs')
+  relayList = document.getElementById('relay-list')
+  clearLogsButton = document.getElementById('clear-logs')
+  exportLogsButton = document.getElementById('export-logs')
+  joinRelayButton = document.getElementById('join-relay')
+  
+  // Log element status
+  const elements = {
+    workerStatusIndicator,
+    workerStatusText,
+    startButton,
+    stopButton,
+    createRelayButton,
+    logsContainer,
+    relayList,
+    clearLogsButton,
+    exportLogsButton,
+    joinRelayButton
+  }
+  
+  console.log('[App] Element initialization results:');
+  for (const [name, element] of Object.entries(elements)) {
+    console.log(`- ${name}:`, element ? 'found' : 'NOT FOUND');
+  }
+  
+  // Set up event listeners
+  setupEventListeners();
+  
+  // Initialize UI state
+  updateWorkerStatus('stopped', 'Not Started');
+  addLog('Hypertuna Relay Desktop initialized', 'status');
+  addLog('Click "Start" to launch the relay worker', 'info');
+  
+  // Debug button state after initialization
+  debugButtonState();
+}
+
+// Wait for DOM to be ready - SINGLE HANDLER
+if (document.readyState === 'loading') {
+  console.log('[App] DOM is loading, setting up DOMContentLoaded listener');
+  document.addEventListener('DOMContentLoaded', () => {
+    console.log('[App] DOMContentLoaded event fired');
+    initializeDOMElements();
+  });
+} else {
+  console.log('[App] DOM already ready, initializing immediately');
+  initializeDOMElements();
+}
+
+// Enable automatic reloading
+// Pear.updates(() => Pear.reload())
+
 // Cleanup on teardown
 Pear.teardown(async () => {
   addLog('Application shutting down...', 'status')
@@ -741,7 +824,11 @@ style.textContent = `
 `
 document.head.appendChild(style)
 
-// Expose controls for integration
-window.startWorker = startWorker
-window.stopWorker = stopWorker
-window.createRelayInstance = createRelayInstance
+// Expose controls for integration - do this immediately
+console.log('[App] Exposing window functions');
+window.startWorker = startWorker;
+window.stopWorker = stopWorker;
+window.createRelayInstance = createRelayInstance;
+window.debugButtonState = debugButtonState;
+
+console.log('[App] app.js loading completed at:', new Date().toISOString());

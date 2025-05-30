@@ -28,86 +28,29 @@ const DEFAULT_RELAYS = [
 document.addEventListener('DOMContentLoaded', () => {
     console.log('Initializing Nostr Groups app with Hypertuna support...');
     
-    // Set up App in the global context if it's not already defined
+    // Check if App already exists (it should from index.html)
     if (typeof window.App === 'undefined') {
-        console.log('Creating App in window context...');
-        // Initialize the App with all required methods
-        window.App = {
-            currentPage: 'auth',
-            currentUser: null,
-            currentGroup: null,
-            currentGroupId: null,
-            relay: null,
-            
-            init() {
-                this.setupEventListeners();
-                this.loadUserFromLocalStorage();
-                this.updateUIState();
-            },
-            
-            // The placeholder methods will be replaced by our implementations
-            loadUserFromLocalStorage() {},
-            saveUserToLocalStorage() {},
-            setupEventListeners() {},
-            updateUIState() {},
-            updateProfileDisplay() {},
-            navigateTo() {},
-            switchTab() {},
-            login() {},
-            logout() {},
-            connectRelay() {},
-            generatePrivateKey() {},
-            updateHypertunaDisplay() {},
-            updateHypertunaSettings() {}
-        };
+        console.error('[Main] App object not found! This should have been created by index.html');
+        return;
     }
     
     // Access the App object
     const App = window.App;
     
-    // Replace the placeholder methods with our enhanced implementations
-    // These would typically be done by loading/evaluating the code from our artifact files
-    
-    // Initialize the app
-    App.init();
-    
-    // Then integrate with real nostr relays
-    integrateNostrRelays(App);
-    
-    // Initialize with default relays if user is already logged in
+    // The App should already be initialized by index.html
+    // Just handle any additional setup for returning users
     if (App.currentUser && App.currentUser.privateKey) {
         // Set up Hypertuna configuration if not already present
         if (!App.currentUser.hypertunaConfig) {
-            try {
-                // We need to use an async IIFE here since setupUserConfig is async
-                (async () => {
+            (async () => {
+                try {
                     App.currentUser.hypertunaConfig = await HypertunaUtils.setupUserConfig(App.currentUser);
                     App.saveUserToLocalStorage();
                     console.log('Initialized Hypertuna configuration for existing user');
-                })().catch(e => {
+                } catch (e) {
                     console.error('Error initializing Hypertuna configuration:', e);
-                });
-            } catch (e) {
-                console.error('Error initializing Hypertuna configuration:', e);
-            }
-        }
-        
-        if (App.nostr) {
-            // Set default relays in the UI
-            const relayUrlsInput = document.getElementById('relay-urls');
-            if (relayUrlsInput) {
-                relayUrlsInput.value = DEFAULT_RELAYS.join('\n');
-            }
-            
-            const profileRelayUrlsInput = document.getElementById('profile-relay-urls');
-            if (profileRelayUrlsInput) {
-                profileRelayUrlsInput.value = DEFAULT_RELAYS.join('\n');
-            }
-            
-            // Connect to default relays
-            App.nostr.updateRelays(DEFAULT_RELAYS)
-                .then(() => console.log('Connected to default relays'))
-                .catch(error => console.error('Error connecting to default relays:', error));
+                }
+            })();
         }
     }
     

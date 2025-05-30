@@ -66,7 +66,7 @@ export async function initializeRelayServer(customConfig = {}) {
     proxy_server_address: customConfig.proxy_server_address || 'hypertuna.com',
     gatewayUrl: customConfig.gatewayUrl || 'https://hypertuna.com',
     registerWithGateway: customConfig.registerWithGateway ?? true,
-    registerInterval: customConfig.registerInterval || 300000,
+    registerInterval: customConfig.registerInterval || 60000,
     relays: customConfig.relays || [],
     storage: customConfig.storage || (global.Pear?.config.storage || './data'),
     // Add gateway public key if known (optional)
@@ -156,8 +156,8 @@ async function startHyperswarmServer() {
     const keyPair = crypto.keyPair(Buffer.from(config.proxy_seed, 'hex'));
     config.swarmPublicKey = keyPair.publicKey.toString('hex');
     
-    console.log('[RelayServer] Generated keypair from seed');
-    console.log('[RelayServer] Public key:', config.swarmPublicKey);
+    console.log('[RelayServer] Generated keypair from seed:', config.proxy_seed);
+    console.log('[RelayServer] Hyperswarm Peer Public key:', config.swarmPublicKey);
     
     // Initialize Hyperswarm
     swarm = new Hyperswarm({

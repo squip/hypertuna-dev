@@ -41,6 +41,7 @@ build/Release
 # Dependency directories
 hypertuna-worker/node_modules/
 hypertuna-desktop/node_modules/
+archive/
 jspm_packages/
 
 # Snowpack dependency directory (https://snowpack.dev/)

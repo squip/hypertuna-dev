@@ -411,6 +411,13 @@ body {
     margin-bottom: var(--space-lg);
 }
 
+/* Additional spacing for the last profile section */
+.profile-section:last-child {
+    margin-top: 2rem;
+    padding-top: 2rem;
+    border-top: 1px solid var(--border-color);
+}
+
 .auth-actions {
     display: flex;
     gap: var(--space-sm);
