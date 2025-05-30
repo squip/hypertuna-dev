@@ -441,7 +441,7 @@ function integrateNostrRelays(App) {
         if (pubkeyInput) pubkeyInput.value = config.proxy_publicKey;
         
         const privkeyInput = document.getElementById('hypertuna-privkey-display');
-        if (privkeyInput) privkeyInput.value = config.proxy_privateKey;
+        if (privkeyInput) privkeyInput.value = config.swarmPublicKey || config.proxy_privateKey;
         
         const seedInput = document.getElementById('hypertuna-seed-display');
         if (seedInput) seedInput.value = config.proxy_seed;
