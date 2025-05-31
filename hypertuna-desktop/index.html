@@ -499,7 +499,7 @@
       import NostrGroupClient from './NostrGroupClient.js';
       import NostrIntegration from './NostrIntegration.js';
       import integrateNostrRelays from './AppIntegration.js';
-      
+      import { HypertunaUtils } from './HypertunaUtils.js';
       // Initialize the original app logic
       const App = {
           currentPage: 'auth',
@@ -1134,7 +1134,15 @@
                     
                     // Start worker if available
                     if (window.startWorker) {
-                        await window.startWorker();
+                      const key = await window.startWorker();
+                        if (key && App.currentUser && App.currentUser.hypertunaConfig) {
+                            App.currentUser.hypertunaConfig.swarmPublicKey = key;
+                            await HypertunaUtils.saveConfig(App.currentUser.hypertunaConfig);
+                            App.saveUserToLocalStorage();
+                            if (typeof App.updateHypertunaDisplay === 'function') {
+                                App.updateHypertunaDisplay();
+                            }
+                        }
                         console.log('[Index] Worker started');
                     }
                 } catch (e) {

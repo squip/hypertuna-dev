@@ -20,6 +20,10 @@ let healthState = null
 let gatewayRegistered = false
 let relayCreateResolvers = []
 
+// Promise resolution for swarm key
+let swarmKeyPromise = null
+let swarmKeyResolver = null
+
 // Track initialization state
 let isInitialized = false
 let eventListenersAttached = false
@@ -109,11 +113,15 @@ function updateWorkerStatus(status, text) {
 // Start the worker
 async function startWorker() {
     console.log('[App] startWorker() called at:', new Date().toISOString());
-    
+    // Prepare promise that resolves when swarm key is received
+    swarmKeyPromise = new Promise((resolve) => {
+    swarmKeyResolver = resolve;
+    });
     // Prevent multiple simultaneous starts
     if (workerStatus !== 'stopped') {
         console.log('[App] Worker already starting/running, ignoring duplicate call');
-        return;
+        if (swarmKeyResolver) swarmKeyResolver(null);
+        return swarmKeyPromise;
     }
     
     try {
@@ -319,7 +327,10 @@ async function startWorker() {
         addLog(`Failed to start worker: ${error.message}`, 'error')
         updateWorkerStatus('stopped', 'Failed')
         stopPolling()
+        if (swarmKeyResolver) swarmKeyResolver(null)
+        return swarmKeyPromise
     }
+    return swarmKeyPromise
 }
     
 
@@ -384,6 +395,10 @@ function handleWorkerMessage(message) {
                     window.App.updateHypertunaDisplay()
                     }
                 }
+                if (swarmKeyResolver) {
+                    swarmKeyResolver(message.swarmKey)
+                    swarmKeyResolver = null
+                  }
             } catch (e) {
                 console.error('[App] Failed to store swarm key', e)
             }

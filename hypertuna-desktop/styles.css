@@ -1124,6 +1124,56 @@ body {
     border-top: 1px solid var(--border-color);
 }
 
+/* Loading spinner for Hypertuna key generation */
+.loading-spinner {
+    display: inline-block;
+    width: 1rem;
+    height: 1rem;
+    margin-right: var(--space-sm);
+    border: 2px solid var(--border-color);
+    border-top-color: var(--primary-color);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    vertical-align: middle;
+}
+
+/* Hypertuna Status Message */
+#hypertuna-key-status {
+    margin-top: var(--space-sm);
+    display: flex;
+    align-items: center;
+    font-size: 0.875rem;
+}
+
+#hypertuna-key-status.warning {
+    background-color: rgba(245, 158, 11, 0.1);
+    color: var(--warning-color);
+    border: 1px solid rgba(245, 158, 11, 0.2);
+    padding: var(--space-xs) var(--space-sm);
+    border-radius: var(--radius-sm);
+}
+
+/* Ensure the spinner animation is defined */
+@keyframes spin {
+    from {
+        transform: rotate(0deg);
+    }
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+/* Disable input while loading */
+#hypertuna-pubkey-display:disabled {
+    opacity: 0.7;
+    cursor: wait;
+}
+
+/* Update animation for smooth transitions */
+#hypertuna-pubkey-display {
+    transition: opacity var(--transition-fast);
+}
+
 .invite-code-display {
     display: flex;
     gap: var(--space-sm);
