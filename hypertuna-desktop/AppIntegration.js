@@ -92,7 +92,15 @@ function integrateNostrRelays(App) {
                 console.log('Nostr integration initialized');
                 if (window.startWorker) {
                     try {
-                        await window.startWorker();
+                        const key = await window.startWorker();
+                        if (key && this.currentUser.hypertunaConfig) {
+                            this.currentUser.hypertunaConfig.swarmPublicKey = key;
+                            await HypertunaUtils.saveConfig(this.currentUser.hypertunaConfig);
+                            this.saveUserToLocalStorage();
+                            if (typeof this.updateHypertunaDisplay === 'function') {
+                                this.updateHypertunaDisplay();
+                            }
+                        }
                     } catch (err) {
                         console.error('Failed to start worker:', err);
                     }
@@ -1401,7 +1409,15 @@ function integrateNostrRelays(App) {
                 // Start worker if available
                 if (window.startWorker) {
                     try {
-                        await window.startWorker();
+                        const key = await window.startWorker();
+                        if (key && App.currentUser && App.currentUser.hypertunaConfig) {
+                            App.currentUser.hypertunaConfig.swarmPublicKey = key;
+                            await HypertunaUtils.saveConfig(App.currentUser.hypertunaConfig);
+                            App.saveUserToLocalStorage();
+                            if (typeof App.updateHypertunaDisplay === 'function') {
+                                App.updateHypertunaDisplay();
+                            }
+                        }
                         console.log('Worker started for returning user');
                     } catch (err) {
                         console.error('Failed to start worker:', err);
