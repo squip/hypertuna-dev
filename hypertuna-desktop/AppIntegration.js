@@ -615,10 +615,10 @@ function integrateNostrRelays(App) {
         
         // Populate the fields with the current configuration
         const pubkeyInput = document.getElementById('hypertuna-pubkey-display');
-        if (pubkeyInput) pubkeyInput.value = config.proxy_publicKey;
+        if (pubkeyInput) pubkeyInput.value = config.swarmPublicKey;
         
         const privkeyInput = document.getElementById('hypertuna-privkey-display');
-        if (privkeyInput) privkeyInput.value = config.proxy_privateKey;
+        if (privkeyInput) privkeyInput.value = config.proxy_privateKey || config.proxy_privateKey;
         
         const seedInput = document.getElementById('hypertuna-seed-display');
         if (seedInput) seedInput.value = config.proxy_seed;

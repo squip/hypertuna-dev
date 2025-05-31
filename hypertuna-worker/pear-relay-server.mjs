@@ -157,6 +157,8 @@ async function startHyperswarmServer() {
     // Create key pair from seed
     const keyPair = crypto.keyPair(Buffer.from(config.proxy_seed, 'hex'));
     config.swarmPublicKey = keyPair.publicKey.toString('hex');
+    // Persist the generated public key so it can be read on next start
+    await saveConfig(config);
     
     console.log('[RelayServer] Generated keypair from seed:', config.proxy_seed);
     console.log('[RelayServer] Hyperswarm Peer Public key:', config.swarmPublicKey);

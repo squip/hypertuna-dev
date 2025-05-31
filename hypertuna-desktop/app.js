@@ -371,11 +371,27 @@ function handleWorkerMessage(message) {
   
   switch (message.type) {
     case 'status':
-      addLog(`Worker: ${message.message}`, 'status')
-      if (message.initialized) {
-        updateWorkerStatus('running', 'Running')
-      }
-      break
+        addLog(`Worker: ${message.message}`, 'status')
+            if (message.swarmKey) {
+            try {
+                const stored = localStorage.getItem('hypertuna_config')
+                const cfg = stored ? JSON.parse(stored) : {}
+                cfg.swarmPublicKey = message.swarmKey
+                localStorage.setItem('hypertuna_config', JSON.stringify(cfg))
+                if (window.App && window.App.currentUser && window.App.currentUser.hypertunaConfig) {
+                    window.App.currentUser.hypertunaConfig.swarmPublicKey = message.swarmKey
+                if (typeof window.App.updateHypertunaDisplay === 'function') {
+                    window.App.updateHypertunaDisplay()
+                    }
+                }
+            } catch (e) {
+                console.error('[App] Failed to store swarm key', e)
+            }
+        }
+        if (message.initialized) {
+                updateWorkerStatus('running', 'Running')
+        }
+        break
       
     case 'heartbeat':
       // Update last heartbeat time
