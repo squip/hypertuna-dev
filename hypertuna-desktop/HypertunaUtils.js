@@ -6,6 +6,7 @@
  */
 
 import { NostrUtils } from './NostrUtils.js';
+import { ConfigLogger } from './ConfigLogger.js';
 
 // Import hypercore-crypto library
 // Note: Make sure to add "hypercore-crypto": "^3.5.0" to your package.json dependencies
@@ -279,17 +280,68 @@ export class HypertunaUtils {
      * @param {Object} config - Hypertuna configuration
      */
     static async saveConfig(config) {
-        localStorage.setItem(this.STORAGE_KEY, JSON.stringify(config));
+        ConfigLogger.log('SAVE', {
+            module: 'HypertunaUtils',
+            method: 'saveConfig',
+            key: this.STORAGE_KEY,
+            dataSize: ConfigLogger.getDataSize(config)
+        });
+        
+        // Save to localStorage
+        try {
+            localStorage.setItem(this.STORAGE_KEY, JSON.stringify(config));
+            ConfigLogger.log('SAVE', {
+                module: 'HypertunaUtils',
+                method: 'saveConfig',
+                filepath: 'localStorage',
+                key: this.STORAGE_KEY,
+                success: true,
+                dataSize: ConfigLogger.getDataSize(config)
+            });
+        } catch (e) {
+            ConfigLogger.log('SAVE', {
+                module: 'HypertunaUtils',
+                method: 'saveConfig',
+                filepath: 'localStorage',
+                key: this.STORAGE_KEY,
+                success: false,
+                error: e.message
+            });
+        }
 
+        // Save to file system if in Pear environment
         if (typeof Pear !== 'undefined' && Pear.config && Pear.config.storage) {
             try {
                 const { promises: fs } = await import('fs');
                 const { join } = await import('path');
+                
                 await fs.mkdir(Pear.config.storage, { recursive: true });
                 const filePath = join(Pear.config.storage, 'relay-config.json');
+                
+                ConfigLogger.log('SAVE', {
+                    module: 'HypertunaUtils',
+                    method: 'saveConfig',
+                    filepath: filePath,
+                    dataSize: ConfigLogger.getDataSize(config)
+                });
+                
                 await fs.writeFile(filePath, JSON.stringify(config, null, 2));
+                
+                ConfigLogger.log('SAVE', {
+                    module: 'HypertunaUtils',
+                    method: 'saveConfig',
+                    filepath: filePath,
+                    success: true,
+                    dataSize: ConfigLogger.getDataSize(config)
+                });
             } catch (e) {
-                console.error('Failed to persist Hypertuna config to file:', e);
+                ConfigLogger.log('SAVE', {
+                    module: 'HypertunaUtils',
+                    method: 'saveConfig',
+                    filepath: join(Pear.config.storage, 'relay-config.json'),
+                    success: false,
+                    error: e.message
+                });
             }
         }
     }
@@ -299,22 +351,83 @@ export class HypertunaUtils {
      * @returns {Object|null} - Hypertuna configuration or null if not found
      */
     static async loadConfig() {
+        ConfigLogger.log('LOAD', {
+            module: 'HypertunaUtils',
+            method: 'loadConfig',
+            filepath: 'attempting multiple sources'
+        });
+        
         let config = null;
+        
+        // Try loading from file system first (Pear environment)
         if (typeof Pear !== 'undefined' && Pear.config && Pear.config.storage) {
             try {
                 const { promises: fs } = await import('fs');
                 const { join } = await import('path');
                 const filePath = join(Pear.config.storage, 'relay-config.json');
+                
+                ConfigLogger.log('LOAD', {
+                    module: 'HypertunaUtils',
+                    method: 'loadConfig',
+                    filepath: filePath,
+                    attempting: true
+                });
+                
                 const data = await fs.readFile(filePath, 'utf8');
                 config = JSON.parse(data);
-            } catch {
-                // fall back to localStorage
+                
+                ConfigLogger.log('LOAD', {
+                    module: 'HypertunaUtils',
+                    method: 'loadConfig',
+                    filepath: filePath,
+                    success: true,
+                    dataSize: data.length
+                });
+            } catch (e) {
+                ConfigLogger.log('LOAD', {
+                    module: 'HypertunaUtils',
+                    method: 'loadConfig',
+                    filepath: join(Pear.config.storage, 'relay-config.json'),
+                    success: false,
+                    error: e.message
+                });
             }
         }
+        
+        // Fall back to localStorage
         if (!config) {
-            const local = localStorage.getItem(this.STORAGE_KEY);
-            config = local ? JSON.parse(local) : null;
+            try {
+                ConfigLogger.log('LOAD', {
+                    module: 'HypertunaUtils',
+                    method: 'loadConfig',
+                    filepath: 'localStorage',
+                    key: this.STORAGE_KEY,
+                    attempting: true
+                });
+                
+                const local = localStorage.getItem(this.STORAGE_KEY);
+                config = local ? JSON.parse(local) : null;
+                
+                ConfigLogger.log('LOAD', {
+                    module: 'HypertunaUtils',
+                    method: 'loadConfig',
+                    filepath: 'localStorage',
+                    key: this.STORAGE_KEY,
+                    success: !!config,
+                    dataSize: local ? local.length : 0
+                });
+            } catch (e) {
+                ConfigLogger.log('LOAD', {
+                    module: 'HypertunaUtils',
+                    method: 'loadConfig',
+                    filepath: 'localStorage',
+                    key: this.STORAGE_KEY,
+                    success: false,
+                    error: e.message
+                });
+            }
         }
+        
         return config;
     }
     

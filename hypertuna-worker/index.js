@@ -17,22 +17,42 @@ const __dirname = Pear.config.dir || '.'
 let relayServer = null
 let isShuttingDown = false
 
-// Generate a default configuration that matches the expected format
-function generateDefaultConfig() {
-  return {
-    "nostr_pubkey_hex": "f9c91021ab6074cf4f95f479e364c1c7091dbdf63eb4de70bade343cc16e0455",
-    "nostr_nsec_hex": "531b76e21f83cf4e795664afbf355e9da6e844179b888e3b9db787af602c6682",
-    "proxy_privateKey": "d79f4d7cdd1174009b5a07bacc71eaf78624451d51da1f96b48f9a942360a19e",
-    "proxy_publicKey": "186385f20cd512a177e71f18616b8633f5ed4cc55ad34b285db4365ecdbfb2b8",
-    "proxy_seed": "d79f4d7cdd1174009b5a07bacc71eaf78624451d51da1f96b48f9a942360a19e",
-    "proxy_server_address": "hypertuna.com",
-    "gatewayUrl": "https://hypertuna.com",
-    "port": 1945,
-    "relays": [],
-    "registerWithGateway": true,
-    "registerInterval": 300000
+
+function getUserKey(config) {
+    // If storage path contains /users/, extract the key
+    if (config.storage && config.storage.includes('/users/')) {
+      const match = config.storage.match(/\/users\/([a-f0-9]{64})/);
+      if (match) {
+        return match[1];
+      }
+    }
+    
+    // Otherwise, generate from nostr_nsec_hex
+    if (config.nostr_nsec_hex) {
+      return crypto.createHash('sha256')
+        .update(config.nostr_nsec_hex)
+        .digest('hex');
+    }
+    
+    throw new Error('Unable to determine user key from config');
   }
-}
+
+// Generate a default configuration that matches the expected format
+// function generateDefaultConfig() {
+//   return {
+//     "nostr_pubkey_hex": "f9c91021ab6074cf4f95f479e364c1c7091dbdf63eb4de70bade343cc16e0455",
+//     "nostr_nsec_hex": "531b76e21f83cf4e795664afbf355e9da6e844179b888e3b9db787af602c6682",
+//     "proxy_privateKey": "d79f4d7cdd1174009b5a07bacc71eaf78624451d51da1f96b48f9a942360a19e",
+//     "proxy_publicKey": "186385f20cd512a177e71f18616b8633f5ed4cc55ad34b285db4365ecdbfb2b8",
+//     "proxy_seed": "d79f4d7cdd1174009b5a07bacc71eaf78624451d51da1f96b48f9a942360a19e",
+//     "proxy_server_address": "hypertuna.com",
+//     "gatewayUrl": "https://hypertuna.com",
+//     "port": 1945,
+//     "relays": [],
+//     "registerWithGateway": true,
+//     "registerInterval": 300000
+//   }
+// }
 
 // Load or create configuration
 async function loadOrCreateConfig() {
@@ -49,11 +69,11 @@ async function loadOrCreateConfig() {
   } catch (err) {
     // Create new config
     console.log('[Worker] Creating new config at:', configPath)
-    const config = generateDefaultConfig()
+    // const config = generateDefaultConfig()
     // Add storage path from Pear
-    config.storage = configDir
-    await fs.writeFile(configPath, JSON.stringify(config, null, 2))
-    return config
+    // config.storage = configDir
+    // await fs.writeFile(configPath, JSON.stringify(config, null, 2))
+    // return config
   }
 }
 
@@ -293,38 +313,37 @@ async function cleanup() {
 
 // Main function to start the relay server
 async function main() {
-  try {
-    console.log('[Worker] Hypertuna Relay Worker starting...')
-    
-    // Load or create configuration
-    let config = await loadOrCreateConfig()
-    
-    // Wait for config from parent if available
-    if (workerPipe) {
-      console.log('[Worker] Waiting for parent config...');
+    try {
+      console.log('[Worker] Hypertuna Relay Worker starting...')
       
-      // Create a promise to wait for config
-      const parentConfig = await new Promise((resolve) => {
-        const timeout = setTimeout(() => {
-          console.log('[Worker] Config timeout - using default config');
-          resolve(null);
-        }, 3000);
+      // Load or create configuration
+      let config = await loadOrCreateConfig()
+      
+      // Wait for config from parent if available
+      if (workerPipe) {
+        console.log('[Worker] Waiting for parent config...');
         
-        // Temporary listener for config
-        const handleData = (data) => {
-          try {
-            const lines = data.toString().split('\n');
-            for (const line of lines) {
-              if (line.trim()) {
-                const message = JSON.parse(line);
-                if (message.type === 'config' && message.data) {
-                  console.log('[Worker] Received config from parent');
-                  clearTimeout(timeout);
-                  workerPipe.off('data', handleData); // Remove this listener
-                  resolve(message.data);
-                  return;
+        const parentConfig = await new Promise((resolve) => {
+            const timeout = setTimeout(() => {
+            console.log('[Worker] Config timeout - using default config');
+            resolve(null);
+            }, 3000);
+            
+            // Temporary listener for config
+            const handleData = (data) => {
+            try {
+                const lines = data.toString().split('\n');
+                for (const line of lines) {
+                if (line.trim()) {
+                    const message = JSON.parse(line);
+                    if (message.type === 'config' && message.data) {
+                        console.log('[Worker] Received config from parent');
+                        clearTimeout(timeout);
+                        workerPipe.off('data', handleData); // Remove this listener
+                        resolve(message.data);
+                        return;
+                    }
                 }
-              }
             }
           } catch (err) {
             console.error('[Worker] Error parsing config message:', err);
@@ -335,13 +354,38 @@ async function main() {
       });
       
       if (parentConfig) {
+        // Get user key from parent config
+        const userKey = getUserKey(parentConfig);
+        console.log('[Worker] User key:', userKey);
+        
+        // Create user-specific storage path in worker's directory
+        const workerBaseStorage = Pear.config.storage || './data';
+        const userSpecificStorage = join(workerBaseStorage, 'users', userKey);
+        
+        // Ensure user directory exists
+        await fs.mkdir(userSpecificStorage, { recursive: true });
+        
         // Merge parent config with loaded config
         config = {
           ...config,
           ...parentConfig,
-          storage: config.storage // Keep storage path
+          storage: userSpecificStorage,  // Use user-specific path in worker's storage
+          userKey: userKey  // Store for reference
         };
-        console.log('[Worker] Merged config with parent data:', config);
+        
+        console.log('[Worker] Merged config with user-specific storage:', {
+          ...config,
+          storage: config.storage,
+          userKey: config.userKey
+        });
+
+        // Set global user config for profile manager
+        global.userConfig = {
+            userKey: config.userKey,
+            storage: config.storage
+        };
+        
+        console.log('[Worker] Set global user config for profile operations');
       }
     }
     

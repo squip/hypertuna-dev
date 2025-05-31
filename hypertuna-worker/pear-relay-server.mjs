@@ -57,6 +57,7 @@ export async function initializeRelayServer(customConfig = {}) {
   
   // Merge with defaults
   config = {
+    userKey: customConfig.userKey,  // Preserve user key
     port: 1945,
     nostr_pubkey_hex: customConfig.nostr_pubkey_hex || generateHexKey(),
     nostr_nsec_hex: customConfig.nostr_nsec_hex || generateHexKey(),
@@ -80,7 +81,8 @@ export async function initializeRelayServer(customConfig = {}) {
     registerWithGateway: config.registerWithGateway,
     registerInterval: config.registerInterval,
     gatewayPublicKey: config.gatewayPublicKey ? config.gatewayPublicKey.substring(0, 8) + '...' : 'not set',
-    storage: config.storage
+    storage: config.storage,
+    userKey: config.userKey ? config.userKey.substring(0, 8) + '...' : 'not set'
   });
   
   // Save config to storage

@@ -22,13 +22,14 @@ const activeRelays = new Map();
 
 // Store config reference
 let globalConfig = null;
+let globalUserKey = null;
 
 // Initialize profile storage on module load
 let profilesInitialized = false;
 
-async function ensureProfilesInitialized() {
+async function ensureProfilesInitialized(userKey = null) {
     if (!profilesInitialized) {
-        await initRelayProfilesStorage();
+        await initRelayProfilesStorage(userKey || globalUserKey);
         profilesInitialized = true;
     }
 }
@@ -45,17 +46,20 @@ async function ensureProfilesInitialized() {
 export async function createRelay(options = {}) {
     const { name, description, storageDir, config } = options;
     
-    // Store config globally if provided
+    // Store config and user key globally if provided
     if (config) {
         globalConfig = config;
+        globalUserKey = config.userKey;
     }
     
     try {
-        await ensureProfilesInitialized();
+        await ensureProfilesInitialized(globalUserKey);
         
         // Generate relay key components
         const timestamp = Date.now();
-        const defaultStorageDir = storageDir || join(config.storage || './data', `relay-${timestamp}`);
+        const userStorageBase = join(config.storage || './data', 'relays');
+        const defaultStorageDir = storageDir || join(userStorageBase, `relay-${timestamp}`);
+        
         
         // Ensure storage directory exists
         await fs.mkdir(defaultStorageDir, { recursive: true });
@@ -259,8 +263,8 @@ export async function disconnectRelay(relayKey) {
  * @returns {Promise<Array>} - Array of relay profiles
  */
 export async function getRelayProfiles() {
-    await ensureProfilesInitialized();
-    return getAllRelayProfiles();
+    await ensureProfilesInitialized(globalUserKey);
+    return getAllRelayProfiles(globalUserKey);
 }
 
 /**
@@ -270,11 +274,13 @@ export async function getRelayProfiles() {
  */
 export async function autoConnectStoredRelays(config) {
     try {
-        await ensureProfilesInitialized();
+        // Extract user key from config
+        const userKey = config.userKey;
+        await ensureProfilesInitialized(userKey);
         
-        console.log('[RelayAdapter] Starting auto-connection to stored relays...');
+        console.log('[RelayAdapter] Starting auto-connection to stored relays for user:', userKey);
         
-        const relayProfiles = await getAllRelayProfiles();
+        const relayProfiles = await getAllRelayProfiles(userKey);
         if (!relayProfiles || relayProfiles.length === 0) {
             console.log('[RelayAdapter] No stored relay profiles found');
             return [];

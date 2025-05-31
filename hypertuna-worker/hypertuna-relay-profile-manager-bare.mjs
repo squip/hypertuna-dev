@@ -8,22 +8,32 @@ import { join, dirname } from 'bare-path';
 const RELAY_PROFILES_FILE = 'relay-profiles.json';
 
 // Get storage directory from Pear config or use default
-function getStorageDir() {
-    return global.Pear?.config.storage || './data';
+function getStorageDir(userKey = null) {
+    const baseDir = global.Pear?.config.storage || './data';
+    
+    // If we have a userKey from config, use user-specific directory
+    if (userKey || global.userConfig?.userKey) {
+        const key = userKey || global.userConfig.userKey;
+        return join(baseDir, 'users', key);
+    }
+    
+    // Fallback to base directory (but log a warning)
+    console.warn('[ProfileManager] No user key available, using base storage directory');
+    return baseDir;
 }
 
 // Get full path to relay profiles file
-function getRelayProfilesPath() {
-    return join(getStorageDir(), RELAY_PROFILES_FILE);
+function getRelayProfilesPath(userKey = null) {
+    return join(getStorageDir(userKey), RELAY_PROFILES_FILE);
 }
 
 /**
  * Initialize the relay profiles storage file if it doesn't exist
  * @returns {Promise<void>}
  */
-export async function initRelayProfilesStorage() {
+export async function initRelayProfilesStorage(userKey = null) {
     try {
-        const profilesPath = getRelayProfilesPath();
+        const profilesPath = getRelayProfilesPath(userKey);
         
         // Ensure directory exists
         const dir = dirname(profilesPath);
@@ -48,12 +58,13 @@ export async function initRelayProfilesStorage() {
  * Load all relay profiles from the storage file
  * @returns {Promise<Array>} - Array of relay profiles
  */
-export async function getAllRelayProfiles() {
+export async function getAllRelayProfiles(userKey = null) {
     try {
         // Ensure the storage file exists
-        await initRelayProfilesStorage();
+        await initRelayProfilesStorage(userKey);
         
-        const profilesPath = getRelayProfilesPath();
+        const profilesPath = getRelayProfilesPath(userKey);
+
         
         // Read and parse the file
         const data = await fs.readFile(profilesPath, 'utf8');

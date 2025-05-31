@@ -7,6 +7,7 @@
 import NostrIntegration from './NostrIntegration.js';
 import { NostrUtils } from './NostrUtils.js';
 import { HypertunaUtils } from './HypertunaUtils.js';
+import { ConfigLogger } from './ConfigLogger.js';
 
 /**
  * This function modifies the existing App object to use real nostr relays
@@ -77,6 +78,10 @@ function integrateNostrRelays(App) {
                     proxy_server: hypertunaConfig.proxy_server_address,
                     gatewayUrl: hypertunaConfig.gatewayUrl
                 });
+                
+                // IMPORTANT: Sync to file system for worker
+                await this.syncHypertunaConfigToFile();
+                
             } catch (e) {
                 console.error('Error generating Hypertuna configuration:', e);
                 // Continue with login even if Hypertuna config fails
@@ -143,6 +148,12 @@ function integrateNostrRelays(App) {
      * Save Hypertuna configuration separately
      */
     App.saveUserToLocalStorage = function() {
+        ConfigLogger.log('SAVE', {
+            module: 'AppIntegration',
+            method: 'saveUserToLocalStorage',
+            attempting: true
+        });
+        
         if (this.currentUser) {
             // Create a clean copy of the user object without any circular references
             const userToSave = {
@@ -158,67 +169,178 @@ function integrateNostrRelays(App) {
             }
             
             // Save user data to localStorage
-            localStorage.setItem('nostr_user', JSON.stringify(userToSave));
+            try {
+                localStorage.setItem('nostr_user', JSON.stringify(userToSave));
+                ConfigLogger.log('SAVE', {
+                    module: 'AppIntegration',
+                    method: 'saveUserToLocalStorage',
+                    filepath: 'localStorage',
+                    key: 'nostr_user',
+                    success: true,
+                    dataSize: ConfigLogger.getDataSize(userToSave)
+                });
+            } catch (e) {
+                ConfigLogger.log('SAVE', {
+                    module: 'AppIntegration',
+                    method: 'saveUserToLocalStorage',
+                    filepath: 'localStorage',
+                    key: 'nostr_user',
+                    success: false,
+                    error: e.message
+                });
+            }
             
             // If the user has Hypertuna configuration, also save it separately
             if (this.currentUser.hypertunaConfig) {
-                localStorage.setItem('hypertuna_config', JSON.stringify(this.currentUser.hypertunaConfig));
+                try {
+                    localStorage.setItem('hypertuna_config', JSON.stringify(this.currentUser.hypertunaConfig));
+                    ConfigLogger.log('SAVE', {
+                        module: 'AppIntegration',
+                        method: 'saveUserToLocalStorage',
+                        filepath: 'localStorage',
+                        key: 'hypertuna_config',
+                        success: true,
+                        dataSize: ConfigLogger.getDataSize(this.currentUser.hypertunaConfig)
+                    });
+                } catch (e) {
+                    ConfigLogger.log('SAVE', {
+                        module: 'AppIntegration',
+                        method: 'saveUserToLocalStorage',
+                        filepath: 'localStorage',
+                        key: 'hypertuna_config',
+                        success: false,
+                        error: e.message
+                    });
+                }
             }
         } else {
             // Remove user data from localStorage
+            ConfigLogger.log('DELETE', {
+                module: 'AppIntegration',
+                method: 'saveUserToLocalStorage',
+                filepath: 'localStorage',
+                key: 'nostr_user'
+            });
             localStorage.removeItem('nostr_user');
-            // Don't remove Hypertuna config when logging out to persist settings
         }
     };
     
     /**
-     * Enhanced loadUserFromLocalStorage method
-     * Load and check for Hypertuna configuration
-     */
-    App.loadUserFromLocalStorage = async function() {
-        const savedUser = localStorage.getItem('nostr_user');
-        if (savedUser) {
-            try {
-                this.currentUser = JSON.parse(savedUser);
+ * Enhanced loadUserFromLocalStorage method
+ * Load and check for Hypertuna configuration
+ */
+App.loadUserFromLocalStorage = async function() {
+    ConfigLogger.log('LOAD', {
+        module: 'AppIntegration',
+        method: 'loadUserFromLocalStorage',
+        attempting: true
+    });
+    
+    const savedUser = localStorage.getItem('nostr_user');
+    if (savedUser) {
+        try {
+            ConfigLogger.log('LOAD', {
+                module: 'AppIntegration',
+                method: 'loadUserFromLocalStorage',
+                filepath: 'localStorage',
+                key: 'nostr_user',
+                success: true,
+                dataSize: savedUser.length
+            });
+            
+            this.currentUser = JSON.parse(savedUser);
+            
+            // Check for Hypertuna configuration
+            ConfigLogger.log('LOAD', {
+                module: 'AppIntegration',
+                method: 'loadUserFromLocalStorage',
+                filepath: 'localStorage',
+                key: 'hypertuna_config',
+                attempting: true
+            });
+            
+            const hypertunaConfig = localStorage.getItem('hypertuna_config');
+            if (hypertunaConfig) {
+                this.currentUser.hypertunaConfig = JSON.parse(hypertunaConfig);
                 
-                // Check for Hypertuna configuration
-                const hypertunaConfig = localStorage.getItem('hypertuna_config');
-                if (hypertunaConfig) {
-                    this.currentUser.hypertunaConfig = JSON.parse(hypertunaConfig);
-                    console.log('Loaded Hypertuna configuration from localStorage:', {
-                        pubkey: this.currentUser.hypertunaConfig.nostr_pubkey_hex.substring(0, 8) + '...',
-                        proxy_pubkey: this.currentUser.hypertunaConfig.proxy_publicKey.substring(0, 8) + '...',
-                        proxy_server: this.currentUser.hypertunaConfig.proxy_server_address,
-                        gatewayUrl: this.currentUser.hypertunaConfig.gatewayUrl
-                    });
-                } else {
-                    // If no Hypertuna config exists, generate it now
-                    try {
-                        this.currentUser.hypertunaConfig = await HypertunaUtils.setupUserConfig(this.currentUser);
-                        console.log('Generated new Hypertuna configuration for existing user');
-                        this.saveUserToLocalStorage();
-                    } catch (e) {
-                        console.error('Error generating Hypertuna configuration for existing user:', e);
-                    }
+                ConfigLogger.log('LOAD', {
+                    module: 'AppIntegration',
+                    method: 'loadUserFromLocalStorage',
+                    filepath: 'localStorage',
+                    key: 'hypertuna_config',
+                    success: true,
+                    dataSize: hypertunaConfig.length
+                });
+                
+                console.log('Loaded Hypertuna configuration from localStorage:', {
+                    pubkey: this.currentUser.hypertunaConfig.nostr_pubkey_hex.substring(0, 8) + '...',
+                    proxy_pubkey: this.currentUser.hypertunaConfig.proxy_publicKey.substring(0, 8) + '...',
+                    proxy_server: this.currentUser.hypertunaConfig.proxy_server_address,
+                    gatewayUrl: this.currentUser.hypertunaConfig.gatewayUrl
+                });
+                
+                // IMPORTANT: Sync to file system after loading
+                await this.syncHypertunaConfigToFile();
+                
+            } else {
+                ConfigLogger.log('LOAD', {
+                    module: 'AppIntegration',
+                    method: 'loadUserFromLocalStorage',
+                    filepath: 'localStorage',
+                    key: 'hypertuna_config',
+                    success: false,
+                    error: 'Config not found, generating new one'
+                });
+                
+                // If no Hypertuna config exists, generate it now
+                try {
+                    this.currentUser.hypertunaConfig = await HypertunaUtils.setupUserConfig(this.currentUser);
+                    console.log('Generated new Hypertuna configuration for existing user');
+                    this.saveUserToLocalStorage();
+                    
+                    // IMPORTANT: Sync to file system
+                    await this.syncHypertunaConfigToFile();
+                    
+                } catch (e) {
+                    console.error('Error generating Hypertuna configuration for existing user:', e);
                 }
-                
-                this.updateProfileDisplay();
-                
-                // Initialize nostr integration for logged-in user
-                if (this.nostr) {
-                    try {
-                        await this.nostr.init(this.currentUser);
-                        console.log('Nostr integration initialized for existing user');
-                    } catch (e) {
-                        console.error('Error initializing nostr integration for existing user:', e);
-                    }
-                }
-            } catch (e) {
-                console.error('Error loading user data:', e);
-                localStorage.removeItem('nostr_user');
             }
+            
+            this.updateProfileDisplay();
+            
+            // Initialize nostr integration for logged-in user
+            if (this.nostr) {
+                try {
+                    await this.nostr.init(this.currentUser);
+                    console.log('Nostr integration initialized for existing user');
+                } catch (e) {
+                    console.error('Error initializing nostr integration for existing user:', e);
+                }
+            }
+        } catch (e) {
+            ConfigLogger.log('LOAD', {
+                module: 'AppIntegration',
+                method: 'loadUserFromLocalStorage',
+                filepath: 'localStorage',
+                key: 'nostr_user',
+                success: false,
+                error: e.message
+            });
+            
+            console.error('Error loading user data:', e);
+            localStorage.removeItem('nostr_user');
         }
-    };
+    } else {
+        ConfigLogger.log('LOAD', {
+            module: 'AppIntegration',
+            method: 'loadUserFromLocalStorage',
+            filepath: 'localStorage',
+            key: 'nostr_user',
+            success: false,
+            error: 'No saved user found'
+        });
+    }
+};
     
     /**
      * Enhanced updateProfileDisplay method
@@ -449,11 +571,74 @@ function integrateNostrRelays(App) {
         const gatewayInput = document.getElementById('hypertuna-gateway-url');
         if (gatewayInput) gatewayInput.value = config.gatewayUrl;
     };
+
+    /**
+ * Sync current user's Hypertuna config to file system
+ * Call this after login or when user changes
+ */
+App.syncHypertunaConfigToFile = async function() {
+    if (!this.currentUser || !this.currentUser.hypertunaConfig) {
+        console.log('[App] No Hypertuna config to sync');
+        return;
+    }
+    
+    // Only sync if we're in Pear environment
+    if (typeof Pear !== 'undefined' && Pear.config && Pear.config.storage) {
+        try {
+            const { promises: fs } = await import('fs');
+            const { join } = await import('path');
+            
+            const configPath = join(Pear.config.storage, 'relay-config.json');
+            
+            ConfigLogger.log('SAVE', {
+                module: 'AppIntegration',
+                method: 'syncHypertunaConfigToFile',
+                filepath: configPath,
+                attempting: true
+            });
+            
+            // Ensure directory exists
+            await fs.mkdir(Pear.config.storage, { recursive: true });
+            
+            // Write the current user's config
+            await fs.writeFile(
+                configPath, 
+                JSON.stringify(this.currentUser.hypertunaConfig, null, 2)
+            );
+            
+            ConfigLogger.log('SAVE', {
+                module: 'AppIntegration',
+                method: 'syncHypertunaConfigToFile',
+                filepath: configPath,
+                success: true,
+                dataSize: ConfigLogger.getDataSize(this.currentUser.hypertunaConfig)
+            });
+            
+            console.log('[App] Synced Hypertuna config to file system');
+        } catch (e) {
+            ConfigLogger.log('SAVE', {
+                module: 'AppIntegration',
+                method: 'syncHypertunaConfigToFile',
+                filepath: join(Pear.config.storage, 'relay-config.json'),
+                success: false,
+                error: e.message
+            });
+            
+            console.error('[App] Failed to sync config to file:', e);
+        }
+    }
+};
     
     /**
      * New method to update Hypertuna settings
      */
     App.updateHypertunaSettings = async function() {
+        ConfigLogger.log('UPDATE', {
+            module: 'AppIntegration',
+            method: 'updateHypertunaSettings',
+            attempting: true
+        });
+        
         if (!this.currentUser || !this.currentUser.hypertunaConfig) return;
         
         const gatewayUrl = document.getElementById('hypertuna-gateway-url').value.trim();
@@ -478,7 +663,26 @@ function integrateNostrRelays(App) {
         this.currentUser.hypertunaConfig.proxy_server_address = hostname;
         
         // Save the updated configuration
-        localStorage.setItem('hypertuna_config', JSON.stringify(this.currentUser.hypertunaConfig));
+        try {
+            localStorage.setItem('hypertuna_config', JSON.stringify(this.currentUser.hypertunaConfig));
+            ConfigLogger.log('UPDATE', {
+                module: 'AppIntegration',
+                method: 'updateHypertunaSettings',
+                filepath: 'localStorage',
+                key: 'hypertuna_config',
+                success: true,
+                dataSize: ConfigLogger.getDataSize(this.currentUser.hypertunaConfig)
+            });
+        } catch (e) {
+            ConfigLogger.log('UPDATE', {
+                module: 'AppIntegration',
+                method: 'updateHypertunaSettings',
+                filepath: 'localStorage',
+                key: 'hypertuna_config',
+                success: false,
+                error: e.message
+            });
+        }
         
         // Save the user data with the updated configuration
         this.saveUserToLocalStorage();

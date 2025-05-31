@@ -6,6 +6,7 @@
 /* global Pear */
 import { promises as fs } from 'fs'
 import { join } from 'path'
+import { ConfigLogger } from './ConfigLogger.js';
 
 console.log('[App] app.js loading started at:', new Date().toISOString());
 
@@ -107,126 +108,221 @@ function updateWorkerStatus(status, text) {
 
 // Start the worker
 async function startWorker() {
-  console.log('[App] startWorker() called at:', new Date().toISOString());
-  
-  // Prevent multiple simultaneous starts
-  if (workerStatus !== 'stopped') {
-    console.log('[App] Worker already starting/running, ignoring duplicate call');
-    return;
-  }
-  
-  try {
-    addLog('Starting relay worker...', 'status')
-    updateWorkerStatus('starting', 'Starting...')
+    console.log('[App] startWorker() called at:', new Date().toISOString());
     
-    // Get the worker link from config
-    const workerLink = Pear.config.links?.relayWorker
-    
-    if (!workerLink || workerLink === 'pear://dev') {
-      addLog('ERROR: Worker link not configured', 'error')
-      addLog('1. Stage the worker: cd ../relay-worker && pear stage dev', 'error')
-      addLog('2. Update this app\'s package.json with the worker\'s pear:// link', 'error')
-      addLog('3. Restart this desktop app', 'error')
-      updateWorkerStatus('stopped', 'Setup Required')
-      return
+    // Prevent multiple simultaneous starts
+    if (workerStatus !== 'stopped') {
+        console.log('[App] Worker already starting/running, ignoring duplicate call');
+        return;
     }
     
-    addLog(`Using worker link: ${workerLink}`, 'info')
-    
-    // Start the worker process
-    workerPipe = Pear.worker.run(workerLink, [])
-    
-    // Load stored configuration
-    let storedConfig = {}
     try {
-      const configPath = join(Pear.config.storage || '.', 'relay-config.json')
-      const file = await fs.readFile(configPath, 'utf8')
-      storedConfig = JSON.parse(file)
-    } catch (e) {
-      console.error('[App] Failed to load stored config:', e)
-    }
-
-    // Merge with apiUrl from package links
-    const configMessage = {
-      type: 'config',
-      data: {
-        ...storedConfig,
-        apiUrl: Pear.config.links?.api || 'http://localhost:1945'
-      }
-    }
-    
-    // Send config right away
-    setTimeout(() => {
-      if (workerPipe) {
-        console.log('[App] Sending config to worker:', configMessage);
-        workerPipe.write(JSON.stringify(configMessage) + '\n');
-      }
-    }, 100); // Small delay to ensure pipe is ready
-    
-    // Handle worker messages
-    let buffer = ''
-    workerPipe.on('data', (data) => {
-
-      // Convert buffer/Uint8Array to string
-      let dataStr = ''
-      if (data instanceof Uint8Array || data instanceof Buffer) {
-        // Convert byte array to string
-        dataStr = new TextDecoder().decode(data)
-      } else {
-        dataStr = data.toString()
-      }
-      
-      console.log('[App] Raw data from worker (decoded):', dataStr)
-      buffer += dataStr
-      const lines = buffer.split('\n')
-      buffer = lines.pop() // Keep the incomplete line in buffer
-      
-      for (const line of lines) {
-        if (line.trim()) {
-          try {
-            console.log('[App] Parsing line:', line)
-            const message = JSON.parse(line)
-            handleWorkerMessage(message)
-          } catch (err) {
-            addLog(`Error parsing worker message: ${err.message}`, 'error')
-            addLog(`Invalid message: ${line}`, 'error')
-          }
+        addLog('Starting relay worker...', 'status')
+        updateWorkerStatus('starting', 'Starting...')
+        
+        // Get the worker link from config
+        const workerLink = Pear.config.links?.relayWorker
+        
+        if (!workerLink || workerLink === 'pear://dev') {
+            addLog('ERROR: Worker link not configured', 'error')
+            addLog('1. Stage the worker: cd ../relay-worker && pear stage dev', 'error')
+            addLog('2. Update this app\'s package.json with the worker\'s pear:// link', 'error')
+            addLog('3. Restart this desktop app', 'error')
+            updateWorkerStatus('stopped', 'Setup Required')
+            return
         }
-      }
-    })
-    
-    // Handle worker errors
-    workerPipe.on('error', (err) => {
-      addLog(`Worker error: ${err.message}`, 'error')
-      updateWorkerStatus('stopped', 'Error')
-      stopPolling()
-    })
-    
-    // Handle worker close
-    workerPipe.on('close', () => {
-      addLog('Worker process closed', 'status')
-      updateWorkerStatus('stopped', 'Stopped')
-      workerPipe = null
-      stopPolling()
-    })
-    
-    // Send initial configuration again after a short delay
-    setTimeout(() => {
-      if (workerPipe) {
-        workerPipe.write(JSON.stringify(configMessage) + '\n')
-      }
-    }, 1000)
-    
-    // Start polling for relay updates
-    startPolling()
-    startHealthPolling()
+        
+        addLog(`Using worker link: ${workerLink}`, 'info')
+        
+        // Start the worker process
+        workerPipe = Pear.worker.run(workerLink, [])
+        
+        // IMPORTANT: Get the current user's config from localStorage instead of file
+        let configToUse = {}
+        
+        // First, check localStorage for the current user's Hypertuna config
+        const hypertunaConfigStr = localStorage.getItem('hypertuna_config');
+        if (hypertunaConfigStr) {
+            try {
+                configToUse = JSON.parse(hypertunaConfigStr);
+                
+                ConfigLogger.log('LOAD', {
+                    module: 'app.js',
+                    method: 'startWorker',
+                    filepath: 'localStorage',
+                    key: 'hypertuna_config',
+                    success: true,
+                    dataSize: hypertunaConfigStr.length
+                });
+                
+                console.log('[App] Using Hypertuna config from localStorage for current user');
+            } catch (e) {
+                console.error('[App] Failed to parse localStorage hypertuna_config:', e);
+            }
+        }
+        
+        // If no localStorage config, try file system (but verify it matches current user)
+        if (!configToUse.nostr_pubkey_hex) {
+            try {
+                const configPath = join(Pear.config.storage || '.', 'relay-config.json')
+                
+                ConfigLogger.log('LOAD', {
+                    module: 'app.js',
+                    method: 'startWorker',
+                    filepath: configPath,
+                    attempting: true
+                });
+                
+                const file = await fs.readFile(configPath, 'utf8')
+                const fileConfig = JSON.parse(file)
+                
+                ConfigLogger.log('LOAD', {
+                    module: 'app.js',
+                    method: 'startWorker',
+                    filepath: configPath,
+                    success: true,
+                    dataSize: file.length
+                });
+                
+                // CRITICAL: Verify the file config matches current user
+                const currentUserStr = localStorage.getItem('nostr_user');
+                if (currentUserStr) {
+                    const currentUser = JSON.parse(currentUserStr);
+                    
+                    if (fileConfig.nostr_pubkey_hex === currentUser.pubkey) {
+                        console.log('[App] File config matches current user, using it');
+                        configToUse = fileConfig;
+                    } else {
+                        console.warn('[App] File config is for different user!');
+                        console.warn(`  File user: ${fileConfig.nostr_pubkey_hex?.substring(0, 8)}...`);
+                        console.warn(`  Current user: ${currentUser.pubkey?.substring(0, 8)}...`);
+                        
+                        // Use the current user's config from localStorage instead
+                        if (currentUser.hypertunaConfig) {
+                            configToUse = currentUser.hypertunaConfig;
+                            console.log('[App] Using current user\'s Hypertuna config from memory');
+                            
+                            // Save the correct config to file for next time
+                            try {
+                                await fs.writeFile(configPath, JSON.stringify(configToUse, null, 2));
+                                console.log('[App] Updated relay-config.json with current user\'s config');
+                                
+                                ConfigLogger.log('SAVE', {
+                                    module: 'app.js',
+                                    method: 'startWorker',
+                                    filepath: configPath,
+                                    success: true,
+                                    dataSize: JSON.stringify(configToUse).length
+                                });
+                            } catch (saveErr) {
+                                console.error('[App] Failed to save updated config:', saveErr);
+                            }
+                        }
+                    }
+                } else {
+                    // No current user in localStorage, use file config
+                    configToUse = fileConfig;
+                }
+            } catch (e) {
+                ConfigLogger.log('LOAD', {
+                    module: 'app.js',
+                    method: 'startWorker',
+                    filepath: join(Pear.config.storage || '.', 'relay-config.json'),
+                    success: false,
+                    error: e.message
+                });
+                console.error('[App] Failed to load stored config:', e)
+            }
+        }
 
-  } catch (error) {
-    addLog(`Failed to start worker: ${error.message}`, 'error')
-    updateWorkerStatus('stopped', 'Failed')
-    stopPolling()
-  }
+        // Merge with apiUrl from package links
+        const configMessage = {
+            type: 'config',
+            data: {
+                ...configToUse,
+                apiUrl: Pear.config.links?.api || 'http://localhost:1945'
+            }
+        }
+        
+        console.log('[App] Config to send to worker:', {
+            pubkey: configMessage.data.nostr_pubkey_hex?.substring(0, 8) + '...',
+            proxy_pubkey: configMessage.data.proxy_publicKey?.substring(0, 8) + '...',
+            hasStorage: !!configMessage.data.storage
+        });
+        
+        // Send config right away
+        setTimeout(() => {
+            if (workerPipe) {
+                console.log('[App] Sending config to worker:', configMessage);
+                workerPipe.write(JSON.stringify(configMessage) + '\n');
+            }
+        }, 100); // Small delay to ensure pipe is ready
+        
+        // Handle worker messages
+        let buffer = ''
+        workerPipe.on('data', (data) => {
+            // Convert buffer/Uint8Array to string
+            let dataStr = ''
+            if (data instanceof Uint8Array || data instanceof Buffer) {
+                // Convert byte array to string
+                dataStr = new TextDecoder().decode(data)
+            } else {
+                dataStr = data.toString()
+            }
+            
+            console.log('[App] Raw data from worker (decoded):', dataStr)
+            buffer += dataStr
+            const lines = buffer.split('\n')
+            buffer = lines.pop() // Keep the incomplete line in buffer
+            
+            for (const line of lines) {
+                if (line.trim()) {
+                    try {
+                        console.log('[App] Parsing line:', line)
+                        const message = JSON.parse(line)
+                        handleWorkerMessage(message)
+                    } catch (err) {
+                        addLog(`Error parsing worker message: ${err.message}`, 'error')
+                        addLog(`Invalid message: ${line}`, 'error')
+                    }
+                }
+            }
+        })
+        
+        // Handle worker errors
+        workerPipe.on('error', (err) => {
+            addLog(`Worker error: ${err.message}`, 'error')
+            updateWorkerStatus('stopped', 'Error')
+            stopPolling()
+        })
+        
+        // Handle worker close
+        workerPipe.on('close', () => {
+            addLog('Worker process closed', 'status')
+            updateWorkerStatus('stopped', 'Stopped')
+            workerPipe = null
+            stopPolling()
+        })
+        
+        // Send initial configuration again after a short delay
+        setTimeout(() => {
+            if (workerPipe) {
+                workerPipe.write(JSON.stringify(configMessage) + '\n')
+            }
+        }, 1000)
+        
+        // Start polling for relay updates
+        startPolling()
+        startHealthPolling()
+
+    } catch (error) {
+        addLog(`Failed to start worker: ${error.message}`, 'error')
+        updateWorkerStatus('stopped', 'Failed')
+        stopPolling()
+    }
 }
+    
+
 
 // Stop the worker
 async function stopWorker() {
