@@ -55,6 +55,8 @@ function integrateNostrRelays(App) {
         }
         
         try {
+            // Clear the explicit logout flag on successful login
+            localStorage.removeItem('explicit_logout');
             const pubkey = NostrUtils.getPublicKey(privateKey);
             
             this.currentUser = {
@@ -91,6 +93,12 @@ function integrateNostrRelays(App) {
             this.saveUserToLocalStorage();
             this.updateProfileDisplay();
             
+            // IMPORTANT: Recreate NostrIntegration if it's null
+            if (!this.nostr) {
+                console.log('Creating new NostrIntegration instance');
+                this.nostr = new NostrIntegration(this);
+            }
+            
             // Initialize nostr integration if login was successful
             try {
                 await this.nostr.init(this.currentUser);
@@ -107,7 +115,7 @@ function integrateNostrRelays(App) {
             }
             
             // Connect to relay if not already connected
-            if ((!this.relay || !this.relay.isConnected()) && (!this.nostr)) {
+            if ((!this.relay || !this.relay.isConnected()) && this.nostr) {
                 this.connectRelay();
             } else {
                 this.updateUIState();
@@ -116,6 +124,44 @@ function integrateNostrRelays(App) {
             console.error('Error logging in:', e);
             alert('Error: Invalid private key format.');
         }
+    };
+
+
+    App.logout = function() {
+        // Set a flag to indicate explicit logout
+        localStorage.setItem('explicit_logout', 'true');
+        
+        // Disconnect from relays
+        if (this.relay && this.relay.isConnected()) {
+            this.relay.disconnect();
+        }
+        
+        if (this.nostr && this.nostr.client) {
+            // Properly cleanup NostrIntegration
+            this.nostr.client.activeSubscriptions.forEach(subId => {
+                this.nostr.client.relayManager.unsubscribe(subId);
+            });
+            this.nostr.client.activeSubscriptions.clear();
+            
+            // Disconnect from all relays with prevention flag
+            this.nostr.client.relayManager.getRelays().forEach(url => {
+                const relay = this.nostr.client.relayManager.relays.get(url);
+                if (relay && relay.conn) {
+                    relay.preventReconnect = true;
+                    relay.conn.close();
+                }
+                this.nostr.client.relayManager.relays.delete(url);
+            });
+            
+            // Clear the nostr integration
+            this.nostr = null;
+        }
+        
+        window.stopWorker();
+        this.currentUser = null;
+        this.saveUserToLocalStorage();
+        this.navigateTo('auth');
+        this.updateUIState();
     };
     
     /**
@@ -229,16 +275,19 @@ function integrateNostrRelays(App) {
  * Enhanced loadUserFromLocalStorage method
  * Load and check for Hypertuna configuration
  */
-App.loadUserFromLocalStorage = async function() {
-    ConfigLogger.log('LOAD', {
-        module: 'AppIntegration',
-        method: 'loadUserFromLocalStorage',
-        attempting: true
-    });
-    
-    const savedUser = localStorage.getItem('nostr_user');
-    if (savedUser) {
-        try {
+    App.loadUserFromLocalStorage = async function() {
+        ConfigLogger.log('LOAD', {
+            module: 'AppIntegration',
+            method: 'loadUserFromLocalStorage',
+            attempting: true
+        });
+        
+        const savedUser = localStorage.getItem('nostr_user');
+        const explicitLogout = localStorage.getItem('explicit_logout') === 'true';
+        
+        // Only load user if they haven't explicitly logged out
+        if (savedUser && !explicitLogout) {
+            try {
             ConfigLogger.log('LOAD', {
                 module: 'AppIntegration',
                 method: 'loadUserFromLocalStorage',
@@ -331,13 +380,19 @@ App.loadUserFromLocalStorage = async function() {
             localStorage.removeItem('nostr_user');
         }
     } else {
+        // If explicit logout, clear any saved user data
+        if (explicitLogout) {
+            localStorage.removeItem('nostr_user');
+            localStorage.removeItem('hypertuna_config');
+        }
+        
         ConfigLogger.log('LOAD', {
             module: 'AppIntegration',
             method: 'loadUserFromLocalStorage',
             filepath: 'localStorage',
             key: 'nostr_user',
             success: false,
-            error: 'No saved user found'
+            error: explicitLogout ? 'Explicit logout detected' : 'No saved user found'
         });
     }
 };
@@ -699,6 +754,12 @@ App.syncHypertunaConfigToFile = async function() {
         try {
             if (!this.currentUser) {
                 throw new Error('User not logged in');
+            }
+            
+            // Check if nostr integration exists
+            if (!this.nostr) {
+                console.error('NostrIntegration not initialized');
+                throw new Error('NostrIntegration not initialized. Please try logging in again.');
             }
             
             // If we're using the local relay, switch to real relays
@@ -1562,10 +1623,12 @@ App.syncHypertunaConfigToFile = async function() {
     };
     
     // Initialize nostr integration if user is already logged in
-    if (App.currentUser && App.currentUser.privateKey) {
+    const explicitLogout = localStorage.getItem('explicit_logout') === 'true';
+
+    // Initialize nostr integration if user is already logged in AND hasn't explicitly logged out
+    if (App.currentUser && App.currentUser.privateKey && !explicitLogout) {
         // Generate Hypertuna configuration if it doesn't exist
         if (!App.currentUser.hypertunaConfig) {
-            // We need to use an async IIFE here since setupUserConfig is async
             (async () => {
                 try {
                     App.currentUser.hypertunaConfig = await HypertunaUtils.setupUserConfig(App.currentUser);
@@ -1587,16 +1650,6 @@ App.syncHypertunaConfigToFile = async function() {
                     'wss://relay.nostr.band',
                     'wss://nos.lol'
                 ];
-                
-                // Set default relays in the UI
-                const relayListElement = document.getElementById('relay-list');
-                if (relayListElement) {
-                    relayListElement.value = defaultRelays.join('\n');
-                }
-                const profileRelayUrlsElement = document.getElementById('profile-relay-urls');
-                if (profileRelayUrlsElement) {
-                    profileRelayUrlsElement.value = defaultRelays.join('\n');
-                }
                 
                 // Connect to relays
                 await App.nostr.connectRelay();

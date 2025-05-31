@@ -885,25 +885,25 @@
               }
           },
           
-          logout() {
-              // Disconnect from relays
-              if (this.relay && this.relay.isConnected()) {
-                  this.relay.disconnect();
-              }
+          // logout() {
+          //     // Disconnect from relays
+          //     if (this.relay && this.relay.isConnected()) {
+          //         this.relay.disconnect();
+          //     }
               
-              if (this.nostr && this.nostr.client) {
-                  // Disconnect from all relays
-                  this.nostr.client.relayManager.getRelays().forEach(url => {
-                      this.nostr.client.relayManager.removeRelay(url);
-                  });
-              }
+          //     if (this.nostr && this.nostr.client) {
+          //         // Disconnect from all relays
+          //         this.nostr.client.relayManager.getRelays().forEach(url => {
+          //             this.nostr.client.relayManager.removeRelay(url);
+          //         });
+          //     }
               
-              window.stopWorker();
-              this.currentUser = null;
-              this.saveUserToLocalStorage();
-              this.navigateTo('auth');
-              this.updateUIState();
-          },
+          //     window.stopWorker();
+          //     this.currentUser = null;
+          //     this.saveUserToLocalStorage();
+          //     this.navigateTo('auth');
+          //     this.updateUIState();
+          // },
           
           // Placeholder for connectRelay - will be replaced by integration
           connectRelay() {
@@ -1115,7 +1115,10 @@
             'wss://nos.lol'
         ];
         
-        if (App.currentUser) {
+        // Check for explicit logout flag
+        const explicitLogout = localStorage.getItem('explicit_logout') === 'true';
+
+        if (App.currentUser && !explicitLogout) {
             document.getElementById('relay-list').value = defaultRelays.join('\n');
             document.getElementById('profile-relay-urls').value = defaultRelays.join('\n');
             
@@ -1137,9 +1140,8 @@
                 } catch (e) {
                     console.error('[Index] Error during auto-connect:', e);
                 }
-            }, 100); // Small delay to ensure everything is initialized
+            }, 100);
         }
-        
         console.log('[Index] Hypertuna Client initialized');
         
         // Add debugging for worker button state

@@ -80,10 +80,16 @@ class WebSocketRelayManager {
                     // Notify disconnect listeners
                     this.disconnectCallbacks.forEach(callback => callback(url));
                     
-                    // Attempt reconnection after delay
-                    setTimeout(() => {
-                        this.addRelay(url).catch(console.error);
-                    }, 5000);
+                    // Only attempt reconnection if not explicitly prevented
+                    if (!relayData.preventReconnect) {
+                        // Attempt reconnection after delay
+                        setTimeout(() => {
+                            this.addRelay(url).catch(console.error);
+                        }, 5000);
+                    } else {
+                        // Clean up the relay from our map
+                        this.relays.delete(url);
+                    }
                 };
 
                 ws.onerror = (error) => {

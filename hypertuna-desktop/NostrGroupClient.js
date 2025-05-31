@@ -1434,6 +1434,33 @@ class NostrGroupClient {
         
         return event;
     }
+
+    /**
+     * Cleanup and disconnect all resources
+     */
+    cleanup() {
+        // Clear all subscriptions
+        this.activeSubscriptions.forEach(subId => {
+            this.relayManager.unsubscribe(subId);
+        });
+        this.activeSubscriptions.clear();
+        
+        // Clear all cached data
+        this.groups.clear();
+        this.groupMembers.clear();
+        this.groupAdmins.clear();
+        this.groupMessages.clear();
+        this.groupInvites.clear();
+        this.cachedProfiles.clear();
+        this.follows.clear();
+        this.relevantPubkeys.clear();
+        this.hypertunaGroups.clear();
+        this.groupHypertunaIds.clear();
+        
+        // Clear event listeners
+        this.eventListeners.clear();
+        this.eventCallbacks = [];
+    }
     
     /**
      * Add event listener
