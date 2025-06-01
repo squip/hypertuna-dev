@@ -259,10 +259,23 @@ _validateEvent(event) {
     subscribe(subscriptionId, filters, callback) {
         // Create a shorter subscription ID for the wire protocol
         const shortSubId = this._shortenSubscriptionId(subscriptionId);
-        
+
+        // Check for existing subscription with same filters
+        if (this.globalSubscriptions.has(subscriptionId)) {
+            const existing = this.globalSubscriptions.get(subscriptionId);
+            if (JSON.stringify(existing.filters) === JSON.stringify(filters)) {
+                console.log(`Subscription ${subscriptionId} already exists, skipping`);
+                if (callback) existing.callbacks.push(callback);
+                return subscriptionId;
+            }
+
+            // Filters changed - unsubscribe first
+            this.unsubscribe(subscriptionId);
+        }
+
         console.log(`Creating subscription: ${subscriptionId} (${shortSubId})`);
         console.log(`Subscription filters:`, JSON.stringify(filters));
-        
+
         // Add to global subscriptions with the original ID as key
         this.globalSubscriptions.set(subscriptionId, {
             shortId: shortSubId,
@@ -295,6 +308,15 @@ _validateEvent(event) {
         // Get the short ID for this subscription
         const shortSubId = this.globalSubscriptions.get(subscriptionId).shortId;
     
+        // Avoid duplicate subscriptions on the relay
+        if (relay.subscriptions.has(subscriptionId)) {
+            const existing = relay.subscriptions.get(subscriptionId);
+            if (JSON.stringify(existing.filters) === JSON.stringify(filters)) {
+                console.log(`Relay ${relayUrl} already has subscription ${subscriptionId}`);
+                return;
+            }
+        }
+
         // Create a REQ message
         const reqMsg = JSON.stringify(['REQ', shortSubId, ...filters]);
         console.log(`REQ message to ${relayUrl}:`, reqMsg);

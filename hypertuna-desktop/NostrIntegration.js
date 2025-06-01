@@ -104,6 +104,13 @@ class NostrIntegration {
             console.log(`Received Hypertuna relay event for group ${groupId} with ID ${hypertunaId}`);
             this._throttledGroupUpdate();
         });
+
+        this.client.on('relaylist:update', ({ ids }) => {
+            console.log('User relay list updated:', ids);
+            if (this.app.currentPage === 'groups') {
+                this.app.loadGroups();
+            }
+        });
     }
     
     /**
