@@ -445,11 +445,7 @@ class NostrGroupClient {
         const hypertunaGroupSubId = this.relayManager.subscribe('hypertuna-groups', [
             { 
                 kinds: [NostrEvents.KIND_GROUP_METADATA],
-                "#i": ["hypertuna:relay"]
-            },
-            // Add a separate filter that might catch other metadata events
-            {
-                kinds: [NostrEvents.KIND_GROUP_METADATA],
+                "#i": ["hypertuna:relay"],
                 authors: authorsToFollow
             }
         ], (event) => {
@@ -480,7 +476,7 @@ class NostrGroupClient {
         // Subscribe to Hypertuna relay events (kind 30166)
         // Using the 'i' tag filter instead of 'hypertuna'
         const hypertunaRelaySubId = this.relayManager.subscribe('hypertuna-relays', [
-            { kinds: [NostrEvents.KIND_HYPERTUNA_RELAY], "#i": ["hypertuna:relay"] }
+            { kinds: [NostrEvents.KIND_HYPERTUNA_RELAY], "#i": ["hypertuna:relay"], authors: authorsToFollow }
         ], (event) => {
             console.log("Received hypertuna relay event:", {
                 id: event.id.substring(0, 8) + "...",
