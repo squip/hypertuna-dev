@@ -1690,9 +1690,14 @@ App.syncHypertunaConfigToFile = async function() {
                     'wss://nos.lol'
                 ];
                 
-                // Connect to relays
-                await App.nostr.connectRelay();
-                console.log('Connected to default relays for returning user');
+
+
+                // Ensure relays are connected
+                if (!App.nostr.client.relayManager.getRelays().some(url =>
+                        App.nostr.client.relayManager.getRelayStatus(url) === 'open')) {
+                    await App.nostr.connectRelay();
+                    console.log('Connected to default relays for returning user');
+                }
 
                 // Refresh the groups list once relays have connected
                 App.loadGroups();
