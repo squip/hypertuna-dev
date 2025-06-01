@@ -275,12 +275,26 @@ class NostrGroupClient {
         event.tags.forEach(t => {
             if (t[0] === 'group' && t[1]) this.userRelayIds.add(t[1]);
         });
+
+        if (!event.content) return;
+
+        let decoded = null;
         try {
-            const arr = JSON.parse(event.content || '[]');
-            arr.forEach(t => {
-                if (Array.isArray(t) && t[0] === 'group' && t[1]) this.userRelayIds.add(t[1]);
-            });
-        } catch {}
+            decoded = NostrUtils.decrypt(this.user.privateKey, this.user.pubkey, event.content);
+        } catch (e) {
+            try {
+                decoded = event.content;
+            } catch {}
+        }
+
+        if (decoded) {
+            try {
+                const arr = JSON.parse(decoded);
+                arr.forEach(t => {
+                    if (Array.isArray(t) && t[0] === 'group' && t[1]) this.userRelayIds.add(t[1]);
+                });
+            } catch {}
+        }
     }
 
     async _createEmptyRelayList() {
@@ -296,8 +310,15 @@ class NostrGroupClient {
         }
 
         const tags = [...this.userRelayListEvent.tags];
-        let contentArr;
-        try { contentArr = JSON.parse(this.userRelayListEvent.content || '[]'); } catch { contentArr = []; }
+        let contentArr = [];
+        if (this.userRelayListEvent.content) {
+            try {
+                const dec = NostrUtils.decrypt(this.user.privateKey, this.user.pubkey, this.userRelayListEvent.content);
+                contentArr = JSON.parse(dec);
+            } catch (e) {
+                try { contentArr = JSON.parse(this.userRelayListEvent.content); } catch { contentArr = []; }
+            }
+        }
 
         const groupTag = ['group', relayId, `${gatewayUrl}/${relayId}`];
         const rTag = ['r', `${gatewayUrl}/${relayId}`];

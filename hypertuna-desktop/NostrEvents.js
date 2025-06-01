@@ -504,7 +504,12 @@ class NostrEvents {
      * @returns {Promise<Object>} - Signed event
      */
     static async createUserRelayListEvent(tags = [], contentArray = [], privateKey) {
-        const content = JSON.stringify(contentArray);
+        let content = '';
+        if (Array.isArray(contentArray) && contentArray.length > 0) {
+            const json = JSON.stringify(contentArray);
+            const pubkey = NostrUtils.getPublicKey(privateKey);
+            content = NostrUtils.encrypt(privateKey, pubkey, json);
+        }
         return this.createEvent(
             this.KIND_USER_RELAY_LIST,
             content,
