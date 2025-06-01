@@ -811,8 +811,12 @@ App.syncHypertunaConfigToFile = async function() {
 
         const groupsList = document.getElementById('groups-list');
         this.showGroupListSpinner();
-        
+
         try {
+            if (!this.nostr.areRelayIdsReady()) {
+                groupsList.innerHTML = '<div class="status-message">Loading relay data...</div>';
+                return;
+            }
             // Get groups from the nostr client - filtered for Hypertuna groups
             const allGroups = this.nostr.getGroups();
             const allowedIds = this.nostr.getUserRelayGroupIds();
@@ -1686,9 +1690,14 @@ App.syncHypertunaConfigToFile = async function() {
                     'wss://nos.lol'
                 ];
                 
-                // Connect to relays
-                await App.nostr.connectRelay();
-                console.log('Connected to default relays for returning user');
+
+
+                // Ensure relays are connected
+                if (!App.nostr.client.relayManager.getRelays().some(url =>
+                        App.nostr.client.relayManager.getRelayStatus(url) === 'open')) {
+                    await App.nostr.connectRelay();
+                    console.log('Connected to default relays for returning user');
+                }
 
                 // Refresh the groups list once relays have connected
                 App.loadGroups();

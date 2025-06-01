@@ -29,6 +29,7 @@ class NostrGroupClient {
         this.hypertunaRelayUrls = new Map(); // Map of groupId -> relay URL
         this.userRelayListEvent = null; // latest kind 10009 event
         this.userRelayIds = new Set(); // Set of hypertuna relay ids user belongs to
+        this.relayListLoaded = false; // flag indicating relay list has been parsed
         this.debugMode = debugMode;
 
         // Setup default event handlers
@@ -300,8 +301,9 @@ class NostrGroupClient {
                 });
             } catch {}
         }
-
+        this.relayListLoaded = true;
         console.log('Parsed relay list. Current user relay IDs:', Array.from(this.userRelayIds));
+        this.emit('relaylist:update', { ids: Array.from(this.userRelayIds) });
     }
 
     async _createEmptyRelayList() {
@@ -309,6 +311,8 @@ class NostrGroupClient {
         await this.relayManager.publish(event);
         this.userRelayListEvent = event;
         this.userRelayIds.clear();
+        this.relayListLoaded = true;
+        this.emit('relaylist:update', { ids: Array.from(this.userRelayIds) });
         console.log('Created empty user relay list event');
     }
 
@@ -1167,6 +1171,10 @@ class NostrGroupClient {
 
     getUserRelayGroupIds() {
         return Array.from(this.userRelayIds).filter(Boolean);
+    }
+
+    isRelayListReady() {
+        return this.relayListLoaded;
     }
     
     /**

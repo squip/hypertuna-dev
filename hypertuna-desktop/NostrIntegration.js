@@ -22,6 +22,9 @@ class NostrIntegration {
         // Track last update to prevent excessive updates
         this.lastGroupUpdateTime = 0;
         this.updateThrottleTime = 1000; // 1 second throttle
+
+        // Prevent repeated connection attempts
+        this.connecting = false;
     }
     
     /**
@@ -188,9 +191,25 @@ class NostrIntegration {
         if (!this.app.currentUser) {
             throw new Error('User not logged in');
         }
-        
-        // Re-init client with current user
-        await this.client.init(this.app.currentUser, this.relayUrls);
+        if (this.connecting) {
+            console.log('Already connecting to relays, aborting duplicate call');
+            return;
+        }
+
+        const connected = this.client.relayManager.getRelays().some(url =>
+            this.client.relayManager.getRelayStatus(url) === 'open'
+        );
+        if (connected) {
+            console.log('Relays already connected');
+            return;
+        }
+
+        this.connecting = true;
+        try {
+            await this.client.init(this.app.currentUser, this.relayUrls);
+        } finally {
+            this.connecting = false;
+        }
         this._updateRelayStatus();
     }
     
@@ -260,6 +279,10 @@ class NostrIntegration {
 
     getUserRelayGroupIds() {
         return this.client.getUserRelayGroupIds();
+    }
+
+    areRelayIdsReady() {
+        return this.client.isRelayListReady();
     }
     
     /**
