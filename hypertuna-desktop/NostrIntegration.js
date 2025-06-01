@@ -250,6 +250,10 @@ class NostrIntegration {
     getGroupMessages(groupId) {
         return this.client.getGroupMessages(groupId);
     }
+
+    getUserRelayGroupIds() {
+        return this.client.getUserRelayGroupIds();
+    }
     
     /**
      * Create a new group
