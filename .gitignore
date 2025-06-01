@@ -40,9 +40,14 @@ build/Release
 
 # Dependency directories
 hypertuna-worker/node_modules/
+hypertuna-worker/package-lock.json
 hypertuna-desktop/node_modules/
+hypertuna-desktop/package-lock.json
 archive/
 jspm_packages/
+
+# Requirement docs
+requirement-docs/
 
 # Snowpack dependency directory (https://snowpack.dev/)
 web_modules/
