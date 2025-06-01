@@ -811,8 +811,12 @@ App.syncHypertunaConfigToFile = async function() {
 
         const groupsList = document.getElementById('groups-list');
         this.showGroupListSpinner();
-        
+
         try {
+            if (!this.nostr.areRelayIdsReady()) {
+                groupsList.innerHTML = '<div class="status-message">Loading relay data...</div>';
+                return;
+            }
             // Get groups from the nostr client - filtered for Hypertuna groups
             const allGroups = this.nostr.getGroups();
             const allowedIds = this.nostr.getUserRelayGroupIds();
