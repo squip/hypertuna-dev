@@ -1,4 +1,4 @@
-// pear-relay-server.mjs - Enhanced relay server with comprehensive debug logging
+// ./hypertuna-worker/pear-relay-server.mjs - Enhanced relay server with comprehensive debug logging
 import Hyperswarm from 'hyperswarm';
 import { RelayProtocol } from './relay-protocol-enhanced.mjs';
 import { promises as fs } from 'bare-fs';

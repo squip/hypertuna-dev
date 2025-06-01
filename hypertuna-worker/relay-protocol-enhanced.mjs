@@ -1,4 +1,4 @@
-// relay-protocol-enhanced.mjs - Enhanced protocol for full HTTP-like communication
+// ./hypertuna-worker/relay-protocol-enhanced.mjs - Enhanced protocol for full HTTP-like communication
 import Protomux from 'protomux';
 import c from 'compact-encoding';
 import { EventEmitter } from 'bare-events';
