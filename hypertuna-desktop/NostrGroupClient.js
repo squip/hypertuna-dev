@@ -253,6 +253,7 @@ class NostrGroupClient {
                 if (!received) {
                     await this._createEmptyRelayList();
                 }
+                console.log('Fetched user relay list event:', this.userRelayListEvent);
                 resolve();
             }, 5000);
 
@@ -273,7 +274,9 @@ class NostrGroupClient {
         this.userRelayIds.clear();
         if (!event) return;
         event.tags.forEach(t => {
-            if (t[0] === 'group' && t[1]) this.userRelayIds.add(t[1]);
+            if (t[0] === 'group' && t[1] && t[t.length - 1] === 'hypertuna') {
+                this.userRelayIds.add(t[1]);
+            }
         });
 
         if (!event.content) return;
@@ -291,10 +294,14 @@ class NostrGroupClient {
             try {
                 const arr = JSON.parse(decoded);
                 arr.forEach(t => {
-                    if (Array.isArray(t) && t[0] === 'group' && t[1]) this.userRelayIds.add(t[1]);
+                    if (Array.isArray(t) && t[0] === 'group' && t[1] && t[t.length - 1] === 'hypertuna') {
+                        this.userRelayIds.add(t[1]);
+                    }
                 });
             } catch {}
         }
+
+        console.log('Parsed relay list. Current user relay IDs:', Array.from(this.userRelayIds));
     }
 
     async _createEmptyRelayList() {
@@ -302,6 +309,7 @@ class NostrGroupClient {
         await this.relayManager.publish(event);
         this.userRelayListEvent = event;
         this.userRelayIds.clear();
+        console.log('Created empty user relay list event');
     }
 
     async updateUserRelayList(relayId, gatewayUrl, isPublic, add = true) {
@@ -320,8 +328,11 @@ class NostrGroupClient {
             }
         }
 
-        const groupTag = ['group', relayId, `${gatewayUrl}/${relayId}`];
-        const rTag = ['r', `${gatewayUrl}/${relayId}`];
+        const groupId = this.hypertunaGroups.get(relayId);
+        const groupName = (this.groups.get(groupId)?.name) || '';
+
+        const groupTag = ['group', relayId, `${gatewayUrl}/${relayId}`, groupName, 'hypertuna'];
+        const rTag = ['r', `${gatewayUrl}/${relayId}`, 'hypertuna'];
 
         const remove = (arr, tag) => {
             const idx = arr.findIndex(t => JSON.stringify(t) === JSON.stringify(tag));
@@ -335,6 +346,7 @@ class NostrGroupClient {
                 contentArr.push(groupTag, rTag);
             }
             this.userRelayIds.add(relayId);
+            console.log('Added relay to user list:', relayId, { groupTag, rTag });
         } else {
             if (isPublic) {
                 remove(tags, groupTag);
@@ -344,11 +356,14 @@ class NostrGroupClient {
                 remove(contentArr, rTag);
             }
             this.userRelayIds.delete(relayId);
+            console.log('Removed relay from user list:', relayId);
         }
 
         const newEvent = await NostrEvents.createUserRelayListEvent(tags, contentArr, this.user.privateKey);
         this.userRelayListEvent = newEvent;
+        console.log('Publishing updated user relay list event', newEvent);
         await this.relayManager.publish(newEvent);
+        this.emit('relaylist:update', { ids: Array.from(this.userRelayIds) });
     }
     
     /**
@@ -1151,7 +1166,7 @@ class NostrGroupClient {
     }
 
     getUserRelayGroupIds() {
-        return Array.from(this.userRelayIds);
+        return Array.from(this.userRelayIds).filter(Boolean);
     }
     
     /**

@@ -101,6 +101,7 @@ function integrateNostrRelays(App) {
             
             // Initialize nostr integration if login was successful
             try {
+                this.showGroupListSpinner();
                 await this.nostr.init(this.currentUser);
                 console.log('Nostr integration initialized');
                 if (window.startWorker) {
@@ -368,6 +369,7 @@ function integrateNostrRelays(App) {
             // Initialize nostr integration for logged-in user
             if (this.nostr) {
                 try {
+                    this.showGroupListSpinner();
                     await this.nostr.init(this.currentUser);
                     console.log('Nostr integration initialized for existing user');
                 } catch (e) {
@@ -791,14 +793,24 @@ App.syncHypertunaConfigToFile = async function() {
     };
     
     /**
+     * Display the loading spinner in the groups list
+     */
+    App.showGroupListSpinner = function() {
+        const groupsList = document.getElementById('groups-list');
+        if (groupsList) {
+            groupsList.innerHTML = '<div class="loading"><span class="loading-spinner"></span>Loading relays...</div>';
+        }
+    };
+
+    /**
      * Replace load groups method
      * Gets Hypertuna groups from the nostr client
      */
     App.loadGroups = async function() {
         if (!this.currentUser) return;
-        
+
         const groupsList = document.getElementById('groups-list');
-        groupsList.innerHTML = '<div class="loading">Loading relays...</div>';
+        this.showGroupListSpinner();
         
         try {
             // Get groups from the nostr client - filtered for Hypertuna groups
@@ -1334,10 +1346,11 @@ App.syncHypertunaConfigToFile = async function() {
         
         try {
             await this.nostr.joinGroup(this.currentGroupId, inviteCode);
-            
-            // Reload group details to reflect membership changes
+
+            // Reload group details and groups list to reflect membership changes
             setTimeout(() => {
                 this.loadGroupDetails();
+                this.loadGroups();
             }, 1000);
             
         } catch (e) {
@@ -1361,9 +1374,10 @@ App.syncHypertunaConfigToFile = async function() {
                 window.disconnectRelayInstance(this.currentHypertunaId);
             }
             
-            // Reload group details to reflect membership changes
+            // Reload group details and groups list to reflect membership changes
             setTimeout(() => {
                 this.loadGroupDetails();
+                this.loadGroups();
             }, 1000);
             
         } catch (e) {
