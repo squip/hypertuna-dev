@@ -1126,12 +1126,6 @@
             setTimeout(async () => {
                 console.log('[Index] Auto-connecting for returning user...');
                 try {
-                    // Connect to relays
-                    if (App.nostr && App.nostr.client) {
-                        await App.nostr.connectRelay();
-                        console.log('[Index] Connected to relays');
-                    }
-                    
                     // Start worker if available
                     if (window.startWorker) {
                       const key = await window.startWorker();
