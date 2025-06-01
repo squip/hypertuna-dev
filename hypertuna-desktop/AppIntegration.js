@@ -125,7 +125,9 @@ function integrateNostrRelays(App) {
             
             // Connect to relay if not already connected
             if ((!this.relay || !this.relay.isConnected()) && this.nostr) {
-                this.connectRelay();
+                await this.connectRelay();
+                await this.nostr.client.waitForGroupListReady();
+                this.loadGroups();
             } else {
                 this.updateUIState();
             }
@@ -1659,6 +1661,9 @@ App.syncHypertunaConfigToFile = async function() {
 
     // Initialize nostr integration if user is already logged in AND hasn't explicitly logged out
     if (App.currentUser && App.currentUser.privateKey && !explicitLogout) {
+        // Show a spinner while the groups list is being restored
+        App.showGroupListSpinner();
+
         // Generate Hypertuna configuration if it doesn't exist
         if (!App.currentUser.hypertunaConfig) {
             (async () => {
@@ -1686,6 +1691,10 @@ App.syncHypertunaConfigToFile = async function() {
                 // Connect to relays
                 await App.nostr.connectRelay();
                 console.log('Connected to default relays for returning user');
+
+                // Wait until group data is ready before refreshing the list
+                await App.nostr.client.waitForGroupListReady();
+                App.loadGroups();
                 
                 // Start worker if available
                 if (window.startWorker) {

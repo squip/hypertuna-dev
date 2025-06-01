@@ -616,8 +616,26 @@ async testPublish() {
         }
         else if (messageType === 'EOSE') {
             // ["EOSE", <subscription_id>]
-            // End of stored events, we could notify listeners if needed
-            // console.log(`End of stored events for subscription ${message[1]} from ${relayUrl}`);
+            const shortSubId = message[1];
+            let originalSubId = null;
+            this.globalSubscriptions.forEach((subData, subId) => {
+                if (subData.shortId === shortSubId) {
+                    originalSubId = subId;
+                }
+            });
+
+            if (!originalSubId) return;
+
+            const subscription = this.globalSubscriptions.get(originalSubId);
+            if (subscription) {
+                subscription.callbacks.forEach(callback => {
+                    try {
+                        callback(null, relayUrl, originalSubId, true);
+                    } catch (e) {
+                        console.error('Error in subscription callback:', e);
+                    }
+                });
+            }
         }
         else if (messageType === 'NOTICE') {
             // ["NOTICE", <message>]

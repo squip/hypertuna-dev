@@ -29,6 +29,8 @@ class NostrGroupClient {
         this.hypertunaRelayUrls = new Map(); // Map of groupId -> relay URL
         this.userRelayListEvent = null; // latest kind 10009 event
         this.userRelayIds = new Set(); // Set of hypertuna relay ids user belongs to
+        this.pendingGroupEoses = new Set();
+        this.groupReadyCallbacks = [];
         this.debugMode = debugMode;
 
         // Setup default event handlers
@@ -443,7 +445,7 @@ class NostrGroupClient {
         
         // Updated to use 'i' tag with 'hypertuna:relay' value
         const hypertunaGroupSubId = this.relayManager.subscribe('hypertuna-groups', [
-            { 
+            {
                 kinds: [NostrEvents.KIND_GROUP_METADATA],
                 "#i": ["hypertuna:relay"]
             },
@@ -452,7 +454,11 @@ class NostrGroupClient {
                 kinds: [NostrEvents.KIND_GROUP_METADATA],
                 authors: authorsToFollow
             }
-        ], (event) => {
+        ], (event, relayUrl, subId, eose) => {
+            if (eose) {
+                this._handleEOSE(subId);
+                return;
+            }
             console.log("Received group metadata event:", {
                 id: event.id.substring(0, 8) + "...",
                 pubkey: event.pubkey.substring(0, 8) + "...",
@@ -476,6 +482,7 @@ class NostrGroupClient {
             }
         });
         this.activeSubscriptions.add(hypertunaGroupSubId);
+        this.pendingGroupEoses.add(hypertunaGroupSubId);
         
         // Subscribe to Hypertuna relay events (kind 30166)
         // Using the 'i' tag filter instead of 'hypertuna'
@@ -495,22 +502,31 @@ class NostrGroupClient {
         // Subscribe to user's relay list (kind 10009)
         const relayListSub = this.relayManager.subscribe('user-relaylist', [
             { kinds: [NostrEvents.KIND_USER_RELAY_LIST], authors: [this.user.pubkey], limit: 1 }
-        ], (event) => {
+        ], (event, relayUrl, subId, eose) => {
+            if (eose) {
+                this._handleEOSE(subId);
+                return;
+            }
             this.userRelayListEvent = event;
             this._parseRelayListEvent(event);
         });
         this.activeSubscriptions.add(relayListSub);
+        this.pendingGroupEoses.add(relayListSub);
         
         // Subscribe to group membership changes affecting user
         const membershipSubId = this.relayManager.subscribe('user-groups', [
-            { 
+            {
                 kinds: [
                     NostrEvents.KIND_GROUP_MEMBER_LIST,
                     NostrEvents.KIND_GROUP_ADMIN_LIST
                 ],
                 "#p": [this.user.pubkey]
             }
-        ], (event) => {
+        ], (event, relayUrl, subId, eose) => {
+            if (eose) {
+                this._handleEOSE(subId);
+                return;
+            }
             this._processGroupMembershipEvent(event);
             
             // Add all pubkeys from this group to relevant pubkeys
@@ -528,6 +544,7 @@ class NostrGroupClient {
             }
         });
         this.activeSubscriptions.add(membershipSubId);
+        this.pendingGroupEoses.add(membershipSubId);
     }
     
     /**
@@ -754,13 +771,15 @@ class NostrGroupClient {
         }
         
         // Emit event
-        this.emit('group:metadata', { 
-            groupId: groupData.id, 
-            group: groupData 
+        this.emit('group:metadata', {
+            groupId: groupData.id,
+            group: groupData
         });
-        
+
         // Subscribe to membership events for this group
         this._subscribeToGroupMembership(groupData.id);
+
+        this._checkGroupListReady();
     }
     
     /**
@@ -1625,6 +1644,32 @@ class NostrGroupClient {
         return event;
     }
 
+    _handleEOSE(subId) {
+        if (this.pendingGroupEoses.has(subId)) {
+            this.pendingGroupEoses.delete(subId);
+            this._checkGroupListReady();
+        }
+    }
+
+    _checkGroupListReady() {
+        if (this.groups.size > 0 || this.pendingGroupEoses.size === 0) {
+            while (this.groupReadyCallbacks.length) {
+                const cb = this.groupReadyCallbacks.shift();
+                try { cb(); } catch {}
+            }
+            this.emit('groups:ready', { hasGroups: this.groups.size > 0 });
+        }
+    }
+
+    waitForGroupListReady() {
+        if (this.groups.size > 0 || this.pendingGroupEoses.size === 0) {
+            return Promise.resolve();
+        }
+        return new Promise(resolve => {
+            this.groupReadyCallbacks.push(resolve);
+        });
+    }
+
     /**
      * Cleanup and disconnect all resources
      */
@@ -1649,6 +1694,8 @@ class NostrGroupClient {
         this.hypertunaRelayUrls.clear();
         this.userRelayIds.clear();
         this.userRelayListEvent = null;
+        this.pendingGroupEoses.clear();
+        this.groupReadyCallbacks = [];
         
         // Clear event listeners
         this.eventListeners.clear();
