@@ -54,9 +54,12 @@ class NostrEvents {
     static KIND_GROUP_ADMIN_LIST = 39001;
     static KIND_GROUP_MEMBER_LIST = 39002;
     static KIND_GROUP_ROLES_LIST = 39003;
-    
+
     // Hypertuna custom events
     static KIND_HYPERTUNA_RELAY = 30166;
+
+    // User relay list event
+    static KIND_USER_RELAY_LIST = 10009;
     
     /**
      * Create and sign a generic event with enhanced logging
@@ -489,6 +492,23 @@ class NostrEvents {
             this.KIND_GROUP_DELETE,
             'Deleting group',
             [['h', groupId]],
+            privateKey
+        );
+    }
+
+    /**
+     * Create a user relay list event (kind 10009)
+     * @param {Array} tags - Public relay tags
+     * @param {Array} contentArray - Private relay tags (will be JSON encoded)
+     * @param {string} privateKey - Private key for signing
+     * @returns {Promise<Object>} - Signed event
+     */
+    static async createUserRelayListEvent(tags = [], contentArray = [], privateKey) {
+        const content = JSON.stringify(contentArray);
+        return this.createEvent(
+            this.KIND_USER_RELAY_LIST,
+            content,
+            tags,
             privateKey
         );
     }

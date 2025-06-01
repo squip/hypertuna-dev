@@ -956,6 +956,7 @@ console.log('[App] Exposing window functions');
 window.startWorker = startWorker;
 window.stopWorker = stopWorker;
 window.createRelayInstance = createRelayInstance;
+window.disconnectRelayInstance = disconnectRelay;
 window.debugButtonState = debugButtonState;
 
 console.log('[App] app.js loading completed at:', new Date().toISOString());

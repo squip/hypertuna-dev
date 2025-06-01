@@ -802,7 +802,9 @@ App.syncHypertunaConfigToFile = async function() {
         
         try {
             // Get groups from the nostr client - filtered for Hypertuna groups
-            const groups = this.nostr.getGroups();
+            const allGroups = this.nostr.getGroups();
+            const allowedIds = this.nostr.getUserRelayGroupIds();
+            const groups = allGroups.filter(g => allowedIds.includes(g.hypertunaId));
             
             if (groups.length === 0) {
                 groupsList.innerHTML = `
@@ -1354,6 +1356,10 @@ App.syncHypertunaConfigToFile = async function() {
         
         try {
             await this.nostr.leaveGroup(this.currentGroupId);
+
+            if (window.disconnectRelayInstance && this.currentHypertunaId) {
+                window.disconnectRelayInstance(this.currentHypertunaId);
+            }
             
             // Reload group details to reflect membership changes
             setTimeout(() => {
@@ -1547,6 +1553,10 @@ App.syncHypertunaConfigToFile = async function() {
         
         try {
             await this.nostr.deleteGroup(this.currentGroupId);
+
+            if (window.disconnectRelayInstance && this.currentHypertunaId) {
+                window.disconnectRelayInstance(this.currentHypertunaId);
+            }
             
             this.closeConfirmationModal();
             alert('Group deletion request sent! The group will be removed once relays process the event.');
