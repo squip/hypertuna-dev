@@ -276,7 +276,7 @@ class NostrGroupClient {
         if (!event) return;
         
         event.tags.forEach(t => {
-            if (t[0] === 'group' && t[1] && t[t.length - 1] === 'hypertuna:relay') {
+            if (t[0] === 'group' && t[1] && t[t.length - 1] === 'hypertuna') {
                 this.userRelayIds.add(t[1]);
             }
         });
@@ -301,7 +301,7 @@ class NostrGroupClient {
             try {
                 const arr = JSON.parse(decoded);
                 arr.forEach(t => {
-                    if (Array.isArray(t) && t[0] === 'group' && t[1] && t[t.length - 1] === 'hypertuna:relay') {
+                    if (Array.isArray(t) && t[0] === 'group' && t[1] && t[t.length - 1] === 'hypertuna') {
                         this.userRelayIds.add(t[1]);
                     }
                 });
@@ -342,8 +342,8 @@ class NostrGroupClient {
         const groupId = this.hypertunaGroups.get(relayId);
         const groupName = (this.groups.get(groupId)?.name) || '';
 
-        const groupTag = ['group', relayId, `${gatewayUrl}/${relayId}`, groupName, 'hypertuna:relay'];
-        const rTag = ['r', `${gatewayUrl}/${relayId}`, 'hypertuna:relay'];
+        const groupTag = ['group', relayId, `${gatewayUrl}/${relayId}`, groupName, 'hypertuna'];
+        const rTag = ['r', `${gatewayUrl}/${relayId}`, 'hypertuna'];
 
         const remove = (arr, tag) => {
             const idx = arr.findIndex(t => JSON.stringify(t) === JSON.stringify(tag));
