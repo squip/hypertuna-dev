@@ -1260,26 +1260,22 @@ async fetchMultipleProfiles(pubkeys) {
             console.log('No groups found in the map');
         }
         
-        // For debugging, return all groups regardless of filters
+        // Early return if we have no groups cached
         if (allGroups.length === 0) {
-            console.log('Returning all groups for debugging');
+            console.log('Returning empty group list');
             return allGroups;
         }
-        
+
         // Filter for Hypertuna groups using the identifier tag
         const hypertunaGroups = allGroups.filter(group => {
-            // Check if this is a Hypertuna relay group using the identifier tag
-            const isHypertunaRelay = group.isHypertunaRelay || 
-                                  (group.event && group.event.tags.some(tag => 
-                                      tag[0] === 'i' && tag[1] === 'hypertuna:relay'));
-            
-            // Check if it has a hypertuna ID
+            const isHypertunaRelay = group.isHypertunaRelay ||
+                (group.event && group.event.tags.some(tag => tag[0] === 'i' && tag[1] === 'hypertuna:relay'));
+
             const hasHypertunaId = !!group.hypertunaId;
-            
+
             console.log(`Group ${group.id}: isHypertunaRelay=${isHypertunaRelay}, hasHypertunaId=${hasHypertunaId}`);
-            
-            // For debugging, include all groups to see what's available
-            return true;
+
+            return isHypertunaRelay && hasHypertunaId;
         });
         
         console.log(`Filtered groups: ${hypertunaGroups.length}`);

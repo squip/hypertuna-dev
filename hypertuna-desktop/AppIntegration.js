@@ -1671,6 +1671,8 @@ App.switchListView = function(view) {
     if (view === 'your') {
         groupsList.classList.remove('hidden');
         discoverList.classList.add('hidden');
+        // Clear any previously discovered relays to avoid stale items
+        discoverList.innerHTML = '';
         this.loadGroups();
     } else {
         groupsList.classList.add('hidden');
