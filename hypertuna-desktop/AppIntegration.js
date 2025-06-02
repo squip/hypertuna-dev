@@ -8,6 +8,7 @@ import NostrIntegration from './NostrIntegration.js';
 import { NostrUtils } from './NostrUtils.js';
 import { HypertunaUtils } from './HypertunaUtils.js';
 import { ConfigLogger } from './ConfigLogger.js';
+import NostrEvents from './NostrEvents.js';  // Add this import
 
 /**
  * This function modifies the existing App object to use real nostr relays
@@ -803,7 +804,6 @@ App.syncHypertunaConfigToFile = async function() {
     };
 
     /**
-     * Replace load groups method
      * Gets Hypertuna groups from the nostr client
      */
     App.loadGroups = async function() {
@@ -1613,6 +1613,586 @@ App.syncHypertunaConfigToFile = async function() {
             alert('Error deleting group: ' + e.message);
         }
     };
+
+/**
+ * Current list view mode
+ */
+App.currentListView = 'your'; // 'your' or 'discover'
+App.discoverRelaysCache = null;
+App.discoverRelaysCacheTime = 0;
+App.DISCOVER_CACHE_DURATION = 60000; // 1 minute cache
+
+/**
+ * Setup list toggle listeners
+ */
+App.setupListToggle = function() {
+    const toggleOptions = document.querySelectorAll('.toggle-option');
+    
+    toggleOptions.forEach(option => {
+        option.addEventListener('click', (e) => {
+            const view = e.target.dataset.view;
+            this.switchListView(view);
+        });
+    });
+    
+    // Setup following modal listeners
+    this.setupFollowingModalListeners();
+};
+
+/**
+ * Switch between list views
+ */
+App.switchListView = function(view) {
+    if (this.currentListView === view) return;
+    
+    this.currentListView = view;
+    
+    // Update toggle buttons
+    document.querySelectorAll('.toggle-option').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.view === view);
+    });
+    
+    // Show/hide appropriate buttons
+    const createBtn = document.getElementById('btn-create-new-group');
+    const followingBtn = document.getElementById('btn-edit-following');
+    
+    if (view === 'your') {
+        if (createBtn) createBtn.style.display = 'flex';
+        if (followingBtn) followingBtn.style.display = 'none';
+    } else {
+        if (createBtn) createBtn.style.display = 'none';
+        if (followingBtn) followingBtn.style.display = 'flex';
+    }
+    
+    // Switch lists
+    const groupsList = document.getElementById('groups-list');
+    const discoverList = document.getElementById('discover-list');
+    
+    if (view === 'your') {
+        groupsList.classList.remove('hidden');
+        discoverList.classList.add('hidden');
+        this.loadGroups();
+    } else {
+        groupsList.classList.add('hidden');
+        discoverList.classList.remove('hidden');
+        this.loadDiscoverRelays();
+    }
+};
+
+/**
+ * Load discover relays
+ */
+App.loadDiscoverRelays = async function() {
+    if (!this.currentUser || !this.nostr) return;
+    
+    const discoverList = document.getElementById('discover-list');
+    
+    // Check cache
+    const now = Date.now();
+    if (this.discoverRelaysCache && (now - this.discoverRelaysCacheTime) < this.DISCOVER_CACHE_DURATION) {
+        this.displayDiscoverRelays(this.discoverRelaysCache);
+        return;
+    }
+    
+    // Show loading state
+    discoverList.innerHTML = `
+        <div class="discover-loading">
+            <div class="loading"></div>
+            <div class="discover-loading-text">Discovering relays from your network...</div>
+        </div>
+    `;
+    
+    try {
+        // Discover relays from follows
+        const discoveredRelays = await this.nostr.client.discoverRelaysFromFollows();
+        
+        // Cache the results
+        this.discoverRelaysCache = discoveredRelays;
+        this.discoverRelaysCacheTime = now;
+        
+        // Display the results
+        this.displayDiscoverRelays(discoveredRelays);
+        
+    } catch (e) {
+        console.error('Error discovering relays:', e);
+        discoverList.innerHTML = `
+            <div class="empty-state">
+                <p>Error discovering relays</p>
+                <p>Please try again later</p>
+            </div>
+        `;
+    }
+};
+
+/**
+ * Display discovered relays
+ */
+App.displayDiscoverRelays = function(discoveredRelays) {
+    const discoverList = document.getElementById('discover-list');
+    
+    if (discoveredRelays.size === 0) {
+        discoverList.innerHTML = `
+            <div class="empty-state">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
+                    <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
+                    <line x1="12" y1="22.08" x2="12" y2="12"></line>
+                </svg>
+                <p>No relays found in your network</p>
+                <p>Follow more people to discover relays!</p>
+            </div>
+        `;
+        return;
+    }
+    
+    // Sort by follower count
+    const sortedRelays = Array.from(discoveredRelays.entries())
+        .sort((a, b) => b[1].followerCount - a[1].followerCount);
+    
+    discoverList.innerHTML = '';
+    
+    sortedRelays.forEach(([groupId, relayData]) => {
+        const { group, followers } = relayData;
+        
+        // Skip if user is already a member
+        if (this.nostr.isGroupMember(groupId, this.currentUser.pubkey)) {
+            return;
+        }
+        
+        const groupElement = document.createElement('a');
+        groupElement.href = '#';
+        groupElement.className = 'group-item group-item-with-followers';
+        
+        const firstLetter = group.name ? group.name.charAt(0).toUpperCase() : 'R';
+        
+        // Create followers avatars HTML
+        const maxAvatars = 3;
+        const displayedFollowers = followers.slice(0, maxAvatars);
+        const additionalCount = followers.length - maxAvatars;
+        
+        const avatarsHtml = displayedFollowers.map(follower => {
+            const initial = follower.profile.name ? follower.profile.name.charAt(0).toUpperCase() : '?';
+            
+            if (follower.profile.picture) {
+                return `
+                    <div class="follower-avatar">
+                        <img src="${follower.profile.picture}" alt="${follower.profile.name}" 
+                             onerror="this.parentElement.innerHTML='<span>${initial}</span>'">
+                        <div class="follower-tooltip">${follower.profile.name}</div>
+                    </div>
+                `;
+            } else {
+                return `
+                    <div class="follower-avatar">
+                        <span>${initial}</span>
+                        <div class="follower-tooltip">${follower.profile.name}</div>
+                    </div>
+                `;
+            }
+        }).join('');
+        
+        groupElement.innerHTML = `
+            <div class="group-avatar">${firstLetter}</div>
+            <div class="group-info">
+                <div class="group-name">${group.name || 'Unnamed Relay'}</div>
+                <div class="group-description">${group.about || 'No description available'}</div>
+            </div>
+            <div class="group-meta-badges">
+                <span class="meta-badge">${group.isPublic ? 'Public' : 'Private'}</span>
+                <span class="meta-badge">${group.isOpen ? 'Open' : 'Closed'}</span>
+            </div>
+            <div class="followers-info">
+                <div class="followers-avatars">
+                    ${avatarsHtml}
+                </div>
+                <div class="followers-count">
+                    ${followers.length} ${followers.length === 1 ? 'follow' : 'follows'}
+                    ${additionalCount > 0 ? `+${additionalCount}` : ''}
+                </div>
+            </div>
+        `;
+        
+        groupElement.addEventListener('click', (e) => {
+            e.preventDefault();
+            this.currentGroupId = groupId;
+            this.currentHypertunaId = group.hypertunaId;
+            this.navigateTo('group-detail');
+        });
+        
+        discoverList.appendChild(groupElement);
+    });
+    
+    // Add info message if all discovered relays are already joined
+    if (discoverList.children.length === 0) {
+        discoverList.innerHTML = `
+            <div class="empty-state">
+                <p>You've already joined all relays in your network!</p>
+                <p>Follow more people to discover new relays.</p>
+            </div>
+        `;
+    }
+};
+
+// properties for following management
+App.followingModalOpen = false;
+App.pendingFollowChanges = {
+    toAdd: new Set(),
+    toRemove: new Set()
+};
+App.originalFollows = new Set();
+
+/**
+ * Show the following modal
+ */
+App.showFollowingModal = async function() {
+    this.followingModalOpen = true;
+    document.getElementById('following-modal').classList.add('show');
+    
+    // Reset pending changes
+    this.pendingFollowChanges.toAdd.clear();
+    this.pendingFollowChanges.toRemove.clear();
+    
+    // Load current follows
+    await this.loadFollowingList();
+    
+    // Clear the input
+    document.getElementById('add-follow-pubkey').value = '';
+};
+
+/**
+ * Close the following modal
+ */
+App.closeFollowingModal = function() {
+    this.followingModalOpen = false;
+    document.getElementById('following-modal').classList.remove('show');
+    
+    // Reset pending changes
+    this.pendingFollowChanges.toAdd.clear();
+    this.pendingFollowChanges.toRemove.clear();
+};
+
+/**
+ * Load and display the following list
+ */
+App.loadFollowingList = async function() {
+    const followingList = document.getElementById('following-list');
+    const followingCount = document.getElementById('following-count');
+    
+    // Show loading state
+    followingList.innerHTML = '<div class="following-loading">Loading...</div>';
+    
+    try {
+        // Get current follows
+        const follows = this.nostr.client.follows;
+        this.originalFollows = new Set(follows);
+        
+        if (follows.size === 0) {
+            followingList.innerHTML = `
+                <div class="following-empty">
+                    <p>You're not following anyone yet</p>
+                </div>
+            `;
+            followingCount.textContent = '(0)';
+            return;
+        }
+        
+        // Fetch profiles for all follows
+        const followsArray = Array.from(follows);
+        const profiles = await this.nostr.client.fetchMultipleProfiles(followsArray);
+        
+        // Update count
+        followingCount.textContent = `(${follows.size})`;
+        
+        // Clear list
+        followingList.innerHTML = '';
+        
+        // Display each follow
+        followsArray.forEach(pubkey => {
+            const profile = profiles.get(pubkey) || { 
+                name: `User_${NostrUtils.truncatePubkey(pubkey)}`,
+                pubkey 
+            };
+            
+            const followItem = document.createElement('div');
+            followItem.className = 'following-item';
+            followItem.dataset.pubkey = pubkey;
+            
+            const name = profile.name || `User_${NostrUtils.truncatePubkey(pubkey)}`;
+            const firstLetter = name.charAt(0).toUpperCase();
+            
+            let avatarHtml;
+            if (profile.picture) {
+                avatarHtml = `<img src="${profile.picture}" alt="${name}" onerror="this.parentElement.innerHTML='<span>${firstLetter}</span>'">`;
+            } else {
+                avatarHtml = `<span>${firstLetter}</span>`;
+            }
+            
+            followItem.innerHTML = `
+                <div class="following-avatar">
+                    ${avatarHtml}
+                </div>
+                <div class="following-info">
+                    <div class="following-name">${name}</div>
+                    <div class="following-pubkey">${NostrUtils.truncatePubkey(pubkey)}</div>
+                </div>
+                <button class="btn-remove" data-pubkey="${pubkey}">Remove</button>
+            `;
+            
+            // Add remove handler
+            const removeBtn = followItem.querySelector('.btn-remove');
+            removeBtn.addEventListener('click', () => {
+                this.toggleFollowRemoval(pubkey);
+            });
+            
+            followingList.appendChild(followItem);
+        });
+        
+    } catch (e) {
+        console.error('Error loading following list:', e);
+        followingList.innerHTML = `
+            <div class="following-empty">
+                <p>Error loading following list</p>
+            </div>
+        `;
+    }
+};
+
+/**
+ * Add a new follow
+ */
+App.addFollow = async function() {
+    const input = document.getElementById('add-follow-pubkey');
+    let pubkey = input.value.trim();
+    
+    if (!pubkey) {
+        alert('Please enter a public key');
+        return;
+    }
+    
+    // Handle npub format
+    if (pubkey.startsWith('npub')) {
+        // In a real implementation, you would decode the npub to hex
+        // For now, we'll show an error
+        alert('Please enter a hex public key. npub decoding coming soon!');
+        return;
+    }
+    
+    // Validate hex pubkey
+    if (!/^[a-fA-F0-9]{64}$/.test(pubkey)) {
+        alert('Invalid public key format. Must be 64 hex characters.');
+        return;
+    }
+    
+    // Check if already following
+    if (this.originalFollows.has(pubkey) && !this.pendingFollowChanges.toRemove.has(pubkey)) {
+        alert('You are already following this user');
+        return;
+    }
+    
+    // Add to pending additions
+    this.pendingFollowChanges.toAdd.add(pubkey);
+    if (this.pendingFollowChanges.toRemove.has(pubkey)) {
+        this.pendingFollowChanges.toRemove.delete(pubkey);
+    }
+    
+    // Fetch profile and add to list
+    try {
+        const profile = await this.nostr.client.fetchUserProfile(pubkey);
+        const name = profile.name || `User_${NostrUtils.truncatePubkey(pubkey)}`;
+        const firstLetter = name.charAt(0).toUpperCase();
+        
+        const followingList = document.getElementById('following-list');
+        
+        // Remove empty state if present
+        const emptyState = followingList.querySelector('.following-empty');
+        if (emptyState) {
+            emptyState.remove();
+        }
+        
+        const followItem = document.createElement('div');
+        followItem.className = 'following-item pending-addition';
+        followItem.dataset.pubkey = pubkey;
+        
+        let avatarHtml;
+        if (profile.picture) {
+            avatarHtml = `<img src="${profile.picture}" alt="${name}" onerror="this.parentElement.innerHTML='<span>${firstLetter}</span>'">`;
+        } else {
+            avatarHtml = `<span>${firstLetter}</span>`;
+        }
+        
+        followItem.innerHTML = `
+            <div class="following-avatar">
+                ${avatarHtml}
+            </div>
+            <div class="following-info">
+                <div class="following-name">${name}</div>
+                <div class="following-pubkey">${NostrUtils.truncatePubkey(pubkey)}</div>
+            </div>
+            <button class="btn-remove" data-pubkey="${pubkey}">Remove</button>
+        `;
+        
+        // Add remove handler
+        const removeBtn = followItem.querySelector('.btn-remove');
+        removeBtn.addEventListener('click', () => {
+            this.toggleFollowRemoval(pubkey);
+        });
+        
+        // Add to top of list
+        followingList.insertBefore(followItem, followingList.firstChild);
+        
+        // Clear input
+        input.value = '';
+        
+        // Update count
+        const currentCount = this.originalFollows.size + this.pendingFollowChanges.toAdd.size - this.pendingFollowChanges.toRemove.size;
+        document.getElementById('following-count').textContent = `(${currentCount})`;
+        
+    } catch (e) {
+        console.error('Error adding follow:', e);
+        alert('Error adding follow. Please try again.');
+    }
+};
+
+/**
+ * Toggle removal of a follow
+ */
+App.toggleFollowRemoval = function(pubkey) {
+    const item = document.querySelector(`.following-item[data-pubkey="${pubkey}"]`);
+    if (!item) return;
+    
+    if (this.pendingFollowChanges.toAdd.has(pubkey)) {
+        // If it was pending addition, just remove it
+        this.pendingFollowChanges.toAdd.delete(pubkey);
+        item.remove();
+    } else if (this.pendingFollowChanges.toRemove.has(pubkey)) {
+        // Cancel removal
+        this.pendingFollowChanges.toRemove.delete(pubkey);
+        item.classList.remove('pending-removal');
+    } else {
+        // Mark for removal
+        this.pendingFollowChanges.toRemove.add(pubkey);
+        item.classList.add('pending-removal');
+    }
+    
+    // Update count
+    const currentCount = this.originalFollows.size + this.pendingFollowChanges.toAdd.size - this.pendingFollowChanges.toRemove.size;
+    document.getElementById('following-count').textContent = `(${currentCount})`;
+};
+
+/**
+ * Save following changes
+ */
+App.saveFollowingChanges = async function() {
+    if (this.pendingFollowChanges.toAdd.size === 0 && this.pendingFollowChanges.toRemove.size === 0) {
+        this.closeFollowingModal();
+        return;
+    }
+    
+    try {
+        // Show saving state
+        const saveBtn = document.getElementById('btn-save-following');
+        const originalText = saveBtn.textContent;
+        saveBtn.textContent = 'Saving...';
+        saveBtn.disabled = true;
+        
+        // Create new follows set
+        const newFollows = new Set(this.originalFollows);
+        
+        // Apply removals
+        this.pendingFollowChanges.toRemove.forEach(pubkey => {
+            newFollows.delete(pubkey);
+            this.nostr.client.follows.delete(pubkey);
+        });
+        
+        // Apply additions
+        this.pendingFollowChanges.toAdd.forEach(pubkey => {
+            newFollows.add(pubkey);
+            this.nostr.client.follows.add(pubkey);
+            this.nostr.client.relevantPubkeys.add(pubkey);
+        });
+        
+        // Create kind 3 event
+        const tags = Array.from(newFollows).map(pubkey => ['p', pubkey]);
+        
+        const event = await NostrEvents.createEvent(
+            3, // Kind 3 - Contact List
+            '', // Empty content
+            tags,
+            this.currentUser.privateKey
+        );
+        
+        // Publish the event
+        await this.nostr.client.relayManager.publish(event);
+        
+        // Clear pending changes
+        this.pendingFollowChanges.toAdd.clear();
+        this.pendingFollowChanges.toRemove.clear();
+        
+        // Close modal
+        this.closeFollowingModal();
+        
+        // Refresh discover view if active
+        if (this.currentListView === 'discover') {
+            // Clear cache to force refresh
+            this.discoverRelaysCache = null;
+            this.loadDiscoverRelays();
+        }
+        
+        alert('Following list updated successfully!');
+        
+    } catch (e) {
+        console.error('Error saving following changes:', e);
+        alert('Error saving changes. Please try again.');
+    } finally {
+        const saveBtn = document.getElementById('btn-save-following');
+        saveBtn.textContent = 'Save Changes';
+        saveBtn.disabled = false;
+    }
+};
+
+/**
+ * Setup following modal event listeners
+ */
+App.setupFollowingModalListeners = function() {
+    // Edit following button
+    const editFollowingBtn = document.getElementById('btn-edit-following');
+    if (editFollowingBtn) {
+        editFollowingBtn.addEventListener('click', () => {
+            this.showFollowingModal();
+        });
+    }
+    
+    // Modal controls
+    document.getElementById('close-following-modal').addEventListener('click', () => {
+        this.closeFollowingModal();
+    });
+    
+    document.getElementById('btn-cancel-following').addEventListener('click', () => {
+        this.closeFollowingModal();
+    });
+    
+    document.getElementById('btn-save-following').addEventListener('click', () => {
+        this.saveFollowingChanges();
+    });
+    
+    document.getElementById('btn-add-follow').addEventListener('click', () => {
+        this.addFollow();
+    });
+    
+    // Enter key in input
+    document.getElementById('add-follow-pubkey').addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') {
+            this.addFollow();
+        }
+    });
+    
+    // Click outside modal
+    window.addEventListener('click', (e) => {
+        if (e.target.id === 'following-modal') {
+            this.closeFollowingModal();
+        }
+    });
+};
     
     /**
      * Replace update profile method
