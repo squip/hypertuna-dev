@@ -274,14 +274,20 @@ class NostrGroupClient {
     _parseRelayListEvent(event) {
         this.userRelayIds.clear();
         if (!event) return;
+        
         event.tags.forEach(t => {
             if (t[0] === 'group' && t[1] && t[t.length - 1] === 'hypertuna') {
                 this.userRelayIds.add(t[1]);
             }
         });
-
-        if (!event.content) return;
-
+    
+        if (!event.content) {
+            this.relayListLoaded = true;  // ADD THIS LINE
+            console.log('Parsed relay list. Current user relay IDs:', Array.from(this.userRelayIds));
+            this.emit('relaylist:update', { ids: Array.from(this.userRelayIds) });
+            return;
+        }
+    
         let decoded = null;
         try {
             decoded = NostrUtils.decrypt(this.user.privateKey, this.user.pubkey, event.content);
@@ -290,7 +296,7 @@ class NostrGroupClient {
                 decoded = event.content;
             } catch {}
         }
-
+    
         if (decoded) {
             try {
                 const arr = JSON.parse(decoded);
@@ -301,7 +307,8 @@ class NostrGroupClient {
                 });
             } catch {}
         }
-        this.relayListLoaded = true;
+        
+        this.relayListLoaded = true;  // ADD THIS LINE
         console.log('Parsed relay list. Current user relay IDs:', Array.from(this.userRelayIds));
         this.emit('relaylist:update', { ids: Array.from(this.userRelayIds) });
     }

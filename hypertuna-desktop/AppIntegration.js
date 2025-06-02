@@ -798,7 +798,7 @@ App.syncHypertunaConfigToFile = async function() {
     App.showGroupListSpinner = function() {
         const groupsList = document.getElementById('groups-list');
         if (groupsList) {
-            groupsList.innerHTML = '<div class="loading"><span class="loading-spinner"></span>Loading relays...</div>';
+            groupsList.innerHTML = '<div class="loading">Loading relays...</div>';
         }
     };
 
@@ -808,19 +808,42 @@ App.syncHypertunaConfigToFile = async function() {
      */
     App.loadGroups = async function() {
         if (!this.currentUser) return;
-
+    
         const groupsList = document.getElementById('groups-list');
-        this.showGroupListSpinner();
-
+        
+        // Only show spinner if we're not already showing one
+        if (!groupsList.querySelector('.loading')) {
+            this.showGroupListSpinner();
+        }
+    
         try {
-            if (!this.nostr.areRelayIdsReady()) {
-                groupsList.innerHTML = '<div class="status-message">Loading relay data...</div>';
-                return;
+            // Wait for relay list to be ready
+            let retries = 0;
+            while (!this.nostr.areRelayIdsReady() && retries < 10) {
+                await new Promise(resolve => setTimeout(resolve, 500));
+                retries++;
             }
-            // Get groups from the nostr client - filtered for Hypertuna groups
+    
+            // Get groups from the nostr client
             const allGroups = this.nostr.getGroups();
             const allowedIds = this.nostr.getUserRelayGroupIds();
             const groups = allGroups.filter(g => allowedIds.includes(g.hypertunaId));
+            
+            // Add a small delay to prevent flash of "no relays" message
+            // This gives time for any pending events to be processed
+            if (groups.length === 0 && retries < 5) {
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                
+                // Re-check after delay
+                const updatedGroups = this.nostr.getGroups();
+                const updatedAllowedIds = this.nostr.getUserRelayGroupIds();
+                const finalGroups = updatedGroups.filter(g => updatedAllowedIds.includes(g.hypertunaId));
+                
+                if (finalGroups.length > 0) {
+                    groups.length = 0;
+                    groups.push(...finalGroups);
+                }
+            }
             
             if (groups.length === 0) {
                 groupsList.innerHTML = `
@@ -837,6 +860,7 @@ App.syncHypertunaConfigToFile = async function() {
                 return;
             }
             
+            // Clear and populate groups
             groupsList.innerHTML = '';
             
             groups.forEach(group => {
