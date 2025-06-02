@@ -48,6 +48,21 @@ class NostrGroupClient {
             });
         }
     }
+
+    /**
+     * Helper to publish multiple events sequentially with a delay
+     * @param {Array} events - Array of events to publish
+     * @param {number} delayMs - Delay in milliseconds between publishes
+     * @private
+     */
+    async _publishSequentially(events, delayMs = 500) {
+        for (let i = 0; i < events.length; i++) {
+            await this.relayManager.publish(events[i]);
+            if (i < events.length - 1) {
+                await new Promise(resolve => setTimeout(resolve, delayMs));
+            }
+        }
+    }
     
     /**
      * Initialize the client
@@ -1266,11 +1281,11 @@ class NostrGroupClient {
             roles: ['member']
         });
         
-        // Publish all three events
-        await Promise.all([
-            this.relayManager.publish(groupCreateEvent),
-            this.relayManager.publish(metadataEvent),
-            this.relayManager.publish(hypertunaEvent)
+        // Publish all three events sequentially with a delay to avoid relay rate limits
+        await this._publishSequentially([
+            groupCreateEvent,
+            metadataEvent,
+            hypertunaEvent
         ]);
         
         console.log('All three group creation events published');
@@ -1301,10 +1316,10 @@ class NostrGroupClient {
                 this.user.privateKey
             );
             
-            // Publish both events
-            await Promise.all([
-                this.relayManager.publish(adminEvent),
-                this.relayManager.publish(memberEvent)
+            // Publish both events sequentially with a delay
+            await this._publishSequentially([
+                adminEvent,
+                memberEvent
             ]);
             
             console.log('Admin and member list events published');
@@ -1558,10 +1573,10 @@ class NostrGroupClient {
         
         const { editEvent, updatedMetadataEvent } = events;
         
-        // Publish both events
-        await Promise.all([
-            this.relayManager.publish(editEvent),
-            this.relayManager.publish(updatedMetadataEvent)
+        // Publish both events sequentially with a delay
+        await this._publishSequentially([
+            editEvent,
+            updatedMetadataEvent
         ]);
         
         console.log('Published group metadata update events');
