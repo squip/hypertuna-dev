@@ -1709,9 +1709,7 @@ App.syncHypertunaConfigToFile = async function() {
                 
                 // Auto-connect to default relays for returning users
                 const defaultRelays = [
-                    'wss://relay.damus.io',
-                    'wss://relay.nostr.band',
-                    'wss://nos.lol'
+                    'wss://relay.snort.social'
                 ];
                 
                 // Connect to relays

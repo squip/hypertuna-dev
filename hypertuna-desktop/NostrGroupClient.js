@@ -48,21 +48,6 @@ class NostrGroupClient {
             });
         }
     }
-
-    /**
-     * Helper to publish multiple events sequentially with a delay
-     * @param {Array} events - Array of events to publish
-     * @param {number} delayMs - Delay in milliseconds between publishes
-     * @private
-     */
-    async _publishSequentially(events, delayMs = 500) {
-        for (let i = 0; i < events.length; i++) {
-            await this.relayManager.publish(events[i]);
-            if (i < events.length - 1) {
-                await new Promise(resolve => setTimeout(resolve, delayMs));
-            }
-        }
-    }
     
     /**
      * Initialize the client
@@ -291,7 +276,7 @@ class NostrGroupClient {
         if (!event) return;
         
         event.tags.forEach(t => {
-            if (t[0] === 'group' && t[1] && t[t.length - 1] === 'hypertuna') {
+            if (t[0] === 'group' && t[1] && t[t.length - 1] === 'hypertuna:relay') {
                 this.userRelayIds.add(t[1]);
             }
         });
@@ -316,7 +301,7 @@ class NostrGroupClient {
             try {
                 const arr = JSON.parse(decoded);
                 arr.forEach(t => {
-                    if (Array.isArray(t) && t[0] === 'group' && t[1] && t[t.length - 1] === 'hypertuna') {
+                    if (Array.isArray(t) && t[0] === 'group' && t[1] && t[t.length - 1] === 'hypertuna:relay') {
                         this.userRelayIds.add(t[1]);
                     }
                 });
@@ -357,8 +342,8 @@ class NostrGroupClient {
         const groupId = this.hypertunaGroups.get(relayId);
         const groupName = (this.groups.get(groupId)?.name) || '';
 
-        const groupTag = ['group', relayId, `${gatewayUrl}/${relayId}`, groupName, 'hypertuna'];
-        const rTag = ['r', `${gatewayUrl}/${relayId}`, 'hypertuna'];
+        const groupTag = ['group', relayId, `${gatewayUrl}/${relayId}`, groupName, 'hypertuna:relay'];
+        const rTag = ['r', `${gatewayUrl}/${relayId}`, 'hypertuna:relay'];
 
         const remove = (arr, tag) => {
             const idx = arr.findIndex(t => JSON.stringify(t) === JSON.stringify(tag));
@@ -1281,11 +1266,11 @@ class NostrGroupClient {
             roles: ['member']
         });
         
-        // Publish all three events sequentially with a delay to avoid relay rate limits
-        await this._publishSequentially([
-            groupCreateEvent,
-            metadataEvent,
-            hypertunaEvent
+        // Publish all three events
+        await Promise.all([
+            this.relayManager.publish(groupCreateEvent),
+            this.relayManager.publish(metadataEvent),
+            this.relayManager.publish(hypertunaEvent)
         ]);
         
         console.log('All three group creation events published');
@@ -1316,10 +1301,10 @@ class NostrGroupClient {
                 this.user.privateKey
             );
             
-            // Publish both events sequentially with a delay
-            await this._publishSequentially([
-                adminEvent,
-                memberEvent
+            // Publish both events
+            await Promise.all([
+                this.relayManager.publish(adminEvent),
+                this.relayManager.publish(memberEvent)
             ]);
             
             console.log('Admin and member list events published');
@@ -1573,10 +1558,10 @@ class NostrGroupClient {
         
         const { editEvent, updatedMetadataEvent } = events;
         
-        // Publish both events sequentially with a delay
-        await this._publishSequentially([
-            editEvent,
-            updatedMetadataEvent
+        // Publish both events
+        await Promise.all([
+            this.relayManager.publish(editEvent),
+            this.relayManager.publish(updatedMetadataEvent)
         ]);
         
         console.log('Published group metadata update events');

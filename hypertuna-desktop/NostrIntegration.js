@@ -15,8 +15,7 @@ class NostrIntegration {
         this.client = new NostrGroupClient();
         this.relayUrls = [
             // Default relays - can be configured by the user
-            'wss://relay.damus.io',
-            'wss://nos.lol'
+            'wss://relay.snort.social'
         ];
         
         // Track last update to prevent excessive updates
