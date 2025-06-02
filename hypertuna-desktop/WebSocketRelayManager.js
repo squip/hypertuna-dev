@@ -11,8 +11,11 @@ class WebSocketRelayManager {
         this.connectCallbacks = []; // Callbacks for relay connections
         this.disconnectCallbacks = []; // Callbacks for relay disconnections
         
-        // Rate limiting between messages for each relay
-        this.minTimeBetweenRequests = 250; // ms between messages per relay
+        // Add rate limiting
+        this.requestQueue = [];
+        this.processingQueue = false;
+        this.lastRequestTime = 0;
+        this.minTimeBetweenRequests = 50; // 50ms between requests to avoid "too fast" errors
     }
 
     /**
@@ -38,10 +41,7 @@ class WebSocketRelayManager {
                     conn: ws,
                     status: 'connecting',
                     subscriptions: new Map(),
-                    pendingMessages: [],
-                    requestQueue: [],
-                    processingQueue: false,
-                    lastRequestTime: 0
+                    pendingMessages: []
                 };
                 
                 this.relays.set(url, relayData);
@@ -53,7 +53,7 @@ class WebSocketRelayManager {
                     // Send any pending messages with rate limiting
                     if (relayData.pendingMessages.length > 0) {
                         relayData.pendingMessages.forEach(msg => {
-                            this._queueRelayRequest(url, () => {
+                            this._queueRequest(() => {
                                 if (ws.readyState === WebSocket.OPEN) {
                                     ws.send(msg);
                                 }
@@ -116,43 +116,41 @@ class WebSocketRelayManager {
     }
 
     /**
-     * Process the queue for a specific relay with rate limiting
-     * @param {string} relayUrl - Relay identifier
+     * Process the request queue with rate limiting
      * @private
      */
-    _processRelayQueue(relayUrl) {
-        const relay = this.relays.get(relayUrl);
-        if (!relay) return;
-
-        if (relay.requestQueue.length === 0) {
-            relay.processingQueue = false;
+    _processQueue() {
+        if (this.requestQueue.length === 0) {
+            this.processingQueue = false;
             return;
         }
 
-        relay.processingQueue = true;
+        this.processingQueue = true;
         const now = Date.now();
-        const timeSinceLast = now - relay.lastRequestTime;
-
-        if (timeSinceLast < this.minTimeBetweenRequests) {
-            setTimeout(() => this._processRelayQueue(relayUrl),
-                this.minTimeBetweenRequests - timeSinceLast);
+        const timeSinceLastRequest = now - this.lastRequestTime;
+        
+        // If we need to wait, schedule the next request
+        if (timeSinceLastRequest < this.minTimeBetweenRequests) {
+            setTimeout(() => this._processQueue(), 
+                this.minTimeBetweenRequests - timeSinceLastRequest);
             return;
         }
 
-        const request = relay.requestQueue.shift();
-        relay.lastRequestTime = Date.now();
-
+        // Process the next request
+        const request = this.requestQueue.shift();
+        this.lastRequestTime = Date.now();
+        
         try {
             request();
         } catch (e) {
-            console.error(`Error processing request for ${relayUrl}:`, e);
+            console.error('Error processing request:', e);
         }
 
-        if (relay.requestQueue.length > 0) {
-            setTimeout(() => this._processRelayQueue(relayUrl),
-                this.minTimeBetweenRequests);
+        // Continue processing queue if there are more items
+        if (this.requestQueue.length > 0) {
+            setTimeout(() => this._processQueue(), this.minTimeBetweenRequests);
         } else {
-            relay.processingQueue = false;
+            this.processingQueue = false;
         }
     }
 
@@ -191,14 +189,11 @@ _validateEvent(event) {
      * @param {Function} request - Function to execute
      * @private
      */
-    _queueRelayRequest(relayUrl, request) {
-        const relay = this.relays.get(relayUrl);
-        if (!relay) return;
-
-        relay.requestQueue.push(request);
-
-        if (!relay.processingQueue) {
-            this._processRelayQueue(relayUrl);
+    _queueRequest(request) {
+        this.requestQueue.push(request);
+        
+        if (!this.processingQueue) {
+            this._processQueue();
         }
     }
 
@@ -326,8 +321,8 @@ _validateEvent(event) {
         const reqMsg = JSON.stringify(['REQ', shortSubId, ...filters]);
         console.log(`REQ message to ${relayUrl}:`, reqMsg);
         
-        // Queue the subscription request for this relay
-        this._queueRelayRequest(relayUrl, () => {
+        // Queue the subscription request
+        this._queueRequest(() => {
             if (relay.status === 'open') {
                 relay.conn.send(reqMsg);
                 console.log(`Subscription ${shortSubId} sent to ${relayUrl}`);
@@ -361,7 +356,7 @@ _validateEvent(event) {
             if (relay.status === 'open' && relay.subscriptions.has(subscriptionId)) {
                 const closeMsg = JSON.stringify(['CLOSE', shortSubId]);
                 
-                this._queueRelayRequest(url, () => {
+                this._queueRequest(() => {
                     if (relay.status === 'open') {
                         relay.conn.send(closeMsg);
                     }
@@ -452,8 +447,8 @@ _validateEvent(event) {
                         // Listen for the OK response
                         relay.conn.addEventListener('message', okHandler);
                         
-                        // Queue the publish request for this relay
-                        this._queueRelayRequest(url, () => {
+                        // Queue the publish request
+                        this._queueRequest(() => {
                             try {
                                 if (relay.conn.readyState === WebSocket.OPEN) {
                                     relay.conn.send(eventMsg);
