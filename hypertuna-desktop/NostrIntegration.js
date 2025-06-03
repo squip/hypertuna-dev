@@ -181,6 +181,14 @@ class NostrIntegration {
         
         this._updateRelayStatus();
     }
+
+    /**
+     * Get only joined groups (not discovered)
+     * @returns {Array} - Array of groups user has joined
+     */
+    getJoinedGroups() {
+        return this.client.getJoinedGroups();
+    }
     
     /**
      * Connect to relays
