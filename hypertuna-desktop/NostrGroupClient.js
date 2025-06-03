@@ -955,7 +955,8 @@ async fetchMultipleProfiles(pubkeys) {
         console.log(`Group ${groupData.id} added to groups map. Total groups: ${this.groups.size}`);
         
         // Track if this group came from discovery (not from current user)
-        if (this.discoveredGroups && event.pubkey !== this.user.pubkey) {
+        if (event.pubkey !== this.user.pubkey && 
+            !this.isGroupMember(groupData.id, this.user.pubkey)) {
             this.discoveredGroups.add(groupData.id);
         }
         
@@ -1043,9 +1044,9 @@ async fetchMultipleProfiles(pubkeys) {
             
             // Track if current user is a member
             if (member.pubkey === this.user.pubkey) {
-                this.joinedGroups.add(groupId);
-                // Remove from discovered if now joined
+                // Remove from discovered groups since user is now a member
                 this.discoveredGroups.delete(groupId);
+                this.joinedGroups.add(groupId);
             }
         });
         
@@ -1147,18 +1148,22 @@ async fetchMultipleProfiles(pubkeys) {
     }
 
     /**
-     * Get only groups the user has joined
+     * Get only groups the user has joined or created
      * @returns {Array} - Array of joined groups
      */
-        getJoinedGroups() {
-            const allGroups = Array.from(this.groups.values());
-            
-            // Filter for groups where:
-            // 1. User is the creator (event.pubkey === user.pubkey)
-            // 2. User is in the members list
-            // 3. Group is in the user's relay list
-            const joinedGroups = allGroups.filter(group => {
-                // Check if user created this group
+    getJoinedGroups() {
+        const allGroups = Array.from(this.groups.values());
+        
+        // Filter for groups where:
+        // 1. User is the creator (event.pubkey === user.pubkey)
+        // 2. User is in the members list
+        // 3. Group is in the user's relay list
+        // BUT exclude any that are in discoveredGroups (not joined)
+        const joinedGroups = allGroups.filter(group => {
+            // First check if this is a discovered group that hasn't been joined
+            if (this.discoveredGroups && this.discoveredGroups.has(group.id)) {
+                // If it's in discovered groups, only include it if user has actually joined
+                // Check if user is the creator
                 if (group.event && group.event.pubkey === this.user.pubkey) {
                     return true;
                 }
@@ -1168,24 +1173,39 @@ async fetchMultipleProfiles(pubkeys) {
                     return true;
                 }
                 
-                // Check if in user's relay list (only if userRelayIds is initialized)
+                // Check if in user's relay list
                 if (this.userRelayIds && this.userRelayIds.has(group.hypertunaId)) {
                     return true;
                 }
                 
-                // Exclude discovered groups (only if discoveredGroups is initialized)
-                if (this.discoveredGroups && this.discoveredGroups.has(group.id)) {
-                    return false;
-                }
-                
+                // Otherwise, it's just discovered, not joined
                 return false;
-            });
+            }
             
-            // Sort by creation date (newest first)
-            joinedGroups.sort((a, b) => b.createdAt - a.createdAt);
+            // For non-discovered groups, use the original logic
+            // Check if user created this group
+            if (group.event && group.event.pubkey === this.user.pubkey) {
+                return true;
+            }
             
-            return joinedGroups;
-        }
+            // Check if user is a member
+            if (this.isGroupMember(group.id, this.user.pubkey)) {
+                return true;
+            }
+            
+            // Check if in user's relay list (only if userRelayIds is initialized)
+            if (this.userRelayIds && this.userRelayIds.has(group.hypertunaId)) {
+                return true;
+            }
+            
+            return false;
+        });
+        
+        // Sort by creation date (newest first)
+        joinedGroups.sort((a, b) => b.createdAt - a.createdAt);
+        
+        return joinedGroups;
+    }
     
     /**
      * Subscribe to all events for a specific group
@@ -1599,7 +1619,11 @@ async fetchMultipleProfiles(pubkeys) {
         
         // Add this group to subscriptions
         this.subscribeToGroup(groupId);
-
+        
+        // Remove from discovered groups since user is joining
+        this.discoveredGroups.delete(groupId);
+        this.joinedGroups.add(groupId);
+    
         const hypertunaId = this.groupHypertunaIds.get(groupId);
         const relayUrl = this.hypertunaRelayUrls.get(groupId) || '';
         const group = this.groups.get(groupId);
@@ -1607,7 +1631,7 @@ async fetchMultipleProfiles(pubkeys) {
         if (hypertunaId && relayUrl) {
             await this.updateUserRelayList(hypertunaId, relayUrl, isPublic, true);
         }
-
+    
         return event;
     }
     

@@ -811,6 +811,9 @@ App.syncHypertunaConfigToFile = async function() {
     
         const groupsList = document.getElementById('groups-list');
         
+        // IMPORTANT: Clear the container first to ensure no stale data
+        groupsList.innerHTML = '';
+        
         // Only show spinner if we're not already showing one
         if (!groupsList.querySelector('.loading')) {
             this.showGroupListSpinner();
@@ -840,6 +843,9 @@ App.syncHypertunaConfigToFile = async function() {
                 }
             }
             
+            // IMPORTANT: Clear again before populating to ensure clean state
+            groupsList.innerHTML = '';
+            
             if (groups.length === 0) {
                 groupsList.innerHTML = `
                     <div class="empty-state">
@@ -855,9 +861,7 @@ App.syncHypertunaConfigToFile = async function() {
                 return;
             }
             
-            // Clear and populate groups
-            groupsList.innerHTML = '';
-            
+            // Populate groups
             groups.forEach(group => {
                 // Skip deleted groups
                 if (group.event && group.event.markedAsDeleted) return;
