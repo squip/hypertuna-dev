@@ -827,7 +827,21 @@ App.syncHypertunaConfigToFile = async function() {
             // Get groups from the nostr client
             const allGroups = this.nostr.getGroups();
             const allowedIds = this.nostr.getUserRelayGroupIds();
-            const groups = allGroups.filter(g => allowedIds.includes(g.hypertunaId));
+            
+            // Extra safety: filter out any groups that don't have the user as a member
+            const groups = allGroups.filter(g => {
+                // Must be in the user's relay list
+                if (!allowedIds.includes(g.hypertunaId)) {
+                    return false;
+                }
+                
+                // Additional check: verify user is actually a member
+                const isMember = this.nostr.isGroupMember(g.id, this.currentUser.pubkey);
+                const isAdmin = this.nostr.isGroupAdmin(g.id, this.currentUser.pubkey);
+                const isCreator = g.event && g.event.pubkey === this.currentUser.pubkey;
+                
+                return isMember || isAdmin || isCreator;
+            });
             
             // Add a small delay to prevent flash of "no relays" message
             // This gives time for any pending events to be processed

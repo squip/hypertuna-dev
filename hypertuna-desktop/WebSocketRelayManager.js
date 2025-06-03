@@ -256,10 +256,10 @@ _validateEvent(event) {
      * @param {Array} filters - Array of filter objects
      * @param {Function} callback - Function to call when events arrive
      */
-    subscribe(subscriptionId, filters, callback) {
+    subscribe(subscriptionId, filters, callback, options = {}) {
         // Create a shorter subscription ID for the wire protocol
         const shortSubId = this._shortenSubscriptionId(subscriptionId);
-
+    
         // Check for existing subscription with same filters
         if (this.globalSubscriptions.has(subscriptionId)) {
             const existing = this.globalSubscriptions.get(subscriptionId);
@@ -268,19 +268,21 @@ _validateEvent(event) {
                 if (callback) existing.callbacks.push(callback);
                 return subscriptionId;
             }
-
+    
             // Filters changed - unsubscribe first
             this.unsubscribe(subscriptionId);
         }
-
+    
         console.log(`Creating subscription: ${subscriptionId} (${shortSubId})`);
         console.log(`Subscription filters:`, JSON.stringify(filters));
-
+        console.log(`Subscription options:`, options);
+    
         // Add to global subscriptions with the original ID as key
         this.globalSubscriptions.set(subscriptionId, {
             shortId: shortSubId,
             filters,
-            callbacks: callback ? [callback] : []
+            callbacks: callback ? [callback] : [],
+            suppressGlobalEvents: options.suppressGlobalEvents || false // Add this
         });
     
         // Apply to all connected relays
@@ -293,6 +295,7 @@ _validateEvent(event) {
     
         return subscriptionId;
     }
+    
     
     /**
      * Internal method to subscribe on a specific relay
@@ -570,11 +573,11 @@ async testPublish() {
         if (!Array.isArray(message)) {
             return;
         }
-
+    
         const messageType = message[0];
-
+    
         console.log(`Relay message from ${relayUrl}: ${messageType}`, message);
-
+    
         if (messageType === 'EVENT') {
             // ["EVENT", <subscription_id>, <event>]
             if (message.length < 3) return;
@@ -596,6 +599,7 @@ async testPublish() {
             // Notify global subscription callbacks
             const subscription = this.globalSubscriptions.get(originalSubId);
             if (subscription) {
+                // Always call subscription-specific callbacks
                 subscription.callbacks.forEach(callback => {
                     try {
                         callback(event, relayUrl, originalSubId);
@@ -603,16 +607,20 @@ async testPublish() {
                         console.error('Error in subscription callback:', e);
                     }
                 });
-            }
-            
-            // Notify global event listeners
-            this.eventCallbacks.forEach(callback => {
-                try {
-                    callback(event, relayUrl, originalSubId);
-                } catch (e) {
-                    console.error('Error in event callback:', e);
+                
+                // Only notify global event listeners if not suppressed
+                if (!subscription.suppressGlobalEvents) {
+                    this.eventCallbacks.forEach(callback => {
+                        try {
+                            callback(event, relayUrl, originalSubId);
+                        } catch (e) {
+                            console.error('Error in event callback:', e);
+                        }
+                    });
+                } else {
+                    console.log(`Global events suppressed for subscription ${originalSubId}`);
                 }
-            });
+            }
         }
         else if (messageType === 'EOSE') {
             // ["EOSE", <subscription_id>]

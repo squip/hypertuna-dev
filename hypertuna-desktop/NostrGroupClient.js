@@ -243,131 +243,131 @@ class NostrGroupClient {
  * Discover relays from follows
  * @returns {Promise<Map>} - Map of groupId -> {group, followers}
  */
-async discoverRelaysFromFollows() {
-    console.log('Starting relay discovery from follows...');
-    
-    // Get follows excluding current user
-    const followsPubkeys = Array.from(this.follows).filter(pubkey => pubkey !== this.user.pubkey);
-    
-    if (followsPubkeys.length === 0) {
-        console.log('No follows found to discover relays from');
-        return new Map();
-    }
-    
-    // Step 1: Fetch kind 10009 events from follows
-    const relayListSubId = `discover-relay-lists-${Date.now()}`;
-    const hypertunaGroupsMap = new Map(); // Map of groupId -> Set of pubkeys
-    
-    await new Promise((resolve) => {
-        let receivedCount = 0;
-        const expectedCount = followsPubkeys.length;
+    async discoverRelaysFromFollows() {
+        console.log('Starting relay discovery from follows...');
         
-        const timeoutId = setTimeout(() => {
-            this.relayManager.unsubscribe(relayListSubId);
-            resolve();
-        }, 5000);
+        // Get follows excluding current user
+        const followsPubkeys = Array.from(this.follows).filter(pubkey => pubkey !== this.user.pubkey);
         
-        this.relayManager.subscribe(relayListSubId, [
-            { 
-                kinds: [NostrEvents.KIND_USER_RELAY_LIST], 
-                authors: followsPubkeys,
-                limit: followsPubkeys.length
-            }
-        ], (event) => {
-            receivedCount++;
+        if (followsPubkeys.length === 0) {
+            console.log('No follows found to discover relays from');
+            return new Map();
+        }
+        
+        // Step 1: Fetch kind 10009 events from follows
+        const relayListSubId = `discover-relay-lists-${Date.now()}`;
+        const hypertunaGroupsMap = new Map(); // Map of groupId -> Set of pubkeys
+        
+        await new Promise((resolve) => {
+            let receivedCount = 0;
+            const expectedCount = followsPubkeys.length;
             
-            // Process the relay list event
-            event.tags.forEach(tag => {
-                if (tag[0] === 'group' && tag[tag.length - 1] === 'hypertuna:relay') {
-                    const groupId = tag[1];
-                    if (!hypertunaGroupsMap.has(groupId)) {
-                        hypertunaGroupsMap.set(groupId, new Set());
-                    }
-                    hypertunaGroupsMap.get(groupId).add(event.pubkey);
-                }
-            });
-            
-            if (receivedCount >= expectedCount) {
-                clearTimeout(timeoutId);
+            const timeoutId = setTimeout(() => {
                 this.relayManager.unsubscribe(relayListSubId);
                 resolve();
-            }
-        });
-    });
-    
-    console.log(`Found ${hypertunaGroupsMap.size} unique Hypertuna groups from follows`);
-    
-    if (hypertunaGroupsMap.size === 0) {
-        return new Map();
-    }
-    
-    // Step 2: Fetch profiles for follows
-    const profilesMap = await this.fetchMultipleProfiles(followsPubkeys);
-    
-    // Step 3: Fetch group metadata for discovered groups
-    const groupIds = Array.from(hypertunaGroupsMap.keys());
-    const discoveredRelays = new Map();
-    
-    const metadataSubId = `discover-metadata-${Date.now()}`;
-    
-    await new Promise((resolve) => {
-        let groupsProcessed = 0;
-        
-        const timeoutId = setTimeout(() => {
-            this.relayManager.unsubscribe(metadataSubId);
-            resolve();
-        }, 5000);
-        
-        this.relayManager.subscribe(metadataSubId, [
-            { 
-                kinds: [NostrEvents.KIND_GROUP_METADATA],
-                "#d": groupIds,
-                limit: groupIds.length
-            },
-            {
-                kinds: [NostrEvents.KIND_HYPERTUNA_RELAY],
-                "#h": groupIds,
-                limit: groupIds.length
-            }
-        ], (event) => {
-            if (event.kind === NostrEvents.KIND_GROUP_METADATA) {
-                const groupData = NostrEvents.parseGroupMetadata(event);
-                if (groupData && hypertunaGroupsMap.has(groupData.id)) {
-                    const followerPubkeys = Array.from(hypertunaGroupsMap.get(groupData.id));
-                    const followers = followerPubkeys.map(pubkey => ({
-                        pubkey,
-                        profile: profilesMap.get(pubkey) || { name: `User_${NostrUtils.truncatePubkey(pubkey)}` }
-                    }));
-                    
-                    discoveredRelays.set(groupData.id, {
-                        group: groupData,
-                        followers: followers,
-                        followerCount: followers.length
-                    });
-                    
-                    groupsProcessed++;
-                }
-            } else if (event.kind === NostrEvents.KIND_HYPERTUNA_RELAY) {
-                // Process Hypertuna relay event if needed
-                const groupId = NostrEvents._getTagValue(event, 'h');
-                if (groupId && discoveredRelays.has(groupId)) {
-                    const relayUrl = NostrEvents._getTagValue(event, 'd');
-                    if (relayUrl) {
-                        discoveredRelays.get(groupId).relayUrl = relayUrl;
-                    }
-                }
-            }
+            }, 5000);
             
-            if (groupsProcessed >= groupIds.length) {
-                clearTimeout(timeoutId);
+            this.relayManager.subscribe(relayListSubId, [
+                { 
+                    kinds: [NostrEvents.KIND_USER_RELAY_LIST], 
+                    authors: followsPubkeys,
+                    limit: followsPubkeys.length
+                }
+            ], (event) => {
+                receivedCount++;
+                
+                // Process the relay list event
+                event.tags.forEach(tag => {
+                    if (tag[0] === 'group' && tag[tag.length - 1] === 'hypertuna:relay') {
+                        const groupId = tag[1];
+                        if (!hypertunaGroupsMap.has(groupId)) {
+                            hypertunaGroupsMap.set(groupId, new Set());
+                        }
+                        hypertunaGroupsMap.get(groupId).add(event.pubkey);
+                    }
+                });
+                
+                if (receivedCount >= expectedCount) {
+                    clearTimeout(timeoutId);
+                    this.relayManager.unsubscribe(relayListSubId);
+                    resolve();
+                }
+            }, { suppressGlobalEvents: true }); // Add this option
+        });
+        
+        console.log(`Found ${hypertunaGroupsMap.size} unique Hypertuna groups from follows`);
+        
+        if (hypertunaGroupsMap.size === 0) {
+            return new Map();
+        }
+        
+        // Step 2: Fetch profiles for follows
+        const profilesMap = await this.fetchMultipleProfiles(followsPubkeys);
+        
+        // Step 3: Fetch group metadata for discovered groups
+        const groupIds = Array.from(hypertunaGroupsMap.keys());
+        const discoveredRelays = new Map();
+        
+        const metadataSubId = `discover-metadata-${Date.now()}`;
+        
+        await new Promise((resolve) => {
+            let groupsProcessed = 0;
+            
+            const timeoutId = setTimeout(() => {
                 this.relayManager.unsubscribe(metadataSubId);
                 resolve();
-            }
+            }, 5000);
+            
+            this.relayManager.subscribe(metadataSubId, [
+                { 
+                    kinds: [NostrEvents.KIND_GROUP_METADATA],
+                    "#d": groupIds,
+                    limit: groupIds.length
+                },
+                {
+                    kinds: [NostrEvents.KIND_HYPERTUNA_RELAY],
+                    "#h": groupIds,
+                    limit: groupIds.length
+                }
+            ], (event) => {
+                if (event.kind === NostrEvents.KIND_GROUP_METADATA) {
+                    const groupData = NostrEvents.parseGroupMetadata(event);
+                    if (groupData && hypertunaGroupsMap.has(groupData.id)) {
+                        const followerPubkeys = Array.from(hypertunaGroupsMap.get(groupData.id));
+                        const followers = followerPubkeys.map(pubkey => ({
+                            pubkey,
+                            profile: profilesMap.get(pubkey) || { name: `User_${NostrUtils.truncatePubkey(pubkey)}` }
+                        }));
+                        
+                        discoveredRelays.set(groupData.id, {
+                            group: groupData,
+                            followers: followers,
+                            followerCount: followers.length
+                        });
+                        
+                        groupsProcessed++;
+                    }
+                } else if (event.kind === NostrEvents.KIND_HYPERTUNA_RELAY) {
+                    // Process Hypertuna relay event if needed
+                    const groupId = NostrEvents._getTagValue(event, 'h');
+                    if (groupId && discoveredRelays.has(groupId)) {
+                        const relayUrl = NostrEvents._getTagValue(event, 'd');
+                        if (relayUrl) {
+                            discoveredRelays.get(groupId).relayUrl = relayUrl;
+                        }
+                    }
+                }
+                
+                if (groupsProcessed >= groupIds.length) {
+                    clearTimeout(timeoutId);
+                    this.relayManager.unsubscribe(metadataSubId);
+                    resolve();
+                }
+            }, { suppressGlobalEvents: true }); // Add this option
         });
-    });
-    
-    return discoveredRelays;
-}
+        
+        return discoveredRelays;
+    }
 
 /**
  * Fetch multiple user profiles
@@ -419,7 +419,7 @@ async fetchMultipleProfiles(pubkeys) {
             } catch (e) {
                 console.error('Error parsing profile:', e);
             }
-        });
+        }, { suppressGlobalEvents: true }); // Add this option for profile fetching too
     });
     
     // Add default profiles for any still missing
