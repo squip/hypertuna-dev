@@ -803,6 +803,57 @@ App.syncHypertunaConfigToFile = async function() {
         }
     };
 
+    App.fetchGroupMetadata = async function(groupId) {
+        if (!this.nostr || !this.nostr.client) return null;
+        
+        // Check if already in cache
+        const existingGroup = this.nostr.getGroupById(groupId);
+        if (existingGroup) return existingGroup;
+        
+        console.log(`Fetching metadata for group ${groupId}`);
+        
+        return new Promise((resolve) => {
+            const subId = `group-metadata-${groupId}-${Date.now()}`;
+            let resolved = false;
+            
+            const timeoutId = setTimeout(() => {
+                this.nostr.client.relayManager.unsubscribe(subId);
+                if (!resolved) {
+                    resolved = true;
+                    resolve(null);
+                }
+            }, 3000);
+            
+            this.nostr.client.relayManager.subscribe(subId, [
+                {
+                    kinds: [NostrEvents.KIND_GROUP_METADATA],
+                    "#d": [groupId],
+                    limit: 1
+                }
+            ], (event) => {
+                if (!resolved && event.kind === NostrEvents.KIND_GROUP_METADATA) {
+                    const groupData = NostrEvents.parseGroupMetadata(event);
+                    if (groupData && groupData.id === groupId) {
+                        // Manually add to the groups Map for caching
+                        this.nostr.client.groups.set(groupId, groupData);
+                        
+                        // Also fetch the hypertuna mapping
+                        const hypertunaId = groupData.hypertunaId;
+                        if (hypertunaId) {
+                            this.nostr.client.hypertunaGroups.set(hypertunaId, groupId);
+                            this.nostr.client.groupHypertunaIds.set(groupId, hypertunaId);
+                        }
+                        
+                        clearTimeout(timeoutId);
+                        this.nostr.client.relayManager.unsubscribe(subId);
+                        resolved = true;
+                        resolve(groupData);
+                    }
+                }
+            });
+        });
+    };
+
     /**
      * Gets Hypertuna groups from the nostr client
      */
@@ -933,8 +984,15 @@ App.syncHypertunaConfigToFile = async function() {
             // Subscribe to this group's events
             this.nostr.client.subscribeToGroup(this.currentGroupId);
             
-            // Load group data
-            const group = this.nostr.getGroupById(this.currentGroupId);
+            // First try to get from cache
+            let group = this.nostr.getGroupById(this.currentGroupId);
+            
+            // If not in cache, fetch it
+            if (!group) {
+                console.log(`Group ${this.currentGroupId} not in cache, fetching...`);
+                group = await this.fetchGroupMetadata(this.currentGroupId);
+            }
+            
             if (!group || (group.event && group.event.markedAsDeleted)) {
                 alert('Group not found or has been deleted');
                 this.navigateTo('groups');
@@ -944,6 +1002,7 @@ App.syncHypertunaConfigToFile = async function() {
             this.currentGroup = group;
             this.currentHypertunaId = group.hypertunaId;
             
+            // Rest of the method remains the same...
             // Update group header with null checks
             const groupNameElement = document.getElementById('group-detail-name');
             if (groupNameElement) {
