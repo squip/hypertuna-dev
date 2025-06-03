@@ -811,9 +811,6 @@ App.syncHypertunaConfigToFile = async function() {
     
         const groupsList = document.getElementById('groups-list');
         
-        // IMPORTANT: Clear the container first to ensure no stale data
-        groupsList.innerHTML = '';
-        
         // Only show spinner if we're not already showing one
         if (!groupsList.querySelector('.loading')) {
             this.showGroupListSpinner();
@@ -827,24 +824,26 @@ App.syncHypertunaConfigToFile = async function() {
                 retries++;
             }
     
-            // Get only joined groups, not discovered ones
-            const groups = this.nostr.getJoinedGroups();
+            // Get groups from the nostr client
+            const allGroups = this.nostr.getGroups();
+            const allowedIds = this.nostr.getUserRelayGroupIds();
+            const groups = allGroups.filter(g => allowedIds.includes(g.hypertunaId));
             
             // Add a small delay to prevent flash of "no relays" message
+            // This gives time for any pending events to be processed
             if (groups.length === 0 && retries < 5) {
                 await new Promise(resolve => setTimeout(resolve, 1000));
                 
                 // Re-check after delay
-                const finalGroups = this.nostr.getJoinedGroups();
+                const updatedGroups = this.nostr.getGroups();
+                const updatedAllowedIds = this.nostr.getUserRelayGroupIds();
+                const finalGroups = updatedGroups.filter(g => updatedAllowedIds.includes(g.hypertunaId));
                 
                 if (finalGroups.length > 0) {
                     groups.length = 0;
                     groups.push(...finalGroups);
                 }
             }
-            
-            // IMPORTANT: Clear again before populating to ensure clean state
-            groupsList.innerHTML = '';
             
             if (groups.length === 0) {
                 groupsList.innerHTML = `
@@ -861,7 +860,9 @@ App.syncHypertunaConfigToFile = async function() {
                 return;
             }
             
-            // Populate groups
+            // Clear and populate groups
+            groupsList.innerHTML = '';
+            
             groups.forEach(group => {
                 // Skip deleted groups
                 if (group.event && group.event.markedAsDeleted) return;
@@ -870,7 +871,10 @@ App.syncHypertunaConfigToFile = async function() {
                 groupElement.href = '#';
                 groupElement.className = 'group-item';
                 
+                // Create avatar with first letter of group name
                 const firstLetter = group.name ? group.name.charAt(0).toUpperCase() : 'G';
+                
+                // Use hypertunaId as an additional identifier
                 const hypertunaId = group.hypertunaId || '';
                 
                 groupElement.innerHTML = `

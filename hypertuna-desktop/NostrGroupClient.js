@@ -31,11 +31,7 @@ class NostrGroupClient {
         this.userRelayIds = new Set(); // Set of hypertuna relay ids user belongs to
         this.relayListLoaded = false; // flag indicating relay list has been parsed
         this.debugMode = debugMode;
-        
-        // Add these new properties
-        this.discoveredGroups = new Set(); // Track groups discovered but not joined
-        this.joinedGroups = new Set(); // Track groups user has actually joined
-    
+
         // Setup default event handlers
         this._setupEventHandlers();
         
@@ -916,7 +912,7 @@ async fetchMultipleProfiles(pubkeys) {
      * @param {Object} event - Group metadata event (kind 39000)
      * @private
      */
-    _processGroupMetadataEvent(event) {
+     _processGroupMetadataEvent(event) {
         console.log(`Processing group metadata event with ID: ${event.id.substring(0, 8)}... and kind: ${event.kind}`);
         console.log(`Event content: ${event.content}`);
         console.log(`Event tags:`, JSON.stringify(event.tags));
@@ -953,12 +949,6 @@ async fetchMultipleProfiles(pubkeys) {
         // Update or add group
         this.groups.set(groupData.id, groupData);
         console.log(`Group ${groupData.id} added to groups map. Total groups: ${this.groups.size}`);
-        
-        // Track if this group came from discovery (not from current user)
-        if (event.pubkey !== this.user.pubkey && 
-            !this.isGroupMember(groupData.id, this.user.pubkey)) {
-            this.discoveredGroups.add(groupData.id);
-        }
         
         // Store hypertuna mapping if available
         if (hypertunaId) {
@@ -1041,13 +1031,6 @@ async fetchMultipleProfiles(pubkeys) {
         // Add all member pubkeys to relevant pubkeys
         members.forEach(member => {
             this.relevantPubkeys.add(member.pubkey);
-            
-            // Track if current user is a member
-            if (member.pubkey === this.user.pubkey) {
-                // Remove from discovered groups since user is now a member
-                this.discoveredGroups.delete(groupId);
-                this.joinedGroups.add(groupId);
-            }
         });
         
         // Emit events
@@ -1145,66 +1128,6 @@ async fetchMultipleProfiles(pubkeys) {
         } else if (event.kind === NostrEvents.KIND_GROUP_ADMIN_LIST) {
             this._processGroupAdminListEvent(event);
         }
-    }
-
-    /**
-     * Get only groups the user has joined or created
-     * @returns {Array} - Array of joined groups
-     */
-    getJoinedGroups() {
-        const allGroups = Array.from(this.groups.values());
-        
-        // Filter for groups where:
-        // 1. User is the creator (event.pubkey === user.pubkey)
-        // 2. User is in the members list
-        // 3. Group is in the user's relay list
-        // BUT exclude any that are in discoveredGroups (not joined)
-        const joinedGroups = allGroups.filter(group => {
-            // First check if this is a discovered group that hasn't been joined
-            if (this.discoveredGroups && this.discoveredGroups.has(group.id)) {
-                // If it's in discovered groups, only include it if user has actually joined
-                // Check if user is the creator
-                if (group.event && group.event.pubkey === this.user.pubkey) {
-                    return true;
-                }
-                
-                // Check if user is a member
-                if (this.isGroupMember(group.id, this.user.pubkey)) {
-                    return true;
-                }
-                
-                // Check if in user's relay list
-                if (this.userRelayIds && this.userRelayIds.has(group.hypertunaId)) {
-                    return true;
-                }
-                
-                // Otherwise, it's just discovered, not joined
-                return false;
-            }
-            
-            // For non-discovered groups, use the original logic
-            // Check if user created this group
-            if (group.event && group.event.pubkey === this.user.pubkey) {
-                return true;
-            }
-            
-            // Check if user is a member
-            if (this.isGroupMember(group.id, this.user.pubkey)) {
-                return true;
-            }
-            
-            // Check if in user's relay list (only if userRelayIds is initialized)
-            if (this.userRelayIds && this.userRelayIds.has(group.hypertunaId)) {
-                return true;
-            }
-            
-            return false;
-        });
-        
-        // Sort by creation date (newest first)
-        joinedGroups.sort((a, b) => b.createdAt - a.createdAt);
-        
-        return joinedGroups;
     }
     
     /**
@@ -1619,11 +1542,7 @@ async fetchMultipleProfiles(pubkeys) {
         
         // Add this group to subscriptions
         this.subscribeToGroup(groupId);
-        
-        // Remove from discovered groups since user is joining
-        this.discoveredGroups.delete(groupId);
-        this.joinedGroups.add(groupId);
-    
+
         const hypertunaId = this.groupHypertunaIds.get(groupId);
         const relayUrl = this.hypertunaRelayUrls.get(groupId) || '';
         const group = this.groups.get(groupId);
@@ -1631,7 +1550,7 @@ async fetchMultipleProfiles(pubkeys) {
         if (hypertunaId && relayUrl) {
             await this.updateUserRelayList(hypertunaId, relayUrl, isPublic, true);
         }
-    
+
         return event;
     }
     
@@ -1938,10 +1857,6 @@ async fetchMultipleProfiles(pubkeys) {
         this.hypertunaRelayUrls.clear();
         this.userRelayIds.clear();
         this.userRelayListEvent = null;
-        
-        // Clear the new properties
-        if (this.discoveredGroups) this.discoveredGroups.clear();
-        if (this.joinedGroups) this.joinedGroups.clear();
         
         // Clear event listeners
         this.eventListeners.clear();
