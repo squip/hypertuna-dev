@@ -475,24 +475,31 @@ function setupProtocolHandlers(protocol) {
       
       if (result.success) {
         console.log('[RelayServer] Relay created successfully:', result.relayKey);
-        await updateHealthState(); // Added await
+        await updateHealthState();
         
         // Send update to parent if connected
         if (global.sendMessage) {
-          const activeRelays = await getActiveRelays(); // Added await
+          const activeRelays = await getActiveRelays();
           global.sendMessage({
             type: 'relay-update',
             relays: activeRelays
           });
         }
         
-        // Queue registration if gateway not connected yet
+        // ALWAYS register with gateway via HTTP if enabled
         if (config.registerWithGateway) {
-          if (gatewayConnection) {
-            console.log('[RelayServer] Gateway connected, registering new relay');
+          console.log('[RelayServer] Registering new relay with gateway via HTTP');
+          try {
             await registerWithGateway(result.profile);
-          } else {
-            console.log('[RelayServer] Gateway not connected, queueing registration');
+            console.log('[RelayServer] Successfully registered new relay with gateway');
+          } catch (regError) {
+            console.error('[RelayServer] Failed to register new relay with gateway:', regError.message);
+            // Don't fail the relay creation, just log the error
+          }
+          
+          // Still queue for P2P registration if gateway connects later
+          if (!gatewayConnection) {
+            console.log('[RelayServer] Queueing for P2P registration when gateway connects');
             pendingRegistrations.push(result.profile);
           }
         }
@@ -550,24 +557,32 @@ function setupProtocolHandlers(protocol) {
       
       if (result.success) {
         console.log('[RelayServer] Joined relay successfully');
-        await updateHealthState(); // Added await
+        await updateHealthState();
         
         // Send update to parent
         if (global.sendMessage) {
-          const activeRelays = await getActiveRelays(); // Added await
+          const activeRelays = await getActiveRelays();
           global.sendMessage({
             type: 'relay-update',
             relays: activeRelays
           });
         }
         
-        // Queue registration if gateway not connected yet
+        // ALWAYS register with gateway via HTTP if enabled
         if (config.registerWithGateway) {
-          if (gatewayConnection) {
-            console.log('[RelayServer] Gateway connected, registering joined relay');
+          console.log('[RelayServer] Registering joined relay with gateway via HTTP');
+          try {
+            // For join, we register all relays since we don't have specific profile for joined relay
             await registerWithGateway();
-          } else {
-            console.log('[RelayServer] Gateway not connected, queueing registration');
+            console.log('[RelayServer] Successfully registered joined relay with gateway');
+          } catch (regError) {
+            console.error('[RelayServer] Failed to register joined relay with gateway:', regError.message);
+            // Don't fail the relay join, just log the error
+          }
+          
+          // Still queue for P2P registration if gateway connects later
+          if (!gatewayConnection) {
+            console.log('[RelayServer] Queueing for P2P registration when gateway connects');
             pendingRegistrations.push(null); // null means register all relays
           }
         }
@@ -950,12 +965,20 @@ export async function createRelay(options) {
   });
   
   if (result.success) {
-    await updateHealthState(); // Added await
+    await updateHealthState();
     
-    // Register with gateway if enabled
-    if (config.registerWithGateway && gatewayConnection) {
-      await registerWithGateway(result.profile);
+    // ALWAYS register with gateway via HTTP if enabled
+    let registrationStatus = 'disabled';
+    if (config.registerWithGateway) {
+      try {
+        await registerWithGateway(result.profile);
+        registrationStatus = 'success';
+      } catch (regError) {
+        registrationStatus = 'failed';
+        result.registrationError = regError.message;
+      }
     }
+    result.gatewayRegistration = registrationStatus;
   }
   
   return result;
@@ -969,12 +992,20 @@ export async function joinRelay(options) {
   });
   
   if (result.success) {
-    await updateHealthState(); // Added await
+    await updateHealthState();
     
-    // Register with gateway if enabled
-    if (config.registerWithGateway && gatewayConnection) {
-      await registerWithGateway();
+    // ALWAYS register with gateway via HTTP if enabled
+    let registrationStatus = 'disabled';
+    if (config.registerWithGateway) {
+      try {
+        await registerWithGateway(result.profile);
+        registrationStatus = 'success';
+      } catch (regError) {
+        registrationStatus = 'failed';
+        result.registrationError = regError.message;
+      }
     }
+    result.gatewayRegistration = registrationStatus;
   }
   
   return result;
