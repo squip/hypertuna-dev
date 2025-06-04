@@ -16,6 +16,125 @@ class WebSocketRelayManager {
         this.processingQueue = false;
         this.lastRequestTime = 0;
         this.minTimeBetweenRequests = 50; // 50ms between requests to avoid "too fast" errors
+        this.relayTypes = new Map(); // Map of relay URL -> type ('discovery' | 'group')
+        this.groupRelays = new Map(); // Map of groupId -> relay URL
+        this.discoveryRelays = new Set(); // Set of discovery relay URLs
+    }
+
+    /**
+     * Add a relay with a specific type
+     * @param {string} url - The relay URL
+     * @param {string} type - The relay type ('discovery' or 'group')
+     * @param {string} groupId - Optional group ID for group relays
+     */
+    async addTypedRelay(url, type = 'discovery', groupId = null) {
+        await this.addRelay(url);
+        this.relayTypes.set(url, type);
+        
+        if (type === 'discovery') {
+            this.discoveryRelays.add(url);
+        } else if (type === 'group' && groupId) {
+            this.groupRelays.set(groupId, url);
+        }
+        
+        console.log(`Added ${type} relay: ${url}${groupId ? ' for group ' + groupId : ''}`);
+    }
+
+    /**
+     * Subscribe with relay routing
+     * @param {string} subscriptionId - Subscription ID
+     * @param {Array} filters - Filters
+     * @param {Function} callback - Callback
+     * @param {Object} options - Options including targetRelays
+     */
+    subscribeWithRouting(subscriptionId, filters, callback, options = {}) {
+        const { targetRelays = null, suppressGlobalEvents = false } = options;
+        
+        // If specific target relays are specified, only subscribe to those
+        if (targetRelays && targetRelays.length > 0) {
+            const shortSubId = this._shortenSubscriptionId(subscriptionId);
+            
+            this.globalSubscriptions.set(subscriptionId, {
+                shortId: shortSubId,
+                filters,
+                callbacks: callback ? [callback] : [],
+                suppressGlobalEvents,
+                targetRelays // Store target relays
+            });
+            
+            // Only subscribe on specified relays
+            targetRelays.forEach(relayUrl => {
+                if (this.relays.has(relayUrl) && this.relays.get(relayUrl).status === 'open') {
+                    this._subscribeOnRelay(relayUrl, subscriptionId, filters);
+                }
+            });
+            
+            return subscriptionId;
+        }
+        
+        // Otherwise use normal subscription
+        return this.subscribe(subscriptionId, filters, callback, options);
+    }
+
+    /**
+     * Publish to specific relays only
+     * @param {Object} event - The event to publish
+     * @param {Array} targetRelays - Optional array of specific relay URLs
+     */
+    async publishToRelays(event, targetRelays = null) {
+        if (targetRelays && targetRelays.length > 0) {
+            // Only publish to specified relays
+            const publishPromises = targetRelays.map(url => {
+                if (this.relays.has(url) && this.relays.get(url).status === 'open') {
+                    return this._publishToSingleRelay(event, url);
+                }
+                return Promise.resolve({ url, success: false, error: 'Relay not connected' });
+            });
+            
+            return Promise.allSettled(publishPromises);
+        }
+        
+        // Otherwise use normal publish
+        return this.publish(event);
+    }
+
+    /**
+     * Helper to publish to a single relay
+     */
+    async _publishToSingleRelay(event, relayUrl) {
+        const relay = this.relays.get(relayUrl);
+        if (!relay || relay.status !== 'open') {
+            return { url: relayUrl, success: false, error: 'Relay not connected' };
+        }
+        
+        const eventMsg = JSON.stringify(['EVENT', event]);
+        
+        return new Promise((resolve) => {
+            const timeout = setTimeout(() => {
+                resolve({ url: relayUrl, success: false, error: 'Timeout' });
+            }, 10000);
+            
+            const okHandler = (msgEvent) => {
+                try {
+                    const data = JSON.parse(msgEvent.data);
+                    if (Array.isArray(data) && data[0] === 'OK' && data[1] === event.id) {
+                        clearTimeout(timeout);
+                        relay.conn.removeEventListener('message', okHandler);
+                        resolve({ url: relayUrl, success: data[2] === true });
+                    }
+                } catch (e) {
+                    // Ignore parse errors
+                }
+            };
+            
+            relay.conn.addEventListener('message', okHandler);
+            
+            this._queueRequest(() => {
+                if (relay.conn.readyState === WebSocket.OPEN) {
+                    relay.conn.send(eventMsg);
+                }
+            });
+        });
     }
 
     /**

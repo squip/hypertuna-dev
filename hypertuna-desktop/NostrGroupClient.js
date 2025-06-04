@@ -31,6 +31,11 @@ class NostrGroupClient {
         this.userRelayIds = new Set(); // Set of hypertuna relay ids user belongs to
         this.relayListLoaded = false; // flag indicating relay list has been parsed
         this.debugMode = debugMode;
+        this.groupRelayUrls = new Map(); // Map of groupId -> relay URL
+        this.isInitialized = false;
+        this.pendingRelayConnections = new Map(); // Track pending connections
+        this.relayConnectionAttempts = new Map(); // Track retry attempts
+        this.maxRetryAttempts = 3;
 
         // Setup default event handlers
         this._setupEventHandlers();
@@ -81,6 +86,289 @@ class NostrGroupClient {
         this._createSubscriptions();
         
         return this;
+    }
+
+    /**
+     * Initialize with discovery relays only
+     */
+    async initWithDiscoveryRelays(user, discoveryRelays) {
+        this.user = user;
+        this.relevantPubkeys.add(user.pubkey);
+        
+        // Connect only to discovery relays initially
+        for (const url of discoveryRelays) {
+            await this.relayManager.addTypedRelay(url, 'discovery');
+        }
+        
+        // Fetch user profile and follows
+        await this.fetchUserProfile(user.pubkey);
+        await this.fetchUserFollows();
+        await this.fetchUserRelayList();
+        
+        // Setup minimal subscriptions for discovery
+        this._createDiscoverySubscriptions();
+        
+        this.isInitialized = true;
+        return this;
+    }
+
+    /**
+     * Create discovery-only subscriptions
+     */
+    _createDiscoverySubscriptions() {
+        const discoveryRelays = Array.from(this.relayManager.discoveryRelays);
+        
+        // Subscribe to user's relay list updates
+        this.relayManager.subscribeWithRouting('user-relaylist-discovery', [
+            { kinds: [NostrEvents.KIND_USER_RELAY_LIST], authors: [this.user.pubkey], limit: 1 }
+        ], (event) => {
+            this.userRelayListEvent = event;
+            this._parseRelayListEvent(event);
+            this._connectToUserRelays(); // Auto-connect to user's relays
+        }, { targetRelays: discoveryRelays });
+        
+        // Subscribe to group metadata for discovery
+        this.relayManager.subscribeWithRouting('group-discovery', [
+            { kinds: [NostrEvents.KIND_GROUP_METADATA], "#i": ["hypertuna:relay"] },
+            { kinds: [NostrEvents.KIND_HYPERTUNA_RELAY], "#i": ["hypertuna:relay"] }
+        ], (event) => {
+            if (event.kind === NostrEvents.KIND_GROUP_METADATA) {
+                this._processGroupMetadataEvent(event);
+            } else if (event.kind === NostrEvents.KIND_HYPERTUNA_RELAY) {
+                this._processHypertunaRelayEvent(event);
+            }
+        }, { targetRelays: discoveryRelays });
+    }
+
+    /**
+     * Connect to user's relay groups from kind 10009
+     */
+    async _connectToUserRelays() {
+        if (!this.userRelayListEvent) return;
+        
+        const relayUrls = new Set();
+        const relayKeyMap = new Map(); // Map URL to relay key
+        
+        // Parse public relays from tags
+        this.userRelayListEvent.tags.forEach(tag => {
+            if (tag[0] === 'r' && tag[1] && tag[2] === 'hypertuna:relay') {
+                relayUrls.add(tag[1]);
+                // Extract relay key from URL
+                const urlParts = tag[1].split('/');
+                const relayKey = urlParts[urlParts.length - 1];
+                relayKeyMap.set(tag[1], relayKey);
+            }
+        });
+        
+        // Parse private relays from content
+        if (this.userRelayListEvent.content) {
+            try {
+                const decrypted = NostrUtils.decrypt(
+                    this.user.privateKey, 
+                    this.user.pubkey, 
+                    this.userRelayListEvent.content
+                );
+                const privateTags = JSON.parse(decrypted);
+                
+                privateTags.forEach(tag => {
+                    if (Array.isArray(tag) && tag[0] === 'r' && tag[1] && tag[2] === 'hypertuna:relay') {
+                        relayUrls.add(tag[1]);
+                        const urlParts = tag[1].split('/');
+                        const relayKey = urlParts[urlParts.length - 1];
+                        relayKeyMap.set(tag[1], relayKey);
+                    }
+                });
+            } catch (e) {
+                console.error('Error parsing private relay list:', e);
+            }
+        }
+        
+        console.log(`[NostrGroupClient] Found ${relayUrls.size} relay URLs to connect`);
+        
+        // Queue all relay connections
+        for (const relayUrl of relayUrls) {
+            const relayKey = relayKeyMap.get(relayUrl);
+            if (relayKey) {
+                // Extract groupId from relay key (assuming they're the same)
+                const groupId = relayKey;
+                
+                // Queue the connection attempt
+                this.queueRelayConnection(groupId, relayUrl, relayKey);
+            }
+        }
+        
+        // Start processing the queue
+        this.processRelayConnectionQueue();
+    }
+
+    /**
+     * Queue a relay connection attempt
+     */
+    queueRelayConnection(groupId, relayUrl, relayKey) {
+        if (!this.pendingRelayConnections.has(relayKey)) {
+            this.pendingRelayConnections.set(relayKey, {
+                groupId,
+                relayUrl,
+                relayKey,
+                attempts: 0,
+                status: 'pending'
+            });
+            console.log(`[NostrGroupClient] Queued connection for relay ${relayKey}`);
+        }
+    }
+
+    /**
+     * Process pending relay connections with worker readiness check
+     */
+    async processRelayConnectionQueue() {
+        for (const [relayKey, connection] of this.pendingRelayConnections) {
+            if (connection.status === 'connecting' || connection.status === 'connected') {
+                continue;
+            }
+            
+            connection.status = 'connecting';
+            
+            try {
+                // Wait for relay to be ready in worker
+                console.log(`[NostrGroupClient] Waiting for relay ${relayKey} to be ready...`);
+                
+                if (window.waitForRelayReady) {
+                    try {
+                        await window.waitForRelayReady(relayKey, 15000); // 15 second timeout
+                        console.log(`[NostrGroupClient] Relay ${relayKey} is ready, connecting...`);
+                    } catch (e) {
+                        console.log(`[NostrGroupClient] Relay ${relayKey} not ready yet: ${e.message}`);
+                        connection.status = 'pending';
+                        connection.attempts++;
+                        
+                        // Retry later if under max attempts
+                        if (connection.attempts < this.maxRetryAttempts) {
+                            setTimeout(() => {
+                                this.processRelayConnectionQueue();
+                            }, 5000 * connection.attempts); // Exponential backoff
+                        } else {
+                            connection.status = 'failed';
+                            console.error(`[NostrGroupClient] Failed to connect to relay ${relayKey} after ${this.maxRetryAttempts} attempts`);
+                        }
+                        continue;
+                    }
+                }
+                
+                // Now try to connect
+                await this.connectToGroupRelay(connection.groupId, connection.relayUrl);
+                connection.status = 'connected';
+                this.pendingRelayConnections.delete(relayKey);
+                
+            } catch (e) {
+                console.error(`[NostrGroupClient] Error connecting to relay ${relayKey}:`, e);
+                connection.status = 'failed';
+            }
+        }
+        
+        // Check if there are still pending connections
+        const pendingCount = Array.from(this.pendingRelayConnections.values())
+            .filter(c => c.status === 'pending').length;
+            
+        if (pendingCount > 0) {
+            console.log(`[NostrGroupClient] ${pendingCount} relays still pending, will retry...`);
+            setTimeout(() => {
+                this.processRelayConnectionQueue();
+            }, 5000);
+        }
+    }
+
+    /**
+     * Handle relay ready notification from worker
+     */
+    handleRelayReady(relayKey, gatewayUrl) {
+        console.log(`[NostrGroupClient] Relay ${relayKey} is now ready at ${gatewayUrl}`);
+        
+        // Check if this relay is in our pending connections
+        const pending = this.pendingRelayConnections.get(relayKey);
+        if (pending && pending.status === 'pending') {
+            console.log(`[NostrGroupClient] Found pending connection for ${relayKey}, processing...`);
+            this.processRelayConnectionQueue();
+        }
+    }
+
+    /**
+     * Handle all relays ready notification
+     */
+    handleAllRelaysReady() {
+        console.log(`[NostrGroupClient] All stored relays are ready`);
+        
+        // Process any remaining pending connections
+        this.processRelayConnectionQueue();
+        
+        // Emit event that we're fully initialized
+        this.emit('relays:ready');
+    }
+
+    /**
+     * Connect to a specific group relay
+     */
+    async connectToGroupRelay(groupId, relayUrl) {
+        try {
+            console.log(`[NostrGroupClient] Connecting to group relay: ${relayUrl}`);
+            
+            // Add with retry logic
+            let connected = false;
+            let attempts = 0;
+            
+            while (!connected && attempts < 3) {
+                try {
+                    await this.relayManager.addTypedRelay(relayUrl, 'group', groupId);
+                    connected = true;
+                } catch (e) {
+                    attempts++;
+                    if (attempts < 3) {
+                        console.log(`[NostrGroupClient] Connection attempt ${attempts} failed, retrying...`);
+                        await new Promise(resolve => setTimeout(resolve, 2000));
+                    } else {
+                        throw e;
+                    }
+                }
+            }
+            
+            this.groupRelayUrls.set(groupId, relayUrl);
+            
+            // Subscribe to group-specific events only on this relay
+            this._subscribeToGroupOnRelay(groupId, relayUrl);
+            
+            console.log(`[NostrGroupClient] Successfully connected to group relay: ${relayUrl}`);
+            
+            // Emit event for UI update
+            this.emit('relay:connected', { groupId, relayUrl });
+            
+        } catch (e) {
+            console.error(`[NostrGroupClient] Failed to connect to group relay ${relayUrl}:`, e);
+            
+            // Emit failure event
+            this.emit('relay:failed', { groupId, relayUrl, error: e.message });
+            
+            throw e;
+        }
+    }
+
+    /**
+     * Subscribe to group events only on the group's relay
+     */
+    _subscribeToGroupOnRelay(groupId, relayUrl) {
+        // Subscribe to group metadata
+        this.relayManager.subscribeWithRouting(`group-meta-${groupId}`, [
+            { kinds: [NostrEvents.KIND_GROUP_METADATA], "#d": [groupId] },
+            { kinds: [NostrEvents.KIND_GROUP_MEMBER_LIST], "#d": [groupId] },
+            { kinds: [NostrEvents.KIND_GROUP_ADMIN_LIST], "#d": [groupId] }
+        ], (event) => {
+            this._processEvent(event, relayUrl);
+        }, { targetRelays: [relayUrl] });
+        
+        // Subscribe to group messages
+        this.relayManager.subscribeWithRouting(`group-messages-${groupId}`, [
+            { kinds: [NostrEvents.KIND_TEXT_NOTE], "#h": [groupId] }
+        ], (event) => {
+            this._processGroupMessageEvent(event);
+        }, { targetRelays: [relayUrl] });
     }
     
     /**
@@ -569,8 +857,21 @@ async fetchMultipleProfiles(pubkeys) {
 
         const newEvent = await NostrEvents.createUserRelayListEvent(tags, contentArr, this.user.privateKey);
         this.userRelayListEvent = newEvent;
-        console.log('Publishing updated user relay list event', newEvent);
-        await this.relayManager.publish(newEvent);
+        
+        // Always publish to discovery relays only
+        const discoveryRelays = Array.from(this.relayManager.discoveryRelays);
+        await this.relayManager.publishToRelays(newEvent, discoveryRelays);
+        
+        console.log('Published user relay list to discovery relays');
+        
+        // If adding a relay, connect to it
+        if (add && gatewayUrl) {
+            const groupId = this.hypertunaGroups.get(relayId);
+            if (groupId) {
+                await this.connectToGroupRelay(groupId, gatewayUrl);
+            }
+        }
+        
         this.emit('relaylist:update', { ids: Array.from(this.userRelayIds) });
     }
     
@@ -1426,51 +1727,41 @@ async fetchMultipleProfiles(pubkeys) {
             groupId,
             hypertunaId
         } = eventsCollection;
-
+        
+        // Extract relay URL from hypertuna event
         const relayUrl = NostrEvents._getTagValue(hypertunaEvent, 'd');
+        
+        if (normalizedData.isPublic) {
+            // PUBLIC RELAY: Publish to discovery relays first
+            const discoveryRelays = Array.from(this.relayManager.discoveryRelays);
+            
+            await Promise.all([
+                this.relayManager.publishToRelays(groupCreateEvent, discoveryRelays),
+                this.relayManager.publishToRelays(metadataEvent, discoveryRelays),
+                this.relayManager.publishToRelays(hypertunaEvent, discoveryRelays)
+            ]);
+            
+            console.log('Published public relay events to discovery relays');
+        }
+        
+        // Update user relay list (always goes to discovery relays)
         if (relayUrl) {
-            this.hypertunaRelayUrls.set(groupId, relayUrl);
+            await this.updateUserRelayList(hypertunaId, relayUrl, normalizedData.isPublic, true);
         }
         
-        console.log(`Creating new group with ID: ${groupId}`);
-        console.log(`Using Hypertuna ID: ${hypertunaId}`);
-        
-        // Store the Hypertuna mapping
-        this.hypertunaGroups.set(hypertunaId, groupId);
-        this.groupHypertunaIds.set(groupId, hypertunaId);
-        
-        // IMPORTANT: Process the metadata event directly before publishing
-        this._processGroupMetadataEvent(metadataEvent);
-        
-        // IMPORTANT: Explicitly add the current user as admin and member
-        console.log(`Adding current user ${this.user.pubkey.substring(0, 8)}... as admin and member`);
-        
-        // Add to admins list
-        if (!this.groupAdmins.has(groupId)) {
-            this.groupAdmins.set(groupId, []);
+        // Connect to the new group relay
+        if (relayUrl) {
+            await this.connectToGroupRelay(groupId, relayUrl);
+            
+            // Publish events to the group relay itself
+            await Promise.all([
+                this.relayManager.publishToRelays(groupCreateEvent, [relayUrl]),
+                this.relayManager.publishToRelays(metadataEvent, [relayUrl]),
+                this.relayManager.publishToRelays(hypertunaEvent, [relayUrl])
+            ]);
+            
+            console.log('Published relay events to group relay itself');
         }
-        this.groupAdmins.get(groupId).push({
-            pubkey: this.user.pubkey,
-            roles: ['admin']
-        });
-        
-        // Add to members list
-        if (!this.groupMembers.has(groupId)) {
-            this.groupMembers.set(groupId, []);
-        }
-        this.groupMembers.get(groupId).push({
-            pubkey: this.user.pubkey,
-            roles: ['member']
-        });
-        
-        // Publish all three events
-        await Promise.all([
-            this.relayManager.publish(groupCreateEvent),
-            this.relayManager.publish(metadataEvent),
-            this.relayManager.publish(hypertunaEvent)
-        ]);
-        
-        console.log('All three group creation events published');
         
         // Also create and publish member and admin list events
         console.log('Creating admin and member list events');
@@ -1617,8 +1908,13 @@ async fetchMultipleProfiles(pubkeys) {
             this.user.privateKey
         );
         
-        // Publish the event
-        await this.relayManager.publish(event);
+        // Publish only to the group's relay
+        const groupRelayUrl = this.groupRelayUrls.get(groupId);
+        if (groupRelayUrl) {
+            await this.relayManager.publishToRelays(event, [groupRelayUrl]);
+        } else {
+            throw new Error('Group relay not connected');
+        }
         
         return event;
     }

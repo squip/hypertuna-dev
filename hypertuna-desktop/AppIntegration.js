@@ -1126,13 +1126,37 @@ App.syncHypertunaConfigToFile = async function() {
         if (!this.currentUser || !this.currentGroupId) return;
         
         try {
+            // First check if user is a member (existing logic)
             const isMember = this.nostr.isGroupMember(this.currentGroupId, this.currentUser.pubkey);
             if (!isMember) return;
             
             const messageList = document.getElementById('message-list');
+            
+            // Then check if connected to group's relay (new logic)
+            if (!this.nostr.isConnectedToGroupRelay(this.currentGroupId)) {
+                messageList.innerHTML = `
+                    <div class="status-message warning">
+                        Connecting to relay...
+                    </div>
+                `;
+                
+                // Try to connect if we have the relay URL
+                const group = this.nostr.getGroupById(this.currentGroupId);
+                if (group && group.hypertunaId) {
+                    const relayUrl = this.nostr.client.hypertunaRelayUrls.get(this.currentGroupId);
+                    if (relayUrl) {
+                        await this.nostr.connectToGroupRelay(this.currentGroupId, relayUrl);
+                        // Retry loading messages after connection
+                        setTimeout(() => this.loadGroupMessages(), 1000);
+                    }
+                }
+                return;
+            }
+            
+            // Clear message list
             messageList.innerHTML = '';
             
-            // Get messages for the group
+            // Get messages for the group (existing logic continues)
             const messages = this.nostr.getGroupMessages(this.currentGroupId);
             
             if (messages.length === 0) {
@@ -2340,51 +2364,20 @@ App.setupFollowingModalListeners = function() {
 
     // Initialize nostr integration if user is already logged in AND hasn't explicitly logged out
     if (App.currentUser && App.currentUser.privateKey && !explicitLogout) {
-        // Show a spinner while the groups list is being restored
         App.showGroupListSpinner();
-
-        // Generate Hypertuna configuration if it doesn't exist
-        if (!App.currentUser.hypertunaConfig) {
-            (async () => {
-                try {
-                    App.currentUser.hypertunaConfig = await HypertunaUtils.setupUserConfig(App.currentUser);
-                    App.saveUserToLocalStorage();
-                    console.log('Generated new Hypertuna configuration for existing user');
-                } catch (e) {
-                    console.error('Error initializing Hypertuna configuration:', e);
-                }
-            })();
-        }
         
         App.nostr.init(App.currentUser)
             .then(async () => {
-                console.log('Nostr integration initialized');
+                console.log('Nostr integration initialized with discovery relays');
                 
-                // Auto-connect to default relays for returning users
-                const defaultRelays = [
-                    'wss://relay.snort.social'
-                ];
-                
-                // Connect to relays
-                await App.nostr.connectRelay();
-                console.log('Connected to default relays for returning user');
-
-                // Refresh the groups list once relays have connected
-                App.loadGroups();
+                // Wait for relays to be ready before loading groups
+                await App.nostr.waitForRelaysAndLoadGroups();
                 
                 // Start worker if available
                 if (window.startWorker) {
                     try {
                         const key = await window.startWorker();
-                        if (key && App.currentUser && App.currentUser.hypertunaConfig) {
-                            App.currentUser.hypertunaConfig.swarmPublicKey = key;
-                            await HypertunaUtils.saveConfig(App.currentUser.hypertunaConfig);
-                            App.saveUserToLocalStorage();
-                            if (typeof App.updateHypertunaDisplay === 'function') {
-                                App.updateHypertunaDisplay();
-                            }
-                        }
-                        console.log('Worker started for returning user');
+                        // ... rest of worker start code ...
                     } catch (err) {
                         console.error('Failed to start worker:', err);
                     }

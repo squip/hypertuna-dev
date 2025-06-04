@@ -96,10 +96,39 @@ export async function initializeRelayServer(customConfig = {}) {
     console.log('[RelayServer] Starting auto-connection to stored relays...');
     const connectedRelays = await autoConnectStoredRelays(config);
     console.log(`[RelayServer] Auto-connected to ${connectedRelays.length} relays`);
-    await updateHealthState(); // Added await
-  } catch (error) {
+    
+    // Update health state after auto-connect
+    await updateHealthState();
+    
+    // If we have relays and gateway registration is enabled, register them
+    if (connectedRelays.length > 0 && config.registerWithGateway) {
+        console.log('[RelayServer] Registering auto-connected relays with gateway...');
+        
+        // Register each connected relay
+        for (const relayKey of connectedRelays) {
+            try {
+                const profile = await getRelayProfileByKey(relayKey);
+                if (profile) {
+                    await registerWithGateway(profile);
+                    
+                    // Send registration complete message
+                    if (global.sendMessage) {
+                        global.sendMessage({
+                            type: 'relay-registration-complete',
+                            relayKey: relayKey,
+                            gatewayUrl: `wss://${config.proxy_server_address}/${relayKey}`,
+                            timestamp: new Date().toISOString()
+                        });
+                    }
+                }
+            } catch (regError) {
+                console.error(`[RelayServer] Failed to register relay ${relayKey}:`, regError);
+            }
+        }
+    }
+} catch (error) {
     console.error('[RelayServer] Error during auto-connection:', error);
-  }
+}
   
   // Start internal health monitoring
   startHealthMonitoring();

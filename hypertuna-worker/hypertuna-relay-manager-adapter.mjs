@@ -60,7 +60,6 @@ export async function createRelay(options = {}) {
         const userStorageBase = join(config.storage || './data', 'relays');
         const defaultStorageDir = storageDir || join(userStorageBase, `relay-${timestamp}`);
         
-        
         // Ensure storage directory exists
         await fs.mkdir(defaultStorageDir, { recursive: true });
         
@@ -92,6 +91,19 @@ export async function createRelay(options = {}) {
         
         console.log('[RelayAdapter] Created relay:', relayKey);
         console.log(`[RelayAdapter] Connect at: wss://${config.proxy_server_address}/${relayKey}`);
+        
+        // Send relay initialized message for newly created relay
+        if (global.sendMessage) {
+            global.sendMessage({
+                type: 'relay-initialized',
+                relayKey: relayKey,
+                gatewayUrl: `wss://${config.proxy_server_address}/${relayKey}`,
+                name: profileInfo.name,
+                connectionUrl: `wss://${config.proxy_server_address}/${relayKey}`,
+                isNew: true,
+                timestamp: new Date().toISOString()
+            });
+        }
         
         return {
             success: true,
@@ -126,6 +138,7 @@ export async function joinRelay(options = {}) {
     // Store config globally if provided
     if (config) {
         globalConfig = config;
+        globalUserKey = config.userKey;
     }
     
     if (!relayKey) {
@@ -136,10 +149,23 @@ export async function joinRelay(options = {}) {
     }
     
     try {
-        await ensureProfilesInitialized();
+        await ensureProfilesInitialized(globalUserKey);
         
         // Check if already connected
         if (activeRelays.has(relayKey)) {
+            console.log(`[RelayAdapter] Already connected to relay ${relayKey}`);
+            
+            // Still send initialized message since the UI might be waiting
+            if (global.sendMessage) {
+                global.sendMessage({
+                    type: 'relay-initialized',
+                    relayKey: relayKey,
+                    gatewayUrl: `wss://${config.proxy_server_address}/${relayKey}`,
+                    alreadyActive: true,
+                    timestamp: new Date().toISOString()
+                });
+            }
+            
             return {
                 success: false,
                 error: 'Already connected to this relay'
@@ -147,7 +173,7 @@ export async function joinRelay(options = {}) {
         }
         
         // Set default storage directory
-        const defaultStorageDir = storageDir || join(config.storage || './data', relayKey);
+        const defaultStorageDir = storageDir || join(config.storage || './data', 'relays', relayKey);
         
         // Ensure storage directory exists
         await fs.mkdir(defaultStorageDir, { recursive: true });
@@ -188,6 +214,19 @@ export async function joinRelay(options = {}) {
         }
         
         console.log('[RelayAdapter] Joined relay:', relayKey);
+        
+        // Send relay initialized message for joined relay
+        if (global.sendMessage) {
+            global.sendMessage({
+                type: 'relay-initialized',
+                relayKey: relayKey,
+                gatewayUrl: `wss://${config.proxy_server_address}/${relayKey}`,
+                name: profileInfo.name,
+                connectionUrl: `wss://${config.proxy_server_address}/${relayKey}`,
+                isJoined: true,
+                timestamp: new Date().toISOString()
+            });
+        }
         
         return {
             success: true,
@@ -283,20 +322,55 @@ export async function autoConnectStoredRelays(config) {
         const relayProfiles = await getAllRelayProfiles(userKey);
         if (!relayProfiles || relayProfiles.length === 0) {
             console.log('[RelayAdapter] No stored relay profiles found');
+            
+            // Notify that there are no relays to initialize
+            if (global.sendMessage) {
+                global.sendMessage({
+                    type: 'all-relays-initialized',
+                    count: 0,
+                    message: 'No stored relays to initialize'
+                });
+            }
             return [];
         }
         
-        const connectedRelays = [];
+        console.log(`[RelayAdapter] Found ${relayProfiles.length} stored relay profiles`);
         
+        const connectedRelays = [];
+        const failedRelays = [];
+        
+        // Process each relay profile
         for (const profile of relayProfiles) {
             try {
                 // Skip if already active or auto-connect disabled
-                if (activeRelays.has(profile.relay_key) || profile.auto_connect === false) {
+                if (activeRelays.has(profile.relay_key)) {
+                    console.log(`[RelayAdapter] Relay ${profile.relay_key} already active, skipping`);
+                    connectedRelays.push(profile.relay_key);
+                    
+                    // Send initialized message for already active relay
+                    if (global.sendMessage) {
+                        global.sendMessage({
+                            type: 'relay-initialized',
+                            relayKey: profile.relay_key,
+                            gatewayUrl: `wss://${config.proxy_server_address}/${profile.relay_key}`,
+                            name: profile.name,
+                            alreadyActive: true
+                        });
+                    }
                     continue;
                 }
                 
+                if (profile.auto_connect === false) {
+                    console.log(`[RelayAdapter] Auto-connect disabled for relay ${profile.relay_key}, skipping`);
+                    continue;
+                }
+                
+                console.log(`[RelayAdapter] Attempting to connect to relay ${profile.relay_key}...`);
+                
                 const result = await joinRelay({
                     relayKey: profile.relay_key,
+                    name: profile.name,
+                    description: profile.description,
                     storageDir: profile.relay_storage,
                     config
                 });
@@ -304,18 +378,88 @@ export async function autoConnectStoredRelays(config) {
                 if (result.success) {
                     connectedRelays.push(profile.relay_key);
                     profile.auto_connected = true;
+                    profile.last_connected_at = new Date().toISOString();
                     await saveRelayProfile(profile);
+                    
+                    console.log(`[RelayAdapter] Successfully connected to relay ${profile.relay_key}`);
+                    
+                    // Send relay initialized message
+                    if (global.sendMessage) {
+                        global.sendMessage({
+                            type: 'relay-initialized',
+                            relayKey: profile.relay_key,
+                            gatewayUrl: `wss://${config.proxy_server_address}/${profile.relay_key}`,
+                            name: profile.name || `Relay ${profile.relay_key.substring(0, 8)}`,
+                            connectionUrl: result.connectionUrl,
+                            timestamp: new Date().toISOString()
+                        });
+                    }
+                } else {
+                    console.error(`[RelayAdapter] Failed to connect to relay ${profile.relay_key}: ${result.error}`);
+                    failedRelays.push({
+                        relayKey: profile.relay_key,
+                        error: result.error
+                    });
+                    
+                    // Send relay initialization failed message
+                    if (global.sendMessage) {
+                        global.sendMessage({
+                            type: 'relay-initialization-failed',
+                            relayKey: profile.relay_key,
+                            error: result.error,
+                            timestamp: new Date().toISOString()
+                        });
+                    }
                 }
             } catch (error) {
                 console.error(`[RelayAdapter] Error auto-connecting to ${profile.relay_key}:`, error);
+                failedRelays.push({
+                    relayKey: profile.relay_key,
+                    error: error.message
+                });
+                
+                // Send relay initialization failed message
+                if (global.sendMessage) {
+                    global.sendMessage({
+                        type: 'relay-initialization-failed',
+                        relayKey: profile.relay_key,
+                        error: error.message,
+                        timestamp: new Date().toISOString()
+                    });
+                }
             }
         }
         
-        console.log(`[RelayAdapter] Auto-connected to ${connectedRelays.length} relays`);
+        console.log(`[RelayAdapter] Auto-connection complete:`);
+        console.log(`[RelayAdapter] - Connected: ${connectedRelays.length} relays`);
+        console.log(`[RelayAdapter] - Failed: ${failedRelays.length} relays`);
+        
+        // Send all-relays-initialized message
+        if (global.sendMessage) {
+            global.sendMessage({
+                type: 'all-relays-initialized',
+                count: connectedRelays.length,
+                connected: connectedRelays,
+                failed: failedRelays,
+                total: relayProfiles.length,
+                timestamp: new Date().toISOString()
+            });
+        }
+        
         return connectedRelays;
         
     } catch (error) {
         console.error('[RelayAdapter] Error during auto-connection:', error);
+        
+        // Send error message
+        if (global.sendMessage) {
+            global.sendMessage({
+                type: 'relay-auto-connect-error',
+                error: error.message,
+                timestamp: new Date().toISOString()
+            });
+        }
+        
         return [];
     }
 }

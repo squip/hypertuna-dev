@@ -35,8 +35,8 @@ class NostrIntegration {
         // Set up event listeners
         this._setupEventListeners();
         
-        // Initialize client with user and relays
-        await this.client.init(user, this.relayUrls);
+        // Initialize client with discovery relays only
+        await this.client.initWithDiscoveryRelays(user, this.relayUrls);
         
         // Update relay status in UI
         this._updateRelayStatus();
@@ -44,6 +44,62 @@ class NostrIntegration {
         return this;
     }
     
+    // Add method to check if connected to a group's relay
+    isConnectedToGroupRelay(groupId) {
+        return this.client.groupRelayUrls.has(groupId);
+    }
+    
+    // Add method to manually connect to a group relay
+    async connectToGroupRelay(groupId, relayUrl) {
+        await this.client.connectToGroupRelay(groupId, relayUrl);
+    }
+
+    /**
+     * Handle relay ready notification from worker
+     */
+    handleRelayReady(relayKey, gatewayUrl) {
+        if (this.client) {
+            this.client.handleRelayReady(relayKey, gatewayUrl);
+        }
+    }
+    
+    /**
+     * Handle all relays ready notification
+     */
+    handleAllRelaysReady() {
+        if (this.client) {
+            this.client.handleAllRelaysReady();
+        }
+    }
+
+    /**
+     * Wait for relays to be ready before loading groups
+     */
+    async waitForRelaysAndLoadGroups() {
+        return new Promise((resolve) => {
+            let timeout;
+            
+            const checkAndLoad = () => {
+                if (this.app.currentPage === 'groups') {
+                    this.app.loadGroups();
+                    resolve();
+                }
+            };
+            
+            // Listen for relays ready event
+            this.client.once('relays:ready', () => {
+                clearTimeout(timeout);
+                checkAndLoad();
+            });
+            
+            // Set a timeout to load anyway after 10 seconds
+            timeout = setTimeout(() => {
+                console.log('[NostrIntegration] Timeout waiting for relays, loading groups anyway');
+                checkAndLoad();
+            }, 10000);
+        });
+    }
+
     /**
      * Set up event listeners for the client
      * @private
