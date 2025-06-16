@@ -48,15 +48,21 @@ function integrateNostrRelays(App) {
      * Generate and store Hypertuna keypair during login
      */
     App.login = async function() {
-        const privateKey = document.getElementById('privateKey').value.trim();
+        const privateKeyInput = document.getElementById('privateKey').value.trim();
         
-        if (!privateKey) {
+        if (!privateKeyInput) {
             alert('Please enter a valid private key or generate a new one.');
             return;
         }
         
         try {
-            // Clear the explicit logout flag on successful login
+            // Normalize the private key input (handles both hex and nsec)
+            const privateKey = NostrUtils.normalizePrivateKey(privateKeyInput);
+            if (!privateKey) {
+                alert('Invalid private key format. Please enter a hex key or nsec format.');
+                return;
+            }
+            
             localStorage.removeItem('explicit_logout');
             const pubkey = NostrUtils.getPublicKey(privateKey);
             
@@ -472,12 +478,18 @@ function integrateNostrRelays(App) {
         
         const profilePubkeyDisplay = document.getElementById('profile-pubkey-display');
         if (profilePubkeyDisplay) {
-            profilePubkeyDisplay.value = this.currentUser.pubkey;
+            // Display as npub by default
+            profilePubkeyDisplay.value = NostrUtils.hexToNpub(this.currentUser.pubkey);
+            profilePubkeyDisplay.dataset.format = 'npub';
+            profilePubkeyDisplay.dataset.hex = this.currentUser.pubkey;
         }
         
         const profilePrivkeyDisplay = document.getElementById('profile-privkey-display');
         if (profilePrivkeyDisplay) {
-            profilePrivkeyDisplay.value = this.currentUser.privateKey;
+            // Display as nsec by default
+            profilePrivkeyDisplay.value = NostrUtils.hexToNsec(this.currentUser.privateKey);
+            profilePrivkeyDisplay.dataset.format = 'nsec';
+            profilePrivkeyDisplay.dataset.hex = this.currentUser.privateKey;
         }
         
         // Update profile picture if available
@@ -1579,18 +1591,24 @@ App.syncHypertunaConfigToFile = async function() {
     App.addMember = async function() {
         if (!this.currentUser || !this.currentGroupId) return;
         
-        const memberPubkey = document.getElementById('add-member-pubkey').value.trim();
+        const memberPubkeyInput = document.getElementById('add-member-pubkey').value.trim();
         const role = document.getElementById('add-member-role').value;
         
-        if (!memberPubkey) {
+        if (!memberPubkeyInput) {
             alert('Please enter a valid public key.');
+            return;
+        }
+        
+        // Normalize the public key (handles both hex and npub)
+        const memberPubkey = NostrUtils.normalizePublicKey(memberPubkeyInput);
+        if (!memberPubkey) {
+            alert('Invalid public key format. Please enter a hex key or npub format.');
             return;
         }
         
         try {
             await this.nostr.addGroupMember(this.currentGroupId, memberPubkey, [role]);
             
-            // Close modal and reload members
             this.closeAddMemberModal();
             setTimeout(() => {
                 this.loadGroupMembers();
@@ -1775,6 +1793,42 @@ App.switchListView = function(view) {
         this.loadDiscoverRelays();
     }
 };
+
+App.setupKeyFormatToggles = function() {
+    // Add toggle buttons next to key displays
+    const addToggleButton = (inputId, keyType) => {
+        const input = document.getElementById(inputId);
+        if (!input) return;
+        
+        const toggleBtn = document.createElement('button');
+        toggleBtn.className = 'key-format-toggle';
+        toggleBtn.textContent = '[Toggle Format]';
+        toggleBtn.onclick = () => {
+            const currentFormat = input.dataset.format;
+            const hexValue = input.dataset.hex;
+            
+            if (currentFormat === 'hex') {
+                if (keyType === 'public') {
+                    input.value = NostrUtils.hexToNpub(hexValue);
+                    input.dataset.format = 'npub';
+                } else {
+                    input.value = NostrUtils.hexToNsec(hexValue);
+                    input.dataset.format = 'nsec';
+                }
+            } else {
+                input.value = hexValue;
+                input.dataset.format = 'hex';
+            }
+        };
+        
+        // Insert after the input
+        input.parentElement.appendChild(toggleBtn);
+    };
+    
+    addToggleButton('profile-pubkey-display', 'public');
+    addToggleButton('profile-privkey-display', 'private');
+};
+
 
 /**
  * Load discover relays
@@ -2059,18 +2113,17 @@ App.loadFollowingList = async function() {
  */
 App.addFollow = async function() {
     const input = document.getElementById('add-follow-pubkey');
-    let pubkey = input.value.trim();
+    let pubkeyInput = input.value.trim();
     
-    if (!pubkey) {
+    if (!pubkeyInput) {
         alert('Please enter a public key');
         return;
     }
     
-    // Handle npub format
-    if (pubkey.startsWith('npub')) {
-        // In a real implementation, you would decode the npub to hex
-        // For now, we'll show an error
-        alert('Please enter a hex public key. npub decoding coming soon!');
+    // Normalize the public key input
+    const pubkey = NostrUtils.normalizePublicKey(pubkeyInput);
+    if (!pubkey) {
+        alert('Invalid public key format. Please enter a hex key or npub format.');
         return;
     }
     

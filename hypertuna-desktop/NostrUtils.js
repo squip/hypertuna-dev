@@ -5,7 +5,7 @@
  */
 
 // Import from local module if available, otherwise try window object
-import { nobleSecp256k1, browserifyCipher } from './crypto-libraries.js';
+import { nobleSecp256k1, browserifyCipher, bech32 } from './crypto-libraries.js';
 
 export class NostrUtils {
     /**
@@ -287,5 +287,105 @@ export class NostrUtils {
         }
         
         return refs;
+    }
+
+    /**
+     * Convert hex public key to npub format
+     * @param {string} hex - Hex encoded public key
+     * @returns {string} - Bech32 encoded npub string
+     */
+    static hexToNpub(hex) {
+        try {
+            const bytes = this.hexToBytes(hex);
+            const words = bech32.bech32.toWords(bytes);
+            return bech32.bech32.encode('npub', words, 90);
+        } catch (e) {
+            console.error('Error encoding npub:', e);
+            return null;
+        }
+    }
+
+    /**
+     * Convert npub to hex public key
+     * @param {string} npub - Bech32 encoded npub string
+     * @returns {string} - Hex encoded public key
+     */
+    static npubToHex(npub) {
+        try {
+            const decoded = bech32.bech32.decode(npub, 90);
+            if (decoded.prefix !== 'npub') {
+                throw new Error('Invalid npub prefix');
+            }
+            const bytes = new Uint8Array(bech32.bech32.fromWords(decoded.words));
+            return this.bytesToHex(bytes);
+        } catch (e) {
+            console.error('Error decoding npub:', e);
+            return null;
+        }
+    }
+
+    /**
+     * Convert hex private key to nsec format
+     * @param {string} hex - Hex encoded private key
+     * @returns {string} - Bech32 encoded nsec string
+     */
+    static hexToNsec(hex) {
+        try {
+            const bytes = this.hexToBytes(hex);
+            const words = bech32.bech32.toWords(bytes);
+            return bech32.bech32.encode('nsec', words, 90);
+        } catch (e) {
+            console.error('Error encoding nsec:', e);
+            return null;
+        }
+    }
+
+    /**
+     * Convert nsec to hex private key
+     * @param {string} nsec - Bech32 encoded nsec string
+     * @returns {string} - Hex encoded private key
+     */
+    static nsecToHex(nsec) {
+        try {
+            const decoded = bech32.bech32.decode(nsec, 90);
+            if (decoded.prefix !== 'nsec') {
+                throw new Error('Invalid nsec prefix');
+            }
+            const bytes = new Uint8Array(bech32.bech32.fromWords(decoded.words));
+            return this.bytesToHex(bytes);
+        } catch (e) {
+            console.error('Error decoding nsec:', e);
+            return null;
+        }
+    }
+
+    /**
+     * Normalize any public key input to hex format
+     * @param {string} input - Public key in hex or npub format
+     * @returns {string|null} - Hex public key or null if invalid
+     */
+    static normalizePublicKey(input) {
+        input = input.trim();
+        if (input.startsWith('npub')) {
+            return this.npubToHex(input);
+        } else if (/^[0-9a-fA-F]{64}$/.test(input)) {
+            return input.toLowerCase();
+        }
+        return null;
+    }
+
+    /**
+     * Normalize any private key input to hex format
+     * @param {string} input - Private key in hex or nsec format
+     * @returns {string|null} - Hex private key or null if invalid
+     */
+    static normalizePrivateKey(input) {
+        input = input.trim();
+        if (input.startsWith('nsec')) {
+            return this.nsecToHex(input);
+        } else if (/^[0-9a-fA-F]{64}$/.test(input)) {
+            return input.toLowerCase();
+        }
+        return null;
     }
 }

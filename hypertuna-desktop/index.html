@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Hypertuna P2P Relay Server</title>
     <!-- Load our main script that imports all modules -->
+    <script src="https://bundle.run/bech32@2.0.0"></script>
     <script type="module" src="main.js"></script>
     <!-- Load worker control logic from desktop app -->
     <script type="module" src="app.js"></script>
@@ -52,7 +53,7 @@
                             <div class="form-group">
                                 <label for="privateKey">Private Key</label>
                                 <div class="input-with-action">
-                                    <input type="password" id="privateKey" placeholder="Enter your private key or generate a new one">
+                                    <input type="password" id="privateKey" placeholder="Enter your private key (nsec or hex) or generate a new one">
                                     <button id="btn-toggle-key-visibility" class="input-action-btn" aria-label="Toggle visibility">
                                         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                             <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
@@ -462,7 +463,7 @@
             <div class="modal-body">
                 <div class="form-group">
                     <label for="add-member-pubkey">Public Key</label>
-                    <input type="text" id="add-member-pubkey" class="form-input" placeholder="Enter member's public key">
+                    <input type="text" id="add-member-pubkey" class="form-input" placeholder="Enter member's public key (npub or hex)">
                 </div>
                 <div class="form-group">
                     <label for="add-member-role">Role</label>
@@ -746,25 +747,27 @@
               
               // Copy buttons
               document.querySelectorAll('.copy-btn').forEach(btn => {
-                  btn.addEventListener('click', () => {
-                      const targetId = btn.dataset.copy;
-                      const target = document.getElementById(targetId);
-                      if (target) {
-                          const isPassword = target.type === 'password';
-                          if (isPassword) target.type = 'text';
-                          target.select();
-                          document.execCommand('copy');
-                          if (isPassword) target.type = 'password';
-                          
-                          // Show feedback
-                          const originalText = btn.textContent;
-                          btn.textContent = 'Copied!';
-                          setTimeout(() => {
-                              btn.textContent = originalText;
-                          }, 2000);
-                      }
-                  });
-              });
+                btn.addEventListener('click', () => {
+                    const targetId = btn.dataset.copy;
+                    const target = document.getElementById(targetId);
+                    if (target) {
+                        const isPassword = target.type === 'password';
+                        if (isPassword) target.type = 'text';
+                        
+                        // Copy the current displayed value (npub/nsec or hex)
+                        target.select();
+                        document.execCommand('copy');
+                        
+                        if (isPassword) target.type = 'password';
+                        
+                        const originalText = btn.textContent;
+                        btn.textContent = 'Copied!';
+                        setTimeout(() => {
+                            btn.textContent = originalText;
+                        }, 2000);
+                    }
+                });
+            });
               
               // Modal handlers
               document.getElementById('close-join-modal').addEventListener('click', () => {
