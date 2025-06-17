@@ -260,12 +260,12 @@ const mirror = debounce(mirrorDrive);
 // Message Handling with Hyperswarm
 // ============================
 
-async function forwardMessageToPeer(peerPublicKey, relayKey, message, connectionKey) {
+async function forwardMessageToPeer(peerPublicKey, identifier, message, connectionKey) {
   let peer = activePeers.find(p => p.publicKey === peerPublicKey);
   
   try {
     if (!peer || !peerHealthManager.isPeerHealthy(peerPublicKey)) {
-      const healthyPeer = await findHealthyPeerForRelay(relayKey);
+      const healthyPeer = await findHealthyPeerForRelay(identifier);
       if (!healthyPeer) {
         throw new Error('No healthy peers available for this relay');
       }
@@ -275,7 +275,7 @@ async function forwardMessageToPeer(peerPublicKey, relayKey, message, connection
     // Use Hyperswarm to forward message
     return await forwardMessageToPeerHyperswarm(
       peer.publicKey,
-      relayKey,
+      identifier,
       message,
       connectionKey,
       connectionPool
@@ -292,48 +292,49 @@ async function forwardMessageToPeer(peerPublicKey, relayKey, message, connection
 
 wss.on('connection', (ws, req) => {
   const pathname = url.parse(req.url).pathname;
-  const relayKey = pathname.split('/')[1];
+  const parts = pathname.split('/').filter(Boolean);
+  const identifier = parts.length >= 2 ? `${parts[0]}:${parts[1]}` : parts[0];
 
-  console.log(`[${new Date().toISOString()}] New WebSocket connection for relay: ${relayKey}`);
+  console.log(`[${new Date().toISOString()}] New WebSocket connection for relay: ${identifier}`);
 
-  if (activeRelays.has(relayKey)) {
-    handleWebSocket(ws, relayKey);
+  if (activeRelays.has(identifier)) {
+    handleWebSocket(ws, identifier);
   } else {
-    console.log(`[${new Date().toISOString()}] Invalid relay key: ${relayKey}. Closing connection.`);
+    console.log(`[${new Date().toISOString()}] Invalid relay identifier: ${identifier}. Closing connection.`);
     ws.close(1008, 'Invalid relay key');
   }
 });
 
-function handleWebSocket(ws, relayKey) {
+function handleWebSocket(ws, identifier) {
   const connectionKey = generateConnectionKey();
   console.log(`[${new Date().toISOString()}] New WebSocket connection established:`, {
-    relayKey,
+    identifier,
     connectionKey
   });
-  
-  wsConnections.set(connectionKey, { ws, relayKey });
+
+  wsConnections.set(connectionKey, { ws, relayKey: identifier });
   const messageQueue = new MessageQueue();
   messageQueues.set(connectionKey, messageQueue);
 
   if (ws.readyState !== WebSocket.OPEN) {
-    console.error(`[${new Date().toISOString()}] WebSocket not in OPEN state for relay ${relayKey}:`, 
+    console.error(`[${new Date().toISOString()}] WebSocket not in OPEN state for relay ${identifier}:`,
       { readyState: ws.readyState });
     return;
   }
 
   ws.on('message', async (message) => {
     const processMessage = async (msg) => {
-      console.log(`[${new Date().toISOString()}] Processing WebSocket message for relay ${relayKey}`);
+      console.log(`[${new Date().toISOString()}] Processing WebSocket message for relay ${identifier}`);
       
-      const healthyPeer = await findHealthyPeerForRelay(relayKey);
+      const healthyPeer = await findHealthyPeerForRelay(identifier);
       if (!healthyPeer) {
-        console.error(`[${new Date().toISOString()}] No healthy peers found for relay ${relayKey}`);
+        console.error(`[${new Date().toISOString()}] No healthy peers found for relay ${identifier}`);
         ws.send(JSON.stringify(['NOTICE', 'No healthy peers available for this relay']));
         return;
       }
 
       try {
-        const responses = await forwardMessageToPeer(healthyPeer.publicKey, relayKey, msg, connectionKey);
+        const responses = await forwardMessageToPeer(healthyPeer.publicKey, identifier, msg, connectionKey);
         for (const response of responses) {
           if (response && response.length > 0) {
             if (ws.readyState === WebSocket.OPEN) {
@@ -357,12 +358,12 @@ function handleWebSocket(ws, relayKey) {
   });
 
   ws.on('close', () => {
-    console.log(`[${new Date().toISOString()}] WebSocket connection closed for relay ${relayKey}`);
+    console.log(`[${new Date().toISOString()}] WebSocket connection closed for relay ${identifier}`);
     cleanup(connectionKey);
   });
 
   ws.on('error', (error) => {
-    console.error(`[${new Date().toISOString()}] WebSocket error for relay ${relayKey}:`, error);
+    console.error(`[${new Date().toISOString()}] WebSocket error for relay ${identifier}:`, error);
     cleanup(connectionKey);
   });
 
@@ -385,7 +386,7 @@ async function startEventChecking(connectionKey) {
       return;
     }
 
-    const { ws, relayKey } = connectionData;
+    const { ws, relayKey: identifier } = connectionData;
     
     if (ws.readyState !== WebSocket.OPEN) {
       console.log(`[${new Date().toISOString()}] WebSocket for ${connectionKey} not open (state: ${ws.readyState}), stopping event checking`);
@@ -396,22 +397,22 @@ async function startEventChecking(connectionKey) {
     let healthyPeer = null;
     
     try {
-      healthyPeer = await findHealthyPeerForRelay(relayKey, consecutiveFailures >= 3);
+      healthyPeer = await findHealthyPeerForRelay(identifier, consecutiveFailures >= 3);
       
       if (!healthyPeer) {
         consecutiveFailures++;
         checkInterval = Math.min(30000, checkInterval * 1.5);
         
-        console.log(`[${new Date().toISOString()}] No healthy peers found for relay ${relayKey} (attempt ${consecutiveFailures}), will retry in ${Math.round(checkInterval/1000)}s`);
+        console.log(`[${new Date().toISOString()}] No healthy peers found for relay ${identifier} (attempt ${consecutiveFailures}), will retry in ${Math.round(checkInterval/1000)}s`);
         
         if (consecutiveFailures === 1 && ws.readyState === WebSocket.OPEN) {
           ws.send(JSON.stringify(['NOTICE', 'Event checking temporarily unavailable - no healthy peers, retrying soon']));
         }
         
         if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
-          console.log(`[${new Date().toISOString()}] Max consecutive failures reached, cleaning up connection pool for relay ${relayKey}`);
+          console.log(`[${new Date().toISOString()}] Max consecutive failures reached, cleaning up connection pool for relay ${identifier}`);
           
-          const peersForRelay = activeRelays.get(relayKey)?.peers || new Set();
+          const peersForRelay = activeRelays.get(identifier)?.peers || new Set();
           for (const peerKey of peersForRelay) {
             await connectionPool.closeConnection(peerKey);
           }
@@ -438,7 +439,7 @@ async function startEventChecking(connectionKey) {
 
       const events = await getEventsFromPeerHyperswarm(
         healthyPeer.publicKey,
-        relayKey,
+        identifier,
         connectionKey,
         connectionPool
       );
@@ -453,8 +454,8 @@ async function startEventChecking(connectionKey) {
         }
         console.log(`[${new Date().toISOString()}] Sent ${events.length} events for connectionKey: ${connectionKey}`);
         
-        if (activeRelays.has(relayKey)) {
-          const relayData = activeRelays.get(relayKey);
+        if (activeRelays.has(identifier)) {
+          const relayData = activeRelays.get(identifier);
           relayData.lastSuccessfulMessage = Date.now();
         }
       }
@@ -538,11 +539,14 @@ app.post('/register', async (req, res) => {
 
     // Update relay mappings
     if (relays && Array.isArray(relays)) {
-      relays.forEach(relayKey => {
-        peer.relays.add(relayKey);
-        
-        if (!activeRelays.has(relayKey)) {
-          activeRelays.set(relayKey, { 
+      relays.forEach(r => {
+        const identifier = typeof r === 'string' ? r : r.identifier;
+        if (!identifier) return;
+
+        peer.relays.add(identifier);
+
+        if (!activeRelays.has(identifier)) {
+          activeRelays.set(identifier, {
             peers: new Set(),
             relayProfileInfo: null,
             status: 'active',
@@ -550,14 +554,14 @@ app.post('/register', async (req, res) => {
             lastActive: Date.now()
           });
         }
-        
-        const relayData = activeRelays.get(relayKey);
+
+        const relayData = activeRelays.get(identifier);
         relayData.peers.add(publicKey);
         relayData.lastActive = Date.now();
-        
+
         if (relayProfileInfo && relays.length === 1) {
           relayData.relayProfileInfo = relayProfileInfo;
-          console.log(`[${new Date().toISOString()}] Updated relay-profile info for relay: ${relayKey}`);
+          console.log(`[${new Date().toISOString()}] Updated relay-profile info for relay: ${identifier}`);
           
           if (relayProfileInfo.pubkey) {
             console.log(`[${new Date().toISOString()}] Found relay pubkey in relay-profile info:`, relayProfileInfo.pubkey);
@@ -568,9 +572,9 @@ app.post('/register', async (req, res) => {
             if (directoryUpdater && isPublic) {
               try {
                 directoryUpdater.updateDirectory(relayProfileInfo.pubkey);
-                console.log(`[${new Date().toISOString()}] Successfully updated directory for relay ${relayKey}`);
+                console.log(`[${new Date().toISOString()}] Successfully updated directory for relay ${identifier}`);
               } catch (error) {
-                console.warn(`[${new Date().toISOString()}] Directory update failed for relay ${relayKey}:`, error.message);
+                console.warn(`[${new Date().toISOString()}] Directory update failed for relay ${identifier}:`, error.message);
               }
             } else {
               const reason = !directoryUpdater ? 'Directory updater not available' : 'Relay is not public';
@@ -636,11 +640,14 @@ app.post('/register', async (req, res) => {
   }
 
   if (relays && Array.isArray(relays)) {
-    relays.forEach(relayKey => {
-      peer.relays.add(relayKey);
-      
-      if (!activeRelays.has(relayKey)) {
-        activeRelays.set(relayKey, { 
+    relays.forEach(r => {
+      const identifier = typeof r === 'string' ? r : r.identifier;
+      if (!identifier) return;
+
+      peer.relays.add(identifier);
+
+      if (!activeRelays.has(identifier)) {
+        activeRelays.set(identifier, {
           peers: new Set(),
           relayProfileInfo: null,
           status: 'active',
@@ -648,14 +655,14 @@ app.post('/register', async (req, res) => {
           lastActive: Date.now()
         });
       }
-      
-      const relayData = activeRelays.get(relayKey);
+
+      const relayData = activeRelays.get(identifier);
       relayData.peers.add(publicKey);
       relayData.lastActive = Date.now();
-      
+
       if (relayProfileInfo && relays.length === 1) {
         relayData.relayProfileInfo = relayProfileInfo;
-        console.log(`[${new Date().toISOString()}] Updated relay-profile info for relay: ${relayKey}`);
+        console.log(`[${new Date().toISOString()}] Updated relay-profile info for relay: ${identifier}`);
       }
     });
   }
@@ -834,12 +841,12 @@ function generateConnectionKey() {
   return crypto.randomBytes(16).toString('hex');
 }
 
-async function findHealthyPeerForRelay(relayKey, forceRecheck = false) {
-  console.log(`[${new Date().toISOString()}] Finding healthy peer for relay ${relayKey}`);
-  
-  const relayData = activeRelays.get(relayKey);
+async function findHealthyPeerForRelay(identifier, forceRecheck = false) {
+  console.log(`[${new Date().toISOString()}] Finding healthy peer for relay ${identifier}`);
+
+  const relayData = activeRelays.get(identifier);
   if (!relayData || relayData.peers.size === 0) {
-    console.log(`[${new Date().toISOString()}] No relay data or peers found for relay ${relayKey}`);
+    console.log(`[${new Date().toISOString()}] No relay data or peers found for relay ${identifier}`);
     return null;
   }
 
@@ -847,12 +854,12 @@ async function findHealthyPeerForRelay(relayKey, forceRecheck = false) {
     .map(peerKey => activePeers.find(p => p.publicKey === peerKey))
     .filter(p => p && p.mode === 'hyperswarm'); // Only use Hyperswarm peers
   
-  console.log(`[${new Date().toISOString()}] Found ${peers.length} potential Hyperswarm peers for relay ${relayKey}`);
+  console.log(`[${new Date().toISOString()}] Found ${peers.length} potential Hyperswarm peers for relay ${identifier}`);
 
   if (!forceRecheck) {
     for (const peer of peers) {
       if (peerHealthManager.isPeerHealthy(peer.publicKey)) {
-        console.log(`[${new Date().toISOString()}] Found already healthy peer ${peer.publicKey.substring(0, 8)} for relay ${relayKey}`);
+        console.log(`[${new Date().toISOString()}] Found already healthy peer ${peer.publicKey.substring(0, 8)} for relay ${identifier}`);
         return peer;
       }
     }
@@ -862,7 +869,7 @@ async function findHealthyPeerForRelay(relayKey, forceRecheck = false) {
     if (peerHealthManager.attemptCircuitReset(peer.publicKey)) {
       console.log(`[${new Date().toISOString()}] Attempting to recover circuit-broken peer ${peer.publicKey.substring(0, 8)}`);
       if (await peerHealthManager.checkPeerHealth(peer, connectionPool)) {
-        console.log(`[${new Date().toISOString()}] Successfully recovered peer ${peer.publicKey.substring(0, 8)} for relay ${relayKey}`);
+        console.log(`[${new Date().toISOString()}] Successfully recovered peer ${peer.publicKey.substring(0, 8)} for relay ${identifier}`);
         return peer;
       }
     }
@@ -871,20 +878,20 @@ async function findHealthyPeerForRelay(relayKey, forceRecheck = false) {
   for (const peer of peers) {
     console.log(`[${new Date().toISOString()}] Checking health of peer ${peer.publicKey.substring(0, 8)}`);
     if (await peerHealthManager.checkPeerHealth(peer, connectionPool)) {
-      console.log(`[${new Date().toISOString()}] Found healthy peer ${peer.publicKey.substring(0, 8)} for relay ${relayKey}`);
+      console.log(`[${new Date().toISOString()}] Found healthy peer ${peer.publicKey.substring(0, 8)} for relay ${identifier}`);
       return peer;
     }
   }
 
-  console.log(`[${new Date().toISOString()}] No healthy peers found for relay ${relayKey}`);
+  console.log(`[${new Date().toISOString()}] No healthy peers found for relay ${identifier}`);
   return null;
 }
 
 function removePeerFromAllRelays(peer) {
-  for (const [relayKey, relayData] of activeRelays.entries()) {
+  for (const [identifier, relayData] of activeRelays.entries()) {
     relayData.peers.delete(peer.publicKey);
     if (relayData.peers.size === 0) {
-      activeRelays.delete(relayKey);
+      activeRelays.delete(identifier);
     }
   }
 }
@@ -1002,11 +1009,11 @@ async function updateNetworkStats() {
       last_update: new Date().toISOString()
     };
 
-    for (const [relayKey, relayData] of activeRelays.entries()) {
+    for (const [identifier, relayData] of activeRelays.entries()) {
       const healthyPeers = Array.from(relayData.peers)
         .filter(peer => peerHealthManager.isPeerHealthy(peer));
-      
-      stats.relays[relayKey] = {
+
+      stats.relays[identifier] = {
         status: healthyPeers.length > 0 ? 'online' : 'degraded',
         preferred_relays: [],
         total_peers: relayData.peers.size,
