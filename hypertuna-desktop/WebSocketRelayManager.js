@@ -11,11 +11,12 @@ class WebSocketRelayManager {
         this.connectCallbacks = []; // Callbacks for relay connections
         this.disconnectCallbacks = []; // Callbacks for relay disconnections
         
-        // Add rate limiting
-        this.requestQueue = [];
-        this.processingQueue = false;
-        this.lastRequestTime = 0;
-        this.minTimeBetweenRequests = 50; // 50ms between requests to avoid "too fast" errors
+        // Rate limiting between messages for each relay
+        this.minTimeBetweenRequests = 250; // ms between messages per relay
+
+        // Retry configuration for publishes that get rate limited
+        this.maxPublishRetries = 2;
+        this.retryDelay = 2000; // starting delay in ms for rate-limit retries
     }
 
     /**
@@ -41,7 +42,10 @@ class WebSocketRelayManager {
                     conn: ws,
                     status: 'connecting',
                     subscriptions: new Map(),
-                    pendingMessages: []
+                    pendingMessages: [],
+                    requestQueue: [],
+                    processingQueue: false,
+                    lastRequestTime: 0
                 };
                 
                 this.relays.set(url, relayData);
@@ -53,7 +57,7 @@ class WebSocketRelayManager {
                     // Send any pending messages with rate limiting
                     if (relayData.pendingMessages.length > 0) {
                         relayData.pendingMessages.forEach(msg => {
-                            this._queueRequest(() => {
+                            this._queueRelayRequest(url, () => {
                                 if (ws.readyState === WebSocket.OPEN) {
                                     ws.send(msg);
                                 }
@@ -116,41 +120,43 @@ class WebSocketRelayManager {
     }
 
     /**
-     * Process the request queue with rate limiting
+     * Process the queue for a specific relay with rate limiting
+     * @param {string} relayUrl - Relay identifier
      * @private
      */
-    _processQueue() {
-        if (this.requestQueue.length === 0) {
-            this.processingQueue = false;
+    _processRelayQueue(relayUrl) {
+        const relay = this.relays.get(relayUrl);
+        if (!relay) return;
+
+        if (relay.requestQueue.length === 0) {
+            relay.processingQueue = false;
             return;
         }
 
-        this.processingQueue = true;
+        relay.processingQueue = true;
         const now = Date.now();
-        const timeSinceLastRequest = now - this.lastRequestTime;
-        
-        // If we need to wait, schedule the next request
-        if (timeSinceLastRequest < this.minTimeBetweenRequests) {
-            setTimeout(() => this._processQueue(), 
-                this.minTimeBetweenRequests - timeSinceLastRequest);
+        const timeSinceLast = now - relay.lastRequestTime;
+
+        if (timeSinceLast < this.minTimeBetweenRequests) {
+            setTimeout(() => this._processRelayQueue(relayUrl),
+                this.minTimeBetweenRequests - timeSinceLast);
             return;
         }
 
-        // Process the next request
-        const request = this.requestQueue.shift();
-        this.lastRequestTime = Date.now();
-        
+        const request = relay.requestQueue.shift();
+        relay.lastRequestTime = Date.now();
+
         try {
             request();
         } catch (e) {
-            console.error('Error processing request:', e);
+            console.error(`Error processing request for ${relayUrl}:`, e);
         }
 
-        // Continue processing queue if there are more items
-        if (this.requestQueue.length > 0) {
-            setTimeout(() => this._processQueue(), this.minTimeBetweenRequests);
+        if (relay.requestQueue.length > 0) {
+            setTimeout(() => this._processRelayQueue(relayUrl),
+                this.minTimeBetweenRequests);
         } else {
-            this.processingQueue = false;
+            relay.processingQueue = false;
         }
     }
 
@@ -189,11 +195,14 @@ _validateEvent(event) {
      * @param {Function} request - Function to execute
      * @private
      */
-    _queueRequest(request) {
-        this.requestQueue.push(request);
-        
-        if (!this.processingQueue) {
-            this._processQueue();
+    _queueRelayRequest(relayUrl, request) {
+        const relay = this.relays.get(relayUrl);
+        if (!relay) return;
+
+        relay.requestQueue.push(request);
+
+        if (!relay.processingQueue) {
+            this._processRelayQueue(relayUrl);
         }
     }
 
@@ -324,8 +333,8 @@ _validateEvent(event) {
         const reqMsg = JSON.stringify(['REQ', shortSubId, ...filters]);
         console.log(`REQ message to ${relayUrl}:`, reqMsg);
         
-        // Queue the subscription request
-        this._queueRequest(() => {
+        // Queue the subscription request for this relay
+        this._queueRelayRequest(relayUrl, () => {
             if (relay.status === 'open') {
                 relay.conn.send(reqMsg);
                 console.log(`Subscription ${shortSubId} sent to ${relayUrl}`);
@@ -359,7 +368,7 @@ _validateEvent(event) {
             if (relay.status === 'open' && relay.subscriptions.has(subscriptionId)) {
                 const closeMsg = JSON.stringify(['CLOSE', shortSubId]);
                 
-                this._queueRequest(() => {
+                this._queueRelayRequest(url, () => {
                     if (relay.status === 'open') {
                         relay.conn.send(closeMsg);
                     }
@@ -405,81 +414,80 @@ _validateEvent(event) {
     
         this.relays.forEach((relay, url) => {
             console.log(`Attempting to publish to relay: ${url}`);
-            
-            const publishPromise = new Promise((resolve, reject) => {
-                // Create a timeout for this publish
-                const timeout = setTimeout(() => {
-                    // Remove the one-time event listener if it times out
-                    if (okHandler) {
-                        relay.conn.removeEventListener('message', okHandler);
-                    }
-                    console.warn(`Publish to ${url} timed out for event ${event.id.substring(0, 8)}...`);
-                    reject(new Error(`Publish to ${url} timed out`));
-                }, 10000);
-                
-                // Create a one-time event handler for the OK response
-                const okHandler = (msgEvent) => {
-                    try {
-                        const data = JSON.parse(msgEvent.data);
-                        
-                        // Check if this is an OK response for our event
-                        if (Array.isArray(data) && data[0] === 'OK' && data[1] === event.id) {
-                            console.log(`Received OK from ${url} for event ${event.id.substring(0, 8)}...`, data);
-                            
-                            clearTimeout(timeout);
+
+            const sendWithRetries = (attempt = 0) => {
+                return new Promise((resolve) => {
+                    const timeout = setTimeout(() => {
+                        if (okHandler) {
                             relay.conn.removeEventListener('message', okHandler);
-                            
-                            // Resolve with success or error based on relay response
-                            if (data.length > 2 && data[2] === true) {
-                                console.log(`Success publish to ${url} for event ${event.id.substring(0, 8)}...`);
-                                resolve({ url, success: true });
-                            } else {
-                                const errorMsg = data.length > 3 ? data[3] : 'Unknown error';
-                                console.warn(`Failed publish to ${url}: ${errorMsg}`);
-                                resolve({ url, success: false, error: errorMsg });
-                            }
                         }
-                    } catch (e) {
-                        console.warn(`Error parsing message from ${url}:`, e, msgEvent.data);
-                    }
-                };
-    
-                // Send the event
-                if (relay.status === 'open') {
-                    try {
-                        // Listen for the OK response
-                        relay.conn.addEventListener('message', okHandler);
-                        
-                        // Queue the publish request
-                        this._queueRequest(() => {
-                            try {
-                                if (relay.conn.readyState === WebSocket.OPEN) {
-                                    relay.conn.send(eventMsg);
-                                    console.log(`Event sent to ${url}`);
+                        console.warn(`Publish to ${url} timed out for event ${event.id.substring(0, 8)}...`);
+                        resolve({ url, success: false, error: 'timeout' });
+                    }, 10000);
+
+                    const okHandler = (msgEvent) => {
+                        try {
+                            const data = JSON.parse(msgEvent.data);
+                            if (Array.isArray(data) && data[0] === 'OK' && data[1] === event.id) {
+                                clearTimeout(timeout);
+                                relay.conn.removeEventListener('message', okHandler);
+
+                                if (data.length > 2 && data[2] === true) {
+                                    console.log(`Success publish to ${url} for event ${event.id.substring(0, 8)}...`);
+                                    resolve({ url, success: true });
                                 } else {
-                                    // If connection closed while in queue
-                                    console.log(`Relay ${url} disconnected, queueing event`);
-                                    relay.pendingMessages.push(eventMsg);
-                                    resolve({ url, success: true, queued: true });
+                                    const errorMsg = data.length > 3 ? data[3] : 'Unknown error';
+                                    console.warn(`Failed publish to ${url}: ${errorMsg}`);
+
+                                    if (errorMsg.toLowerCase().includes('rate-limited') && attempt < this.maxPublishRetries) {
+                                        const delay = this.retryDelay * (attempt + 1);
+                                        console.warn(`Rate limited by ${url}, retrying in ${delay}ms`);
+                                        setTimeout(() => {
+                                            this._queueRelayRequest(url, () => {
+                                                sendWithRetries(attempt + 1).then(resolve);
+                                            });
+                                        }, delay);
+                                    } else {
+                                        resolve({ url, success: false, error: errorMsg });
+                                    }
                                 }
-                            } catch (err) {
-                                console.warn(`Error sending to ${url}:`, err);
-                                resolve({ url, success: false, error: err.message });
                             }
-                        });
-                    } catch (err) {
-                        console.warn(`Error setting up publish to ${url}:`, err);
-                        resolve({ url, success: false, error: err.message });
+                        } catch (e) {
+                            console.warn(`Error parsing message from ${url}:`, e, msgEvent.data);
+                        }
+                    };
+
+                    if (relay.status === 'open') {
+                        try {
+                            relay.conn.addEventListener('message', okHandler);
+                            this._queueRelayRequest(url, () => {
+                                try {
+                                    if (relay.conn.readyState === WebSocket.OPEN) {
+                                        relay.conn.send(eventMsg);
+                                        console.log(`Event sent to ${url}`);
+                                    } else {
+                                        console.log(`Relay ${url} disconnected, queueing event`);
+                                        relay.pendingMessages.push(eventMsg);
+                                        resolve({ url, success: true, queued: true });
+                                    }
+                                } catch (err) {
+                                    console.warn(`Error sending to ${url}:`, err);
+                                    resolve({ url, success: false, error: err.message });
+                                }
+                            });
+                        } catch (err) {
+                            console.warn(`Error setting up publish to ${url}:`, err);
+                            resolve({ url, success: false, error: err.message });
+                        }
+                    } else {
+                        console.log(`Relay ${url} not open, queueing message`);
+                        relay.pendingMessages.push(eventMsg);
+                        resolve({ url, success: true, queued: true });
                     }
-                } else {
-                    // Queue the message to be sent when connected
-                    console.log(`Relay ${url} not open, queueing message`);
-                    relay.pendingMessages.push(eventMsg);
-                    resolve({ url, success: true, queued: true });
-                }
-            });
-    
-            publishPromises.push(publishPromise);
+                });
+            };
+
+            publishPromises.push(sendWithRetries());
         });
     
         // Return a promise that resolves when published to at least one relay
