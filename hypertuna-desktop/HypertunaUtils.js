@@ -243,14 +243,27 @@ export class HypertunaUtils {
                 console.warn('Failed to parse gateway URL, using raw value');
             }
             
+            // Generate bech32 encoded values
+            const nostr_npub = NostrUtils.hexToNpub(publicKeyHex);
+            const nostr_nsec = NostrUtils.hexToNsec(privateKeyHex);
+            
             // Create the full configuration
             return {
+                // Hex values (kept for compatibility)
                 nostr_pubkey_hex: publicKeyHex,
                 nostr_nsec_hex: privateKeyHex,
+                
+                // Bech32 encoded values (new)
+                nostr_npub: nostr_npub,
+                nostr_nsec: nostr_nsec,
+                
+                // Hypertuna proxy keys
                 proxy_privateKey: derivedKeypair.privateKey,
                 proxy_publicKey: derivedKeypair.publicKey,
                 proxy_seed: derivedKeypair.seed,
                 swarmPublicKey: derivedKeypair.publicKey,
+                
+                // Server configuration
                 proxy_server_address: hostname,
                 gatewayUrl: gatewayUrl,
                 registerWithGateway: true,
@@ -262,13 +275,26 @@ export class HypertunaUtils {
             // Return a valid but fallback config if derivation fails
             const fallbackKeypair = this.fallbackKeyPair(privateKeyHex);
             
+            // Generate bech32 values even in fallback
+            const nostr_npub = NostrUtils.hexToNpub(publicKeyHex);
+            const nostr_nsec = NostrUtils.hexToNsec(privateKeyHex);
+            
             return {
+                // Hex values
                 nostr_pubkey_hex: publicKeyHex,
                 nostr_nsec_hex: privateKeyHex,
+                
+                // Bech32 values
+                nostr_npub: nostr_npub,
+                nostr_nsec: nostr_nsec,
+                
+                // Proxy keys
                 proxy_privateKey: fallbackKeypair.privateKey,
                 proxy_publicKey: fallbackKeypair.publicKey,
                 proxy_seed: fallbackKeypair.seed,
                 swarmPublicKey: fallbackKeypair.publicKey,
+                
+                // Server configuration
                 proxy_server_address: new URL(gatewayUrl).hostname || 'hypertuna.com',
                 gatewayUrl: gatewayUrl,
                 registerWithGateway: true,
@@ -349,7 +375,8 @@ export class HypertunaUtils {
     }
     
     /**
-     * Load Hypertuna configuration from localStorage
+     * Load Hypertuna configuration from localStorage or file system
+     * Ensures bech32 values are present for backward compatibility
      * @returns {Object|null} - Hypertuna configuration or null if not found
      */
     static async loadConfig() {
@@ -430,6 +457,37 @@ export class HypertunaUtils {
             }
         }
         
+        // Ensure bech32 values are present (for backward compatibility)
+        if (config) {
+            // Check if bech32 values are missing and generate them
+            if (config.nostr_pubkey_hex && !config.nostr_npub) {
+                config.nostr_npub = NostrUtils.hexToNpub(config.nostr_pubkey_hex);
+                console.log('Generated missing npub from hex:', config.nostr_npub);
+            }
+            
+            if (config.nostr_nsec_hex && !config.nostr_nsec) {
+                config.nostr_nsec = NostrUtils.hexToNsec(config.nostr_nsec_hex);
+                console.log('Generated missing nsec from hex');
+            }
+            
+            // Validate bech32 values match hex values
+            if (config.nostr_npub) {
+                const derivedHex = NostrUtils.npubToHex(config.nostr_npub);
+                if (derivedHex && derivedHex !== config.nostr_pubkey_hex) {
+                    console.warn('Mismatch between npub and hex pubkey, regenerating npub');
+                    config.nostr_npub = NostrUtils.hexToNpub(config.nostr_pubkey_hex);
+                }
+            }
+            
+            if (config.nostr_nsec) {
+                const derivedHex = NostrUtils.nsecToHex(config.nostr_nsec);
+                if (derivedHex && derivedHex !== config.nostr_nsec_hex) {
+                    console.warn('Mismatch between nsec and hex privkey, regenerating nsec');
+                    config.nostr_nsec = NostrUtils.hexToNsec(config.nostr_nsec_hex);
+                }
+            }
+        }
+        
         return config;
     }
     
@@ -453,4 +511,38 @@ export class HypertunaUtils {
         await this.saveConfig(config);
         return config;
     }
+
+    /**
+     * Ensure a config object has bech32 encoded values
+     * This is useful before sending config to worker or saving
+     * @param {Object} config - Hypertuna configuration
+     * @returns {Object} - Config with bech32 values added if missing
+     */
+    static ensureBech32Values(config) {
+        if (!config) return config;
+        
+        // Create a copy to avoid mutating the original
+        const enhancedConfig = { ...config };
+        
+        // Add npub if missing
+        if (enhancedConfig.nostr_pubkey_hex && !enhancedConfig.nostr_npub) {
+            try {
+                enhancedConfig.nostr_npub = NostrUtils.hexToNpub(enhancedConfig.nostr_pubkey_hex);
+            } catch (e) {
+                console.error('Failed to generate npub:', e);
+            }
+        }
+        
+        // Add nsec if missing
+        if (enhancedConfig.nostr_nsec_hex && !enhancedConfig.nostr_nsec) {
+            try {
+                enhancedConfig.nostr_nsec = NostrUtils.hexToNsec(enhancedConfig.nostr_nsec_hex);
+            } catch (e) {
+                console.error('Failed to generate nsec:', e);
+            }
+        }
+        
+        return enhancedConfig;
+    }
+
 }

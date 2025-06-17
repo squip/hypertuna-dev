@@ -149,7 +149,7 @@ async function startWorker() {
         
         // IMPORTANT: Get the current user's config from localStorage instead of file
         let configToUse = {}
-        
+
         // First, check localStorage for the current user's Hypertuna config
         const hypertunaConfigStr = localStorage.getItem('hypertuna_config');
         if (hypertunaConfigStr) {
@@ -173,76 +173,102 @@ async function startWorker() {
         
         // If no localStorage config, try file system (but verify it matches current user)
         if (!configToUse.nostr_pubkey_hex) {
-            try {
-                const configPath = join(Pear.config.storage || '.', 'relay-config.json')
-                
-                ConfigLogger.log('LOAD', {
-                    module: 'app.js',
-                    method: 'startWorker',
-                    filepath: configPath,
-                    attempting: true
-                });
-                
-                const file = await fs.readFile(configPath, 'utf8')
-                const fileConfig = JSON.parse(file)
-                
-                ConfigLogger.log('LOAD', {
-                    module: 'app.js',
-                    method: 'startWorker',
-                    filepath: configPath,
-                    success: true,
-                    dataSize: file.length
-                });
-                
-                // CRITICAL: Verify the file config matches current user
-                const currentUserStr = localStorage.getItem('nostr_user');
-                if (currentUserStr) {
-                    const currentUser = JSON.parse(currentUserStr);
-                    
-                    if (fileConfig.nostr_pubkey_hex === currentUser.pubkey) {
-                        console.log('[App] File config matches current user, using it');
-                        configToUse = fileConfig;
-                    } else {
-                        console.warn('[App] File config is for different user!');
-                        console.warn(`  File user: ${fileConfig.nostr_pubkey_hex?.substring(0, 8)}...`);
-                        console.warn(`  Current user: ${currentUser.pubkey?.substring(0, 8)}...`);
-                        
-                        // Use the current user's config from localStorage instead
-                        if (currentUser.hypertunaConfig) {
-                            configToUse = currentUser.hypertunaConfig;
-                            console.log('[App] Using current user\'s Hypertuna config from memory');
-                            
-                            // Save the correct config to file for next time
-                            try {
-                                await fs.writeFile(configPath, JSON.stringify(configToUse, null, 2));
-                                console.log('[App] Updated relay-config.json with current user\'s config');
-                                
-                                ConfigLogger.log('SAVE', {
-                                    module: 'app.js',
-                                    method: 'startWorker',
-                                    filepath: configPath,
-                                    success: true,
-                                    dataSize: JSON.stringify(configToUse).length
-                                });
-                            } catch (saveErr) {
-                                console.error('[App] Failed to save updated config:', saveErr);
-                            }
-                        }
-                    }
-                } else {
-                    // No current user in localStorage, use file config
-                    configToUse = fileConfig;
-                }
-            } catch (e) {
-                ConfigLogger.log('LOAD', {
-                    module: 'app.js',
-                    method: 'startWorker',
-                    filepath: join(Pear.config.storage || '.', 'relay-config.json'),
-                    success: false,
-                    error: e.message
-                });
-                console.error('[App] Failed to load stored config:', e)
-            }
+          try {
+              const configPath = join(Pear.config.storage || '.', 'relay-config.json')
+              
+              ConfigLogger.log('LOAD', {
+                  module: 'app.js',
+                  method: 'startWorker',
+                  filepath: configPath,
+                  attempting: true
+              });
+              
+              const file = await fs.readFile(configPath, 'utf8')
+              const fileConfig = JSON.parse(file)
+              
+              ConfigLogger.log('LOAD', {
+                  module: 'app.js',
+                  method: 'startWorker',
+                  filepath: configPath,
+                  success: true,
+                  dataSize: file.length
+              });
+              
+              // CRITICAL: Verify the file config matches current user
+              const currentUserStr = localStorage.getItem('nostr_user');
+              if (currentUserStr) {
+                  const currentUser = JSON.parse(currentUserStr);
+                  
+                  if (fileConfig.nostr_pubkey_hex === currentUser.pubkey) {
+                      console.log('[App] File config matches current user, using it');
+                      configToUse = fileConfig;
+                  } else {
+                      console.warn('[App] File config is for different user!');
+                      console.warn(`  File user: ${fileConfig.nostr_pubkey_hex?.substring(0, 8)}...`);
+                      console.warn(`  Current user: ${currentUser.pubkey?.substring(0, 8)}...`);
+                      
+                      // Use the current user's config from localStorage instead
+                      if (currentUser.hypertunaConfig) {
+                          configToUse = currentUser.hypertunaConfig;
+                          console.log('[App] Using current user\'s Hypertuna config from memory');
+                          
+                          // Save the correct config to file for next time
+                          try {
+                              await fs.writeFile(configPath, JSON.stringify(configToUse, null, 2));
+                              console.log('[App] Updated relay-config.json with current user\'s config');
+                              
+                              ConfigLogger.log('SAVE', {
+                                  module: 'app.js',
+                                  method: 'startWorker',
+                                  filepath: configPath,
+                                  success: true,
+                                  dataSize: JSON.stringify(configToUse).length
+                              });
+                          } catch (saveErr) {
+                              console.error('[App] Failed to save updated config:', saveErr);
+                          }
+                      }
+                  }
+              } else {
+                  // No current user in localStorage, use file config
+                  configToUse = fileConfig;
+              }
+          } catch (e) {
+              ConfigLogger.log('LOAD', {
+                  module: 'app.js',
+                  method: 'startWorker',
+                  filepath: join(Pear.config.storage || '.', 'relay-config.json'),
+                  success: false,
+                  error: e.message
+              });
+              console.error('[App] Failed to load stored config:', e)
+          }
+        }
+
+        // IMPORTANT: Ensure bech32 values are present before sending to worker
+        // Import HypertunaUtils at the top of app.js if not already imported
+        if (configToUse.nostr_pubkey_hex || configToUse.nostr_nsec_hex) {
+          // Add bech32 values if missing
+          if (!configToUse.nostr_npub && configToUse.nostr_pubkey_hex) {
+              try {
+                  // Use dynamic import to avoid circular dependencies
+                  const { NostrUtils } = await import('./NostrUtils.js');
+                  configToUse.nostr_npub = NostrUtils.hexToNpub(configToUse.nostr_pubkey_hex);
+                  console.log('[App] Generated npub for worker config');
+              } catch (e) {
+                  console.error('[App] Failed to generate npub:', e);
+              }
+          }
+          
+          if (!configToUse.nostr_nsec && configToUse.nostr_nsec_hex) {
+              try {
+                  const { NostrUtils } = await import('./NostrUtils.js');
+                  configToUse.nostr_nsec = NostrUtils.hexToNsec(configToUse.nostr_nsec_hex);
+                  console.log('[App] Generated nsec for worker config');
+              } catch (e) {
+                  console.error('[App] Failed to generate nsec:', e);
+              }
+          }
         }
 
         // Merge with apiUrl from package links
@@ -255,10 +281,12 @@ async function startWorker() {
         }
         
         console.log('[App] Config to send to worker:', {
-            pubkey: configMessage.data.nostr_pubkey_hex?.substring(0, 8) + '...',
-            proxy_pubkey: configMessage.data.proxy_publicKey?.substring(0, 8) + '...',
-            hasStorage: !!configMessage.data.storage
-        });
+          pubkey: configMessage.data.nostr_pubkey_hex?.substring(0, 8) + '...',
+          npub: configMessage.data.nostr_npub?.substring(0, 8) + '...',
+          proxy_pubkey: configMessage.data.proxy_publicKey?.substring(0, 8) + '...',
+          hasStorage: !!configMessage.data.storage,
+          hasBech32: !!(configMessage.data.nostr_npub && configMessage.data.nostr_nsec)
+      });
         
         // Send config right away
         setTimeout(() => {
