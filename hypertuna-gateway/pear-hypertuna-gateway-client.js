@@ -444,11 +444,11 @@ class EnhancedHyperswarmPool {
   }
  }
  
- async function forwardMessageToPeerHyperswarm(peerPublicKey, relayKey, message, connectionKey, connectionPool) {
+async function forwardMessageToPeerHyperswarm(peerPublicKey, identifier, message, connectionKey, connectionPool) {
   try {
     console.log(`[ForwardMessage] ========================================`);
     console.log(`[ForwardMessage] FORWARDING RELAY MESSAGE`);
-    console.log(`[ForwardMessage] Relay: ${relayKey}`);
+    console.log(`[ForwardMessage] Relay: ${identifier}`);
     console.log(`[ForwardMessage] Connection: ${connectionKey}`);
     console.log(`[ForwardMessage] Peer: ${peerPublicKey.substring(0, 8)}...`);
     
@@ -456,7 +456,7 @@ class EnhancedHyperswarmPool {
     
     const response = await connection.sendRequest({
       method: 'POST',
-      path: `/post/relay/${relayKey}`,
+      path: `/post/relay/${identifier}`,
       headers: { 'content-type': 'application/json' },
       body: Buffer.from(JSON.stringify({ message, connectionKey }))
     });
@@ -483,15 +483,15 @@ class EnhancedHyperswarmPool {
   }
  }
  
- async function getEventsFromPeerHyperswarm(peerPublicKey, relayKey, connectionKey, connectionPool) {
+async function getEventsFromPeerHyperswarm(peerPublicKey, identifier, connectionKey, connectionPool) {
   try {
-    console.log(`[GetEvents] Checking for events - relay: ${relayKey}, connection: ${connectionKey}`);
+    console.log(`[GetEvents] Checking for events - relay: ${identifier}, connection: ${connectionKey}`);
     
     const connection = await connectionPool.getConnection(peerPublicKey);
     
     const response = await connection.sendRequest({
       method: 'GET',
-      path: `/get/relay/${relayKey}/${connectionKey}`,
+      path: `/get/relay/${identifier}/${connectionKey}`,
       headers: { 'accept': 'application/json' }
     });
     
