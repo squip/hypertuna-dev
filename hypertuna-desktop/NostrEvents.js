@@ -173,20 +173,26 @@ class NostrEvents {
      * @param {string} privateKey - Private key for signing
      * @returns {Promise<Object>} - Collection of events for group creation
      */
-    static async createGroupCreationEvent(name, about, isPublic, isOpen, privateKey, relayKey = null, proxyServer = '') {
-        const groupId = relayKey || NostrUtils.generateRandomId();
-        const hypertunaId = relayKey || NostrUtils.generateRandomId();
+    static async createGroupCreationEvent(name, about, isPublic, isOpen, privateKey, relayKey = null, proxyServer = '', npub) {
+        // Import the utility
+        const { PublicIdentifierUtils } = await import('./PublicIdentifierUtils.js');
         
-        console.log(`Creating group with ID: ${groupId}`);
-        console.log(`Using hypertuna ID: ${hypertunaId}`);
-        console.log(`Group settings: name="${name}", public=${isPublic}, open=${isOpen}`);
+        // Generate the public identifier
+        const publicIdentifier = PublicIdentifierUtils.generatePublicIdentifier(npub, name);
+        const wsUrl = PublicIdentifierUtils.generateWebSocketUrl(proxyServer, npub, name);
+        
+        console.log(`Creating group with public identifier: ${publicIdentifier}`);
+        console.log(`WebSocket URL: ${wsUrl}`);
+        
+        // Keep the internal relayKey separate from public identifiers
+        const internalGroupId = relayKey || NostrUtils.generateRandomId();
         
         // Base tags for the group creation event (kind 9007)
         const groupTags = [
-            ['h', groupId],
-            ['name', String(name)], // Ensure name is a string
-            ['about', about ? String(about) : ''], // Ensure about is a string, defaulting to empty if null/undefined
-            ['hypertuna', hypertunaId],
+            ['h', publicIdentifier], // Use public identifier instead of groupId
+            ['name', String(name)],
+            ['about', about ? String(about) : ''],
+            ['hypertuna', publicIdentifier], // Use public identifier
             ['i', 'hypertuna:relay']
         ];
         
@@ -210,12 +216,12 @@ class NostrEvents {
             privateKey
         );
         
-        // Create the kind 39000 group metadata event (with 'd' tag instead of 'h')
+        // Create the kind 39000 group metadata event
         const metadataTags = [
-            ['d', groupId],
-            ['name', String(name)], // Ensure name is a string
-            ['about', about ? String(about) : ''], // Ensure about is a string
-            ['hypertuna', hypertunaId],
+            ['d', publicIdentifier], // Use public identifier for 'd' tag
+            ['name', String(name)],
+            ['about', about ? String(about) : ''],
+            ['hypertuna', publicIdentifier], // Use public identifier
             ['i', 'hypertuna:relay']
         ];
         
@@ -240,9 +246,9 @@ class NostrEvents {
         
         // Create the kind 30166 Hypertuna relay event
         const hypertunaRelayTags = [
-            ['d', proxyServer ? `wss://${proxyServer}/${groupId}` : NostrUtils.generateRandomId()],
-            ['hypertuna', hypertunaId],
-            ['h', groupId],
+            ['d', wsUrl], // Use the WebSocket URL with public identifier
+            ['hypertuna', publicIdentifier], // Use public identifier
+            ['h', publicIdentifier], // Use public identifier
             ['i', 'hypertuna:relay']
         ];
         
@@ -257,8 +263,9 @@ class NostrEvents {
             groupCreateEvent,
             metadataEvent,
             hypertunaEvent,
-            groupId,
-            hypertunaId
+            groupId: publicIdentifier, // Return public identifier as groupId
+            hypertunaId: publicIdentifier, // Return public identifier as hypertunaId
+            internalRelayKey: internalGroupId // Keep track of internal key
         };
     }
     
@@ -270,16 +277,13 @@ class NostrEvents {
      * @param {string} privateKey - Private key for signing
      * @returns {Promise<Object>} - Metadata edit event and updated metadata event
      */
-    static async createGroupMetadataEditEvents(groupId, hypertunaId, metadata, privateKey) {
-        console.log(`Creating group metadata edit events for group ${groupId}`);
-        console.log(`Using hypertuna ID: ${hypertunaId}`);
-        console.log(`Updated metadata:`, metadata);
+    static async createGroupMetadataEditEvents(publicIdentifier, metadata, privateKey) {
+        console.log(`Creating group metadata edit events for: ${publicIdentifier}`);
         
         // Create the kind 9002 edit metadata event
         const editTags = [
-            ['h', groupId],
-            ['hypertuna', hypertunaId],
-            ['i', 'hypertuna:relay']  // Added identifier tag
+            ['h', publicIdentifier], // Use public identifier
+            ['i', 'hypertuna:relay']
         ];
         
         if (metadata.name) {
@@ -307,9 +311,9 @@ class NostrEvents {
         
         // Create updated kind 39000 group metadata event
         const metadataTags = [
-            ['d', groupId],
-            ['hypertuna', hypertunaId],
-            ['i', 'hypertuna:relay']  // Added identifier tag
+            ['d', publicIdentifier], // Use public identifier
+            ['hypertuna', publicIdentifier], // Keep consistent
+            ['i', 'hypertuna:relay']
         ];
         
         if (metadata.name) {
@@ -354,9 +358,9 @@ class NostrEvents {
      * @param {string} privateKey - Private key for signing
      * @returns {Promise<Object>} - Signed event
      */
-    static async createGroupJoinRequest(groupId, inviteCode, privateKey) {
+    static async createGroupJoinRequest(publicIdentifier, inviteCode, privateKey) {
         const tags = [
-            ['h', groupId]
+            ['h', publicIdentifier] // Use public identifier
         ];
         
         if (inviteCode) {
@@ -377,26 +381,26 @@ class NostrEvents {
      * @param {string} privateKey - Private key for signing
      * @returns {Promise<Object>} - Signed event
      */
-    static async createGroupLeaveRequest(groupId, privateKey) {
+    static async createGroupLeaveRequest(publicIdentifier, privateKey) {
         return this.createEvent(
             this.KIND_GROUP_LEAVE_REQUEST,
             'Request to leave the group',
-            [['h', groupId]],
+            [['h', publicIdentifier]], // Use public identifier
             privateKey
         );
     }
     
     /**
      * Create a put user event (kind 9000)
-     * @param {string} groupId - Group ID
+     * @param {string} publicIdentifier - Group ID
      * @param {string} pubkey - Public key of user to add/update
      * @param {Array} roles - Array of roles for the user
      * @param {string} privateKey - Private key for signing
      * @returns {Promise<Object>} - Signed event
      */
-    static async createPutUserEvent(groupId, pubkey, roles, privateKey) {
+    static async createPutUserEvent(publicIdentifier, pubkey, roles, privateKey) {
         const tags = [
-            ['h', groupId],
+            ['h', publicIdentifier], // Use public identifier
             ['p', pubkey, ...(roles || ['member'])]
         ];
         
@@ -410,14 +414,14 @@ class NostrEvents {
     
     /**
      * Create a remove user event (kind 9001)
-     * @param {string} groupId - Group ID
+     * @param {string} publicIdentifier - Group ID
      * @param {string} pubkey - Public key of user to remove
      * @param {string} privateKey - Private key for signing
      * @returns {Promise<Object>} - Signed event
      */
-    static async createRemoveUserEvent(groupId, pubkey, privateKey) {
+    static async createRemoveUserEvent(publicIdentifier, pubkey, privateKey) {
         const tags = [
-            ['h', groupId],
+            ['h', publicIdentifier], // Use public identifier
             ['p', pubkey]
         ];
         
@@ -431,15 +435,15 @@ class NostrEvents {
     
     /**
      * Create a group invite event (kind 9009)
-     * @param {string} groupId - Group ID
+     * @param {string} publicIdentifier - Group ID
      * @param {string} privateKey - Private key for signing
      * @returns {Promise<Object>} - Signed event
      */
-    static async createGroupInviteEvent(groupId, privateKey) {
+    static async createGroupInviteEvent(publicIdentifier, privateKey) {
         return this.createEvent(
             this.KIND_GROUP_INVITE_CREATE,
             'Creating invite code',
-            [['h', groupId]],
+            [['h', publicIdentifier]], // Use public identifier
             privateKey
         );
     }
@@ -483,15 +487,15 @@ class NostrEvents {
     
     /**
      * Create a group delete event (kind 9008)
-     * @param {string} groupId - Group ID
+     * @param {string} publicIdentifier - Group ID
      * @param {string} privateKey - Private key for signing
      * @returns {Promise<Object>} - Signed event
      */
-    static async createGroupDeleteEvent(groupId, privateKey) {
+    static async createGroupDeleteEvent(publicIdentifier, privateKey) {
         return this.createEvent(
             this.KIND_GROUP_DELETE,
             'Deleting group',
-            [['h', groupId]],
+            [['h', publicIdentifier]], // Use public identifier
             privateKey
         );
     }

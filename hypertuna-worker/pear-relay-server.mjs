@@ -22,6 +22,12 @@ import {
   updateRelaySubscriptions
 } from './hypertuna-relay-manager-adapter.mjs';
 
+import { 
+  findRelayByPublicIdentifier, 
+  getRelayKeyFromPublicIdentifier,
+  isRelayActiveByPublicIdentifier 
+} from './relay-lookup-utils.mjs';
+
 // Global state
 let config = null;
 let swarm = null;
@@ -442,41 +448,48 @@ function setupProtocolHandlers(protocol) {
   protocol.handle('/relays', async () => {
     console.log('[RelayServer] Relay list requested');
     try {
-      const activeRelays = await getActiveRelays(); // Added await
-      const profiles = await getRelayProfiles();
-      
-      const relayList = activeRelays.map(relay => {
-        const profile = profiles.find(p => p.relay_key === relay.relayKey) || {};
+        const activeRelays = await getActiveRelays();
+        const profiles = await getRelayProfiles();
+        
+        const relayList = activeRelays.map(relay => {
+            const profile = profiles.find(p => p.relay_key === relay.relayKey) || {};
+            
+            // Use public identifier in the connection URL if available
+            const connectionUrl = profile.public_identifier ? 
+                `wss://${config.proxy_server_address}/${profile.public_identifier.replace(':', '/')}` :
+                `wss://${config.proxy_server_address}/${relay.relayKey}`;
+            
+            return {
+                relayKey: relay.relayKey, // Still include for backward compatibility
+                publicIdentifier: profile.public_identifier || null, // Include public identifier
+                connectionUrl: connectionUrl,
+                name: profile.name || 'Unnamed Relay',
+                description: profile.description || '',
+                createdAt: profile.created_at || profile.joined_at || null,
+                peerCount: relay.peerCount || 0
+            };
+        });
+        
+        console.log(`[RelayServer] Returning ${relayList.length} relays`);
+        updateMetrics(true);
         return {
-          relayKey: relay.relayKey,
-          connectionUrl: `wss://${config.proxy_server_address}/${relay.relayKey}`,
-          name: profile.name || 'Unnamed Relay',
-          description: profile.description || '',
-          createdAt: profile.created_at || profile.joined_at || null,
-          peerCount: relay.peerCount || 0
+            statusCode: 200,
+            headers: { 'content-type': 'application/json' },
+            body: Buffer.from(JSON.stringify({
+                relays: relayList,
+                count: relayList.length
+            }))
         };
-      });
-      
-      console.log(`[RelayServer] Returning ${relayList.length} relays`);
-      updateMetrics(true);
-      return {
-        statusCode: 200,
-        headers: { 'content-type': 'application/json' },
-        body: Buffer.from(JSON.stringify({
-          relays: relayList,
-          count: relayList.length
-        }))
-      };
     } catch (error) {
-      console.error('[RelayServer] Error getting relay list:', error);
-      updateMetrics(false);
-      return {
-        statusCode: 500,
-        headers: { 'content-type': 'application/json' },
-        body: Buffer.from(JSON.stringify({ error: error.message }))
-      };
+        console.error('[RelayServer] Error getting relay list:', error);
+        updateMetrics(false);
+        return {
+            statusCode: 500,
+            headers: { 'content-type': 'application/json' },
+            body: Buffer.from(JSON.stringify({ error: error.message }))
+        };
     }
-  });
+});
   
   // Create relay
   protocol.handle('/relay/create', async (request) => {
@@ -643,164 +656,214 @@ function setupProtocolHandlers(protocol) {
   });
   
   // Disconnect from relay
-  protocol.handle('/relay/:relayKey/disconnect', async (request) => {
-    const relayKey = request.params.relayKey;
-    console.log('[RelayServer] Disconnect relay requested:', relayKey);
+  protocol.handle('/relay/:identifier/disconnect', async (request) => {
+    const identifier = request.params.identifier;
+    console.log('[RelayServer] Disconnect relay requested for identifier:', identifier);
     
     try {
-      const result = await disconnectRelayManager(relayKey);
-      
-      if (result.success) {
-        console.log('[RelayServer] Disconnected from relay successfully');
-        await updateHealthState(); // Added await
-        
-        // Send update to parent
-        if (global.sendMessage) {
-          const activeRelays = await getActiveRelays(); // Added await
-          global.sendMessage({
-            type: 'relay-update',
-            relays: activeRelays
-          });
+        // Resolve public identifier to relay key if needed
+        let relayKey = identifier;
+        if (identifier.includes(':')) {
+            relayKey = await getRelayKeyFromPublicIdentifier(identifier);
+            if (!relayKey) {
+                console.error(`[RelayServer] No relay found for public identifier: ${identifier}`);
+                updateMetrics(false);
+                return {
+                    statusCode: 404,
+                    headers: { 'content-type': 'application/json' },
+                    body: Buffer.from(JSON.stringify({ error: 'Relay not found' }))
+                };
+            }
+            console.log(`[RelayServer] Resolved public identifier ${identifier} to relay key ${relayKey.substring(0, 8)}...`);
         }
         
-        // Update gateway if connected
-        if (config.registerWithGateway && gatewayConnection) {
-          console.log('[RelayServer] Updating gateway after relay disconnect');
-          await registerWithGateway();
+        const result = await disconnectRelayManager(relayKey);
+        
+        if (result.success) {
+            console.log('[RelayServer] Disconnected from relay successfully');
+            await updateHealthState();
+            
+            // Send update to parent
+            if (global.sendMessage) {
+                const activeRelays = await getActiveRelays();
+                global.sendMessage({
+                    type: 'relay-update',
+                    relays: activeRelays
+                });
+            }
+            
+            // Update gateway if connected
+            if (config.registerWithGateway && gatewayConnection) {
+                console.log('[RelayServer] Updating gateway after relay disconnect');
+                await registerWithGateway();
+            }
+            
+            updateMetrics(true);
+            return {
+                statusCode: 200,
+                headers: { 'content-type': 'application/json' },
+                body: Buffer.from(JSON.stringify(result))
+            };
+        } else {
+            console.error('[RelayServer] Failed to disconnect relay:', result.error);
+            updateMetrics(false);
+            return {
+                statusCode: 404,
+                headers: { 'content-type': 'application/json' },
+                body: Buffer.from(JSON.stringify({ error: result.error }))
+            };
+        }
+    } catch (error) {
+        console.error('[RelayServer] Error disconnecting relay:', error);
+        updateMetrics(false);
+        return {
+            statusCode: 500,
+            headers: { 'content-type': 'application/json' },
+            body: Buffer.from(JSON.stringify({ error: error.message }))
+        };
+    }
+});
+  
+  // Handle relay messages (from gateway)
+  protocol.handle('/post/relay/:identifier', async (request) => {
+    const identifier = request.params.identifier;
+    const { message, connectionKey } = JSON.parse(request.body.toString());
+    
+    console.log(`[RelayServer] Relay message for identifier: ${identifier}, connectionKey: ${connectionKey}`);
+    
+    try {
+        // Check if identifier is a public identifier or relay key
+        let relayKey = identifier;
+        if (identifier.includes(':')) {
+            // This is a public identifier, look up the relay key
+            relayKey = await getRelayKeyFromPublicIdentifier(identifier);
+            if (!relayKey) {
+                console.error(`[RelayServer] No relay found for public identifier: ${identifier}`);
+                updateMetrics(false);
+                return {
+                    statusCode: 404,
+                    headers: { 'content-type': 'application/json' },
+                    body: Buffer.from(JSON.stringify({ error: 'Relay not found' }))
+                };
+            }
+            console.log(`[RelayServer] Resolved public identifier ${identifier} to relay key ${relayKey.substring(0, 8)}...`);
+        }
+        
+        // Continue with existing message handling logic
+        let nostrMessage;
+        if (message && message.type === 'Buffer' && Array.isArray(message.data)) {
+            const messageStr = Buffer.from(message.data).toString('utf8');
+            try {
+                nostrMessage = JSON.parse(messageStr);
+            } catch (parseError) {
+                throw new Error(`Failed to parse NOSTR message: ${parseError.message}`);
+            }
+        } else {
+            nostrMessage = message;
+        }
+
+        if (!Array.isArray(nostrMessage)) {
+            throw new Error('Invalid NOSTR message format - expected array');
+        }
+
+        if (nostrMessage.length < 2) {
+            throw new Error('Invalid NOSTR message format - insufficient elements');
+        }
+        
+        const responses = [];
+        const sendResponse = (response) => {
+            console.log(`[RelayServer] Queueing response for relay ${relayKey}`);
+            responses.push(response);
+        };
+        
+        await handleRelayMessage(relayKey, nostrMessage, sendResponse, connectionKey);
+        
+        console.log(`[RelayServer] Handled message, ${responses.length} responses queued`);
+        updateMetrics(true);
+        return {
+            statusCode: 200,
+            headers: { 'content-type': 'text/plain' },
+            body: Buffer.from(responses.map(r => JSON.stringify(r)).join('\n'))
+        };
+        
+    } catch (error) {
+        console.error(`[RelayServer] Error processing message:`, error);
+        updateMetrics(false);
+        return {
+            statusCode: 500,
+            headers: { 'content-type': 'application/json' },
+            body: Buffer.from(JSON.stringify([['NOTICE', `Error: ${error.message}`]]))
+        };
+    }
+});
+  
+  // Handle relay subscriptions (from gateway)
+  protocol.handle('/get/relay/:identifier/:connectionKey', async (request) => {
+    const identifier = request.params.identifier;
+    const connectionKey = request.params.connectionKey;
+    
+    console.log(`[RelayServer] Checking subscriptions for identifier: ${identifier}, connectionKey: ${connectionKey}`);
+    
+    try {
+        // Resolve public identifier to relay key if needed
+        let relayKey = identifier;
+        if (identifier.includes(':')) {
+            relayKey = await getRelayKeyFromPublicIdentifier(identifier);
+            if (!relayKey) {
+                console.error(`[RelayServer] No relay found for public identifier: ${identifier}`);
+                updateMetrics(false);
+                return {
+                    statusCode: 404,
+                    headers: { 'content-type': 'application/json' },
+                    body: Buffer.from(JSON.stringify(['NOTICE', 'Relay not found']))
+                };
+            }
+            console.log(`[RelayServer] Resolved public identifier ${identifier} to relay key ${relayKey.substring(0, 8)}...`);
+        }
+        
+        const [events, activeSubscriptionsUpdated] = await handleRelaySubscription(relayKey, connectionKey);
+        
+        if (!Array.isArray(events)) {
+            console.log(`[RelayServer] Invalid response format from handleSubscription`);
+            updateMetrics(false);
+            return {
+                statusCode: 500,
+                headers: { 'content-type': 'application/json' },
+                body: Buffer.from(JSON.stringify(['NOTICE', 'Internal server error: Invalid response format']))
+            };
+        }
+  
+        console.log(`[RelayServer] Found ${events.length} events for connectionKey: ${connectionKey}`);
+        
+        // Update subscriptions if needed
+        if (activeSubscriptionsUpdated) {
+            try {
+                console.log(`[RelayServer] Updating subscriptions for connectionKey: ${connectionKey}`);
+                await updateRelaySubscriptions(relayKey, connectionKey, activeSubscriptionsUpdated);
+                console.log(`[RelayServer] Successfully updated subscriptions for connectionKey: ${connectionKey}`);
+            } catch (updateError) {
+                console.log(`[RelayServer] Warning: Failed to update subscriptions for connectionKey: ${connectionKey}:`, updateError.message);
+            }
         }
         
         updateMetrics(true);
         return {
-          statusCode: 200,
-          headers: { 'content-type': 'application/json' },
-          body: Buffer.from(JSON.stringify(result))
+            statusCode: 200,
+            headers: { 'content-type': 'application/json' },
+            body: Buffer.from(JSON.stringify(events))
         };
-      } else {
-        console.error('[RelayServer] Failed to disconnect relay:', result.error);
+        
+    } catch (error) {
+        console.error(`[RelayServer] Error processing subscription:`, error);
         updateMetrics(false);
         return {
-          statusCode: 404,
-          headers: { 'content-type': 'application/json' },
-          body: Buffer.from(JSON.stringify({ error: result.error }))
+            statusCode: 500,
+            headers: { 'content-type': 'application/json' },
+            body: Buffer.from(JSON.stringify(['NOTICE', `Error: ${error.message}`]))
         };
-      }
-    } catch (error) {
-      console.error('[RelayServer] Error disconnecting relay:', error);
-      updateMetrics(false);
-      return {
-        statusCode: 500,
-        headers: { 'content-type': 'application/json' },
-        body: Buffer.from(JSON.stringify({ error: error.message }))
-      };
     }
-  });
-  
-  // Handle relay messages (from gateway)
-  protocol.handle('/post/relay/:relayKey', async (request) => {
-    const relayKey = request.params.relayKey;
-    const { message, connectionKey } = JSON.parse(request.body.toString());
-    
-    console.log(`[RelayServer] Relay message for ${relayKey}, connectionKey: ${connectionKey}`);
-    
-    try {
-      let nostrMessage;
-      if (message && message.type === 'Buffer' && Array.isArray(message.data)) {
-        const messageStr = Buffer.from(message.data).toString('utf8');
-        try {
-          nostrMessage = JSON.parse(messageStr);
-        } catch (parseError) {
-          throw new Error(`Failed to parse NOSTR message: ${parseError.message}`);
-        }
-      } else {
-        nostrMessage = message;
-      }
+});
 
-      if (!Array.isArray(nostrMessage)) {
-        throw new Error('Invalid NOSTR message format - expected array');
-      }
-
-      if (nostrMessage.length < 2) {
-        throw new Error('Invalid NOSTR message format - insufficient elements');
-      }
-      
-      const responses = [];
-      const sendResponse = (response) => {
-        console.log(`[RelayServer] Queueing response for relay ${relayKey}`);
-        responses.push(response);
-      };
-      
-      await handleRelayMessage(relayKey, nostrMessage, sendResponse, connectionKey);
-      
-      console.log(`[RelayServer] Handled message, ${responses.length} responses queued`);
-      updateMetrics(true);
-      return {
-        statusCode: 200,
-        headers: { 'content-type': 'text/plain' },
-        body: Buffer.from(responses.map(r => JSON.stringify(r)).join('\n'))
-      };
-      
-    } catch (error) {
-      console.error(`[RelayServer] Error processing message:`, error);
-      updateMetrics(false);
-      return {
-        statusCode: 500,
-        headers: { 'content-type': 'application/json' },
-        body: Buffer.from(JSON.stringify([['NOTICE', `Error: ${error.message}`]]))
-      };
-    }
-  });
-  
-  // Handle relay subscriptions (from gateway)
-  protocol.handle('/get/relay/:relayKey/:connectionKey', async (request) => {
-    const relayKey = request.params.relayKey;
-    const connectionKey = request.params.connectionKey;
-    
-    console.log(`[RelayServer] Checking subscriptions for relay ${relayKey}, connectionKey: ${connectionKey}`);
-    
-    try {
-      const [events, activeSubscriptionsUpdated] = await handleRelaySubscription(relayKey, connectionKey);
-      
-      if (!Array.isArray(events)) {
-        console.log(`[RelayServer] Invalid response format from handleSubscription`);
-        updateMetrics(false);
-        return {
-          statusCode: 500,
-          headers: { 'content-type': 'application/json' },
-          body: Buffer.from(JSON.stringify(['NOTICE', 'Internal server error: Invalid response format']))
-        };
-      }
-  
-      console.log(`[RelayServer] Found ${events.length} events for connectionKey: ${connectionKey}`);
-      
-      // Update subscriptions if needed
-      if (activeSubscriptionsUpdated) {
-        try {
-          console.log(`[RelayServer] Updating subscriptions for connectionKey: ${connectionKey}`);
-          await updateRelaySubscriptions(relayKey, connectionKey, activeSubscriptionsUpdated);
-          console.log(`[RelayServer] Successfully updated subscriptions for connectionKey: ${connectionKey}`);
-        } catch (updateError) {
-          console.log(`[RelayServer] Warning: Failed to update subscriptions for connectionKey: ${connectionKey}:`, updateError.message);
-          // Don't fail the entire request, just log the warning
-        }
-      }
-      
-      updateMetrics(true);
-      return {
-        statusCode: 200,
-        headers: { 'content-type': 'application/json' },
-        body: Buffer.from(JSON.stringify(events))
-      };
-      
-    } catch (error) {
-      console.error(`[RelayServer] Error processing subscription:`, error);
-      updateMetrics(false);
-      return {
-        statusCode: 500,
-        headers: { 'content-type': 'application/json' },
-        body: Buffer.from(JSON.stringify(['NOTICE', `Error: ${error.message}`]))
-      };
-    }
-  });
   
   // Registration endpoint (for gateway to call)
   protocol.handle('/register', async (request) => {
@@ -902,84 +965,106 @@ async function registerWithGateway(relayProfileInfo = null) {
   console.log('[RelayServer] Timestamp:', new Date().toISOString());
   
   if (!config.registerWithGateway) {
-    console.log('[RelayServer] Gateway registration is DISABLED in config');
-    console.log('[RelayServer] ========================================');
-    return;
+      console.log('[RelayServer] Gateway registration is DISABLED in config');
+      console.log('[RelayServer] ========================================');
+      return;
   }
   
   try {
-    const activeRelays = await getActiveRelays(); // Added await here
-    const publicKey = config.swarmPublicKey; // This is our Hyperswarm public key
-    
-    const registrationData = {
-      publicKey,  // Hyperswarm public key for P2P connection
-      relays: activeRelays.map(r => r.relayKey),
-      address: `${config.proxy_server_address}:${config.port}`,
-      mode: 'hyperswarm' // Indicate we're using Hyperswarm
-    };
-    
-    if (relayProfileInfo) {
-      registrationData.relayProfileInfo = relayProfileInfo;
-    }
-    
-    console.log('[RelayServer] Sending HTTP registration to gateway');
-    console.log('[RelayServer] Registration URL:', `${config.gatewayUrl}/register`);
-    console.log('[RelayServer] Registration data:', {
-      publicKey: publicKey.substring(0, 8) + '...',
-      relayCount: registrationData.relays.length,
-      address: registrationData.address,
-      hasProfileInfo: !!relayProfileInfo,
-      mode: registrationData.mode
-    });
-    
-    // Make HTTP request to gateway
-    const postData = JSON.stringify(registrationData);
-    
-    const url = new URL(config.gatewayUrl);
-    const options = {
-      hostname: url.hostname,
-      port: url.port || 443,
-      path: '/register',
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Content-Length': Buffer.byteLength(postData)
-      },
-      rejectUnauthorized: false // For self-signed certs
-    };
-    
-    const response = await new Promise((resolve, reject) => {
-      const req = https.request(options, (res) => {
-        let data = '';
-        res.on('data', (chunk) => data += chunk.toString());
-        res.on('end', () => {
-          try {
-            resolve(JSON.parse(data));
-          } catch (e) {
-            resolve(data);
+      const activeRelays = await getActiveRelays();
+      const profiles = await getRelayProfiles();
+      const publicKey = config.swarmPublicKey;
+      
+      // Build relay list with public identifiers
+      const relayList = [];
+      for (const relay of activeRelays) {
+          const profile = profiles.find(p => p.relay_key === relay.relayKey);
+          if (profile) {
+              relayList.push({
+                  identifier: profile.public_identifier || relay.relayKey,
+                  name: profile.name || 'Unnamed Relay',
+                  connectionUrl: profile.public_identifier ? 
+                      `wss://${config.proxy_server_address}/${profile.public_identifier.replace(':', '/')}` :
+                      `wss://${config.proxy_server_address}/${relay.relayKey}`
+              });
           }
-        });
+      }
+      
+      const registrationData = {
+          publicKey,  // Hyperswarm public key for P2P connection
+          relays: relayList, // List with public identifiers
+          address: `${config.proxy_server_address}:${config.port}`,
+          mode: 'hyperswarm',
+          timestamp: new Date().toISOString()
+      };
+      
+      if (relayProfileInfo) {
+          // If registering a specific relay, include its public identifier
+          registrationData.newRelay = {
+              identifier: relayProfileInfo.public_identifier || relayProfileInfo.relay_key,
+              name: relayProfileInfo.name,
+              description: relayProfileInfo.description
+          };
+      }
+      
+      console.log('[RelayServer] Sending HTTP registration to gateway');
+      console.log('[RelayServer] Registration URL:', `${config.gatewayUrl}/register`);
+      console.log('[RelayServer] Registration data:', {
+          publicKey: publicKey.substring(0, 8) + '...',
+          relayCount: registrationData.relays.length,
+          address: registrationData.address,
+          hasNewRelay: !!registrationData.newRelay,
+          mode: registrationData.mode
       });
       
-      req.on('error', reject);
-      req.write(postData);
-      req.end();
-    });
-    
-    console.log('[RelayServer] Gateway HTTP registration response:', response);
-    console.log('[RelayServer] Registration SUCCESSFUL');
-    
-    // Notify parent process
-    if (global.sendMessage) {
-      console.log('[RelayServer] Notifying worker of successful registration');
-      global.sendMessage({
-        type: 'gateway-registered',
-        data: response
+      // Make HTTP request to gateway
+      const postData = JSON.stringify(registrationData);
+      
+      const url = new URL(config.gatewayUrl);
+      const options = {
+          hostname: url.hostname,
+          port: url.port || 443,
+          path: '/register',
+          method: 'POST',
+          headers: {
+              'Content-Type': 'application/json',
+              'Content-Length': Buffer.byteLength(postData)
+          },
+          rejectUnauthorized: false // For self-signed certs
+      };
+      
+      const response = await new Promise((resolve, reject) => {
+          const req = https.request(options, (res) => {
+              let data = '';
+              res.on('data', (chunk) => data += chunk.toString());
+              res.on('end', () => {
+                  try {
+                      resolve(JSON.parse(data));
+                  } catch (e) {
+                      resolve(data);
+                  }
+              });
+          });
+          
+          req.on('error', reject);
+          req.write(postData);
+          req.end();
       });
-    }
+      
+      console.log('[RelayServer] Gateway HTTP registration response:', response);
+      console.log('[RelayServer] Registration SUCCESSFUL');
+      
+      // Notify parent process
+      if (global.sendMessage) {
+          console.log('[RelayServer] Notifying worker of successful registration');
+          global.sendMessage({
+              type: 'gateway-registered',
+              data: response
+          });
+      }
   } catch (error) {
-    console.error('[RelayServer] Gateway HTTP registration FAILED:', error.message);
-    console.error('[RelayServer] Error stack:', error.stack);
+      console.error('[RelayServer] Gateway HTTP registration FAILED:', error.message);
+      console.error('[RelayServer] Error stack:', error.stack);
   }
   
   console.log('[RelayServer] ========================================');

@@ -699,26 +699,30 @@ async function fetchRelays() {
 
 // Update relay list
 function updateRelayList(relayData) {
-  if (!relayList) return
+  if (!relayList) return;
   
-  relays = relayData || []
+  relays = relayData || [];
   
   if (relays.length === 0) {
-    relayList.innerHTML = '<p style="color: var(--text-secondary); font-size: 12px;">No active relays</p>'
-    return
+    relayList.innerHTML = '<p style="color: var(--text-secondary); font-size: 12px;">No active relays</p>';
+    return;
   }
   
-  relayList.innerHTML = ''
+  relayList.innerHTML = '';
   relays.forEach(relay => {
-    const relayElement = document.createElement('div')
-    relayElement.className = 'relay-item'
-    const truncatedKey = relay.relayKey || relay.key || 'unknown'
+    const relayElement = document.createElement('div');
+    relayElement.className = 'relay-item';
+    
+    // Use public identifier if available, fallback to relay key
+    const displayKey = relay.publicIdentifier || relay.relayKey || 'unknown';
+    const truncatedKey = displayKey.length > 30 ? 
+      displayKey.substring(0, 30) + '...' : displayKey;
     
     // Create relay item with disconnect button
     relayElement.innerHTML = `
       <div style="flex: 1;">
         <div><strong>${relay.name || 'Unnamed Relay'}</strong></div>
-        <div class="relay-key">${truncatedKey.substring(0, 16)}...</div>
+        <div class="relay-key">${truncatedKey}</div>
         <div style="font-size: 11px; color: var(--text-secondary);">
           Peers: ${relay.peerCount || 0}
         </div>
@@ -726,31 +730,41 @@ function updateRelayList(relayData) {
           ${relay.connectionUrl ? 'URL: ' + relay.connectionUrl : ''}
         </div>
       </div>
-      <button class="disconnect-btn" data-relay-key="${truncatedKey}">Disconnect</button>
-    `
+      <button class="disconnect-btn" data-relay-identifier="${relay.publicIdentifier || relay.relayKey}">
+        Disconnect
+      </button>
+    `;
     
     // Add disconnect handler
-    const disconnectBtn = relayElement.querySelector('.disconnect-btn')
-    disconnectBtn.addEventListener('click', () => disconnectRelay(truncatedKey))
+    const disconnectBtn = relayElement.querySelector('.disconnect-btn');
+    disconnectBtn.addEventListener('click', () => 
+      disconnectRelay(relay.publicIdentifier || relay.relayKey)
+    );
     
-    relayList.appendChild(relayElement)
-  })
+    relayList.appendChild(relayElement);
+  });
 }
 
-// Disconnect from a relay
-async function disconnectRelay(relayKey) {
+// Update disconnect function to handle public identifiers
+async function disconnectRelay(identifier) {
   if (!workerPipe) {
-    addLog('Worker not running', 'error')
-    return
+    addLog('Worker not running', 'error');
+    return;
   }
   
-  if (confirm(`Are you sure you want to disconnect from relay ${relayKey.substring(0, 16)}...?`)) {
-    addLog(`Disconnecting from relay ${relayKey.substring(0, 16)}...`, 'status')
+  const displayName = identifier.length > 30 ? 
+    identifier.substring(0, 30) + '...' : identifier;
+  
+  if (confirm(`Are you sure you want to disconnect from relay ${displayName}?`)) {
+    addLog(`Disconnecting from relay ${displayName}`, 'status');
     
     workerPipe.write(JSON.stringify({
       type: 'disconnect-relay',
-      data: { relayKey }
-    }) + '\n')
+      data: { 
+        relayKey: identifier, // Can be either public identifier or relay key
+        identifier: identifier 
+      }
+    }) + '\n');
   }
 }
 

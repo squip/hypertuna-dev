@@ -70,13 +70,21 @@ export async function createRelay(options = {}) {
         const relayKey = relayManager.getPublicKey();
         activeRelays.set(relayKey, relayManager);
         
-        // Create relay profile
+        // Generate public identifier
+        const npub = config.nostr_npub || (config.nostr_pubkey_hex ? 
+            NostrUtils.hexToNpub(config.nostr_pubkey_hex) : null);
+        
+        const publicIdentifier = npub && name ? 
+            generatePublicIdentifier(npub, name) : null;
+        
+        // Create relay profile with both internal and public identifiers
         const profileInfo = {
             name: name || `Relay ${relayKey.substring(0, 8)}`,
             description: description || `Created on ${new Date().toLocaleString()}`,
             nostr_pubkey_hex: config.nostr_pubkey_hex || generateHexKey(),
             relay_nostr_id: null,
-            relay_key: relayKey,
+            relay_key: relayKey, // Internal key
+            public_identifier: publicIdentifier, // New public-facing identifier
             relay_storage: defaultStorageDir,
             created_at: new Date().toISOString(),
             auto_connect: true,
@@ -96,10 +104,12 @@ export async function createRelay(options = {}) {
         if (global.sendMessage) {
             global.sendMessage({
                 type: 'relay-initialized',
-                relayKey: relayKey,
-                gatewayUrl: `wss://${config.proxy_server_address}/${relayKey}`,
+                relayKey: relayKey, // Internal key for worker
+                publicIdentifier: publicIdentifier, // Public identifier for external use
+                gatewayUrl: publicIdentifier ? 
+                    `wss://${config.proxy_server_address}/${npub}/${name.replace(/\s+/g, '')}` :
+                    `wss://${config.proxy_server_address}/${relayKey}`,
                 name: profileInfo.name,
-                connectionUrl: `wss://${config.proxy_server_address}/${relayKey}`,
                 isNew: true,
                 timestamp: new Date().toISOString()
             });
@@ -108,7 +118,10 @@ export async function createRelay(options = {}) {
         return {
             success: true,
             relayKey,
-            connectionUrl: `wss://${config.proxy_server_address}/${relayKey}`,
+            publicIdentifier,
+            connectionUrl: publicIdentifier ? 
+                `wss://${config.proxy_server_address}/${npub}/${name.replace(/\s+/g, '')}` :
+                `wss://${config.proxy_server_address}/${relayKey}`,
             profile: profileInfo,
             storageDir: defaultStorageDir
         };
@@ -120,6 +133,21 @@ export async function createRelay(options = {}) {
             error: error.message
         };
     }
+}
+
+// Helper function to generate public identifier
+function generatePublicIdentifier(npub, relayName) {
+    const camelCaseName = relayName
+        .split(' ')
+        .map((word, index) => {
+            if (index === 0) {
+                return word.toLowerCase();
+            }
+            return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+        })
+        .join('');
+    
+    return `${npub}:${camelCaseName}`;
 }
 
 /**

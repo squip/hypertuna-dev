@@ -356,7 +356,7 @@ class NostrIntegration {
      * @param {boolean} isOpen - Whether the group is open to join
      * @returns {Promise<Object>} - Create group events collection
      */
-    async createGroup(name, about, isPublic, isOpen, relayKey, proxyServer) {
+    async createGroup(name, about, isPublic, isOpen, relayKey, proxyServer, npub) {
         try {
             // Validate inputs
             if (typeof name !== 'string') {
@@ -372,15 +372,16 @@ class NostrIntegration {
                 throw new Error('isOpen must be a boolean');
             }
             
-            console.log("NostrIntegration creating group:", { name, about, isPublic, isOpen });
-            
+            console.log("NostrIntegration creating group:", { name, about, isPublic, isOpen, npub });
+        
             const eventsCollection = await this.client.createGroup({
                 name,
                 about,
                 isPublic,
                 isOpen,
                 relayKey,
-                proxyServer
+                proxyServer,
+                npub
             });
             
             console.log('Group created successfully with the following events:');

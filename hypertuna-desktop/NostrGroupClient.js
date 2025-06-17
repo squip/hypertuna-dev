@@ -808,11 +808,11 @@ async fetchMultipleProfiles(pubkeys) {
         console.log('Created empty user relay list event');
     }
 
-    async updateUserRelayList(relayId, gatewayUrl, isPublic, add = true) {
+    async updateUserRelayList(publicIdentifier, gatewayUrl, isPublic, add = true) {
         if (!this.userRelayListEvent) {
             await this._createEmptyRelayList();
         }
-
+    
         const tags = [...this.userRelayListEvent.tags];
         let contentArr = [];
         if (this.userRelayListEvent.content) {
@@ -824,11 +824,12 @@ async fetchMultipleProfiles(pubkeys) {
             }
         }
 
-        const groupId = this.hypertunaGroups.get(relayId);
-        const groupName = (this.groups.get(groupId)?.name) || '';
+        const groupName = (this.groups.get(publicIdentifier)?.name) || '';
+    
+        // Update tag format to use public identifier
+        const groupTag = ['group', publicIdentifier, `${gatewayUrl}`, groupName, 'hypertuna:relay'];
+        const rTag = ['r', `${gatewayUrl}`, 'hypertuna:relay'];
 
-        const groupTag = ['group', relayId, `${gatewayUrl}/${relayId}`, groupName, 'hypertuna:relay'];
-        const rTag = ['r', `${gatewayUrl}/${relayId}`, 'hypertuna:relay'];
 
         const remove = (arr, tag) => {
             const idx = arr.findIndex(t => JSON.stringify(t) === JSON.stringify(tag));
@@ -1040,24 +1041,23 @@ async fetchMultipleProfiles(pubkeys) {
      * @param {string} groupId - Group ID
      * @private
      */
-    _subscribeToGroupMembership(groupId) {
-        if (!groupId) return;
+    _subscribeToGroupMembership(publicIdentifier) {
+        if (!publicIdentifier) return;
         
-        const subId = `group-members-${groupId.substring(0, 8)}`;
+        const subId = `group-members-${publicIdentifier}`;
         
-        // Check if we're already subscribed
         if (this.activeSubscriptions.has(subId)) {
             return;
         }
         
-        // Subscribe to group member and admin lists
+        // Subscribe to group member and admin lists using public identifier
         const actualSubId = this.relayManager.subscribe(subId, [
             { 
                 kinds: [
                     NostrEvents.KIND_GROUP_MEMBER_LIST,
                     NostrEvents.KIND_GROUP_ADMIN_LIST
                 ],
-                "#d": [groupId]
+                "#d": [publicIdentifier] // Use public identifier in 'd' tag
             }
         ], (event) => {
             // Add all member pubkeys to relevant pubkeys
@@ -1227,6 +1227,11 @@ async fetchMultipleProfiles(pubkeys) {
             console.warn(`Failed to parse group metadata from event: ${event.id.substring(0, 8)}...`);
             return;
         }
+
+        // The groupData.id will now be the public identifier
+        const publicIdentifier = groupData.id;
+        
+        console.log(`Parsed group data with public identifier: ${publicIdentifier}`);
         
         console.log(`Parsed group data:`, {
             id: groupData.id,
@@ -1252,20 +1257,20 @@ async fetchMultipleProfiles(pubkeys) {
         console.log(`Group ${groupData.id} added to groups map. Total groups: ${this.groups.size}`);
         
         // Store hypertuna mapping if available
-        if (hypertunaId) {
-            this.hypertunaGroups.set(hypertunaId, groupData.id);
-            this.groupHypertunaIds.set(groupData.id, hypertunaId);
+        if (groupData.hypertunaId) {
+            this.hypertunaGroups.set(groupData.hypertunaId, publicIdentifier);
+            this.groupHypertunaIds.set(publicIdentifier, groupData.hypertunaId);
             console.log(`Stored hypertuna mapping: ${hypertunaId} -> ${groupData.id}`);
         }
         
         // Emit event
         this.emit('group:metadata', { 
-            groupId: groupData.id, 
+            groupId: publicIdentifier, // Now using public identifier
             group: groupData 
         });
         
         // Subscribe to membership events for this group
-        this._subscribeToGroupMembership(groupData.id);
+        this._subscribeToGroupMembership(publicIdentifier);
     }
     
     /**
@@ -1323,11 +1328,12 @@ async fetchMultipleProfiles(pubkeys) {
      * @private
      */
     _processGroupMemberListEvent(event) {
-        const groupId = NostrEvents._getTagValue(event, 'd');
-        if (!groupId) return;
+        // Extract public identifier from 'd' tag
+        const publicIdentifier = NostrEvents._getTagValue(event, 'd');
+        if (!publicIdentifier) return;
         
         const members = NostrEvents.parseGroupMembers(event);
-        this.groupMembers.set(groupId, members);
+        this.groupMembers.set(publicIdentifier, members);
         
         // Add all member pubkeys to relevant pubkeys
         members.forEach(member => {
@@ -1336,7 +1342,7 @@ async fetchMultipleProfiles(pubkeys) {
         
         // Emit events
         this.emit('group:members', { 
-            groupId, 
+            groupId: publicIdentifier, // Using public identifier
             members 
         });
         
@@ -1344,13 +1350,12 @@ async fetchMultipleProfiles(pubkeys) {
         if (this.user) {
             const isMember = members.some(m => m.pubkey === this.user.pubkey);
             this.emit('group:membership', { 
-                groupId, 
+                groupId: publicIdentifier,
                 isMember 
             });
             
-            // If the user is a member, subscribe to this group's content
             if (isMember) {
-                this._subscribeToGroupContent(groupId);
+                this._subscribeToGroupContent(publicIdentifier);
             }
         }
     }
@@ -1691,7 +1696,8 @@ async fetchMultipleProfiles(pubkeys) {
         if (!this.user || !this.user.privateKey) {
             throw new Error('User not logged in');
         }
-        
+        // Get npub if not provided
+        const npub = groupData.npub || NostrUtils.hexToNpub(this.user.pubkey);
         // Validate groupData
         if (!groupData.name || typeof groupData.name !== 'string') {
             throw new Error('Group name is required and must be a string');
@@ -1717,7 +1723,8 @@ async fetchMultipleProfiles(pubkeys) {
             normalizedData.isOpen,
             this.user.privateKey,
             normalizedData.relayKey,
-            normalizedData.proxyServer
+            normalizedData.proxyServer,
+            npub
         );
         
         const {
@@ -1952,18 +1959,18 @@ async fetchMultipleProfiles(pubkeys) {
      * @param {Array} roles - Array of roles to assign
      * @returns {Promise<Object>} - Put user event
      */
-    async addGroupMember(groupId, pubkey, roles = ['member']) {
+    async addGroupMember(publicIdentifier, pubkey, roles = ['member']) {
         if (!this.user || !this.user.privateKey) {
             throw new Error('User not logged in');
         }
         
-        // Check if user is an admin
-        if (!this.isGroupAdmin(groupId, this.user.pubkey)) {
+        // Check if user is an admin using public identifier
+        if (!this.isGroupAdmin(publicIdentifier, this.user.pubkey)) {
             throw new Error('You must be an admin to add members');
         }
         
         const event = await NostrEvents.createPutUserEvent(
-            groupId,
+            publicIdentifier, // Pass public identifier
             pubkey,
             roles,
             this.user.privateKey
@@ -1984,25 +1991,23 @@ async fetchMultipleProfiles(pubkeys) {
      * @param {string} pubkey - Public key of the user to remove
      * @returns {Promise<Object>} - Remove user event
      */
-    async removeGroupMember(groupId, pubkey) {
+    async removeGroupMember(publicIdentifier, pubkey) {
         if (!this.user || !this.user.privateKey) {
             throw new Error('User not logged in');
         }
         
         // Check if user is an admin
-        if (!this.isGroupAdmin(groupId, this.user.pubkey)) {
+        if (!this.isGroupAdmin(publicIdentifier, this.user.pubkey)) {
             throw new Error('You must be an admin to remove members');
         }
         
         const event = await NostrEvents.createRemoveUserEvent(
-            groupId,
+            publicIdentifier,
             pubkey,
             this.user.privateKey
         );
         
-        // Publish the event
         await this.relayManager.publish(event);
-        
         return event;
     }
     
@@ -2012,55 +2017,30 @@ async fetchMultipleProfiles(pubkeys) {
      * @param {Object} metadata - Updated metadata
      * @returns {Promise<Object>} - Collection of edit metadata events
      */
-    async updateGroupMetadata(groupId, metadata) {
+    async updateGroupMetadata(publicIdentifier, metadata) {
         if (!this.user || !this.user.privateKey) {
             throw new Error('User not logged in');
         }
         
         // Check if user is an admin
-        if (!this.isGroupAdmin(groupId, this.user.pubkey)) {
+        if (!this.isGroupAdmin(publicIdentifier, this.user.pubkey)) {
             throw new Error('You must be an admin to update group settings');
         }
         
-        // Get the hypertuna ID for this group
-        const hypertunaId = this.groupHypertunaIds.get(groupId);
-        if (!hypertunaId) {
-            console.warn(`No hypertuna ID found for group ${groupId}, using legacy update method`);
-            // Fall back to the legacy method
-            const event = await NostrEvents.createGroupMetadataEditEvent(
-                groupId,
-                metadata,
-                this.user.privateKey
-            );
-            
-            // Publish the event
-            await this.relayManager.publish(event);
-            
-            return { editEvent: event };
-        }
-        
-        console.log(`Updating group ${groupId} with hypertuna ID ${hypertunaId}`);
-        
-        // Create both the edit metadata event and an updated kind 39000 metadata event
         const events = await NostrEvents.createGroupMetadataEditEvents(
-            groupId,
-            hypertunaId,
+            publicIdentifier,
             metadata,
             this.user.privateKey
         );
         
-        const { editEvent, updatedMetadataEvent } = events;
-        
         // Publish both events
         await Promise.all([
-            this.relayManager.publish(editEvent),
-            this.relayManager.publish(updatedMetadataEvent)
+            this.relayManager.publish(events.editEvent),
+            this.relayManager.publish(events.updatedMetadataEvent)
         ]);
         
-        console.log('Published group metadata update events');
-        
         // Process the updated metadata event to update local state
-        this._processGroupMetadataEvent(updatedMetadataEvent);
+        this._processGroupMetadataEvent(events.updatedMetadataEvent);
         
         return events;
     }

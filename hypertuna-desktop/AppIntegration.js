@@ -1413,7 +1413,10 @@ App.syncHypertunaConfigToFile = async function() {
         }
         
         try {
-            console.log("Creating group with parameters:", { name, about, isPublic, isOpen });
+            // Get the user's npub
+            const npub = NostrUtils.hexToNpub(this.currentUser.pubkey);
+            
+            console.log("Creating group with parameters:", { name, about, isPublic, isOpen, npub });
 
             let relayKey = null;
             if (window.createRelayInstance) {
@@ -1426,13 +1429,21 @@ App.syncHypertunaConfigToFile = async function() {
 
             const proxyServer = this.currentUser?.hypertunaConfig?.proxy_server_address || '';
 
-            const eventsCollection = await this.nostr.createGroup(name, about, isPublic, isOpen, relayKey, proxyServer);
+            const eventsCollection = await this.nostr.createGroup(
+                name, about, isPublic, isOpen, relayKey, proxyServer, npub
+            );
             
-            console.log(`Group created successfully with ID: ${eventsCollection.groupId}`);
-            console.log(`Hypertuna ID: ${eventsCollection.hypertunaId}`);
+            console.log(`Group created successfully with public ID: ${eventsCollection.groupId}`);
+            console.log(`Internal relay key: ${eventsCollection.internalRelayKey}`);
             
-            // Store the Hypertuna ID for future use
-            this.currentHypertunaId = eventsCollection.hypertunaId;
+            // Store the mapping in the Nostr client
+            if (eventsCollection.internalRelayKey && eventsCollection.groupId) {
+                this.nostr.client.publicToInternalMap = this.nostr.client.publicToInternalMap || new Map();
+                this.nostr.client.internalToPublicMap = this.nostr.client.internalToPublicMap || new Map();
+                
+                this.nostr.client.publicToInternalMap.set(eventsCollection.groupId, eventsCollection.internalRelayKey);
+                this.nostr.client.internalToPublicMap.set(eventsCollection.internalRelayKey, eventsCollection.groupId);
+            }
             
             // Give the relays time to process the events
             console.log("Waiting for relays to process events...");
