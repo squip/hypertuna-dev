@@ -801,6 +801,15 @@ body {
     white-space: nowrap;
 }
 
+.message-pubkey {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 .member-role {
     margin-left: auto;
     font-size: 0.75rem;

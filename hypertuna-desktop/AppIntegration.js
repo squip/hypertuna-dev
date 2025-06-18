@@ -1199,6 +1199,8 @@ App.syncHypertunaConfigToFile = async function() {
             messages.forEach(message => {
                 const author = profiles[message.pubkey] || { name: 'User_' + NostrUtils.truncatePubkey(message.pubkey) };
                 const isCurrentUser = message.pubkey === this.currentUser.pubkey;
+                const npub = NostrUtils.hexToNpub(message.pubkey);
+                const displayPub = NostrUtils.truncateNpub(npub);
                 
                 const messageElement = document.createElement('div');
                 messageElement.className = `message ${isCurrentUser ? 'own' : ''}`;
@@ -1209,6 +1211,7 @@ App.syncHypertunaConfigToFile = async function() {
                     </div>
                     <div class="message-meta">
                         <span>${author.name || 'Unknown'}</span>
+                        <span class="message-pubkey">${displayPub}</span>
                         <span>${this.formatTime(message.created_at)}</span>
                     </div>
                 `;
@@ -1290,6 +1293,8 @@ App.syncHypertunaConfigToFile = async function() {
                 const profile = profiles[pubkey] || {};
                 const roles = memberRoles[pubkey] || ['member'];
                 const isCurrentUser = pubkey === this.currentUser.pubkey;
+                const npub = NostrUtils.hexToNpub(pubkey);
+                const displayPub = NostrUtils.truncateNpub(npub);
                 
                 const memberElement = document.createElement('div');
                 memberElement.className = 'member-item';
@@ -1308,7 +1313,7 @@ App.syncHypertunaConfigToFile = async function() {
                     </div>
                     <div class="member-info">
                         <div class="member-name">${name}</div>
-                        <div class="member-pubkey">${NostrUtils.truncatePubkey(pubkey)}</div>
+                        <div class="member-pubkey">${displayPub}</div>
                     </div>
                     <span class="member-role ${roleClass}">${roleText}</span>
                 `;
@@ -2089,13 +2094,16 @@ App.loadFollowingList = async function() {
                 avatarHtml = `<span>${firstLetter}</span>`;
             }
             
+            const npub = NostrUtils.hexToNpub(pubkey);
+            const displayPub = NostrUtils.truncateNpub(npub);
+
             followItem.innerHTML = `
                 <div class="following-avatar">
                     ${avatarHtml}
                 </div>
                 <div class="following-info">
                     <div class="following-name">${name}</div>
-                    <div class="following-pubkey">${NostrUtils.truncatePubkey(pubkey)}</div>
+                    <div class="following-pubkey">${displayPub}</div>
                 </div>
                 <button class="btn-remove" data-pubkey="${pubkey}">Remove</button>
             `;
@@ -2181,13 +2189,16 @@ App.addFollow = async function() {
             avatarHtml = `<span>${firstLetter}</span>`;
         }
         
+        const npubAdded = NostrUtils.hexToNpub(pubkey);
+        const displayPubAdded = NostrUtils.truncateNpub(npubAdded);
+
         followItem.innerHTML = `
             <div class="following-avatar">
                 ${avatarHtml}
             </div>
             <div class="following-info">
                 <div class="following-name">${name}</div>
-                <div class="following-pubkey">${NostrUtils.truncatePubkey(pubkey)}</div>
+                <div class="following-pubkey">${displayPubAdded}</div>
             </div>
             <button class="btn-remove" data-pubkey="${pubkey}">Remove</button>
         `;

@@ -227,6 +227,16 @@ export class NostrUtils {
         if (!pubkey) return '';
         return pubkey.substring(0, 6) + '...' + pubkey.substring(pubkey.length - 4);
     }
+
+    /**
+     * Truncate npub for display
+     * @param {string} npub - bech32 public key
+     * @returns {string}
+     */
+    static truncateNpub(npub) {
+        if (!npub) return '';
+        return npub.substring(0, 8) + '...' + npub.substring(npub.length - 4);
+    }
     
     /**
      * Generate a random ID (for group IDs, etc.)

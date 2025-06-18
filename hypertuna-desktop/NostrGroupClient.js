@@ -1798,6 +1798,7 @@ async fetchMultipleProfiles(pubkeys) {
                 `Admin list for group: ${groupData.name}`,
                 [
                     ['d', groupId],
+                    ['hypertuna', groupId],
                     ['p', this.user.pubkey, 'admin']
                 ],
                 this.user.privateKey
@@ -1809,6 +1810,7 @@ async fetchMultipleProfiles(pubkeys) {
                 `Member list for group: ${groupData.name}`,
                 [
                     ['d', groupId],
+                    ['hypertuna', groupId],
                     ['p', this.user.pubkey, 'member']
                 ],
                 this.user.privateKey
