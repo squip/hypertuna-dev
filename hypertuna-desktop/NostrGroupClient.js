@@ -36,6 +36,9 @@ class NostrGroupClient {
         this.pendingRelayConnections = new Map(); // Track pending connections
         this.relayConnectionAttempts = new Map(); // Track retry attempts
         this.maxRetryAttempts = 3;
+        // Mapping between public identifiers and internal relay keys (if available)
+        this.publicToInternalMap = new Map();
+        this.internalToPublicMap = new Map();
 
         // Setup default event handlers
         this._setupEventHandlers();
@@ -147,16 +150,25 @@ class NostrGroupClient {
         if (!this.userRelayListEvent) return;
         
         const relayUrls = new Set();
-        const relayKeyMap = new Map(); // Map URL to relay key
-        
+        const identifierMap = new Map(); // Map URL -> public identifier
+
         // Parse public relays from tags
         this.userRelayListEvent.tags.forEach(tag => {
-            if (tag[0] === 'r' && tag[1] && tag[2] === 'hypertuna:relay') {
-                relayUrls.add(tag[1]);
-                // Extract relay key from URL
-                const urlParts = tag[1].split('/');
-                const relayKey = urlParts[urlParts.length - 1];
-                relayKeyMap.set(tag[1], relayKey);
+            if (tag[0] === 'group' && tag[4] === 'hypertuna:relay') {
+                const identifier = tag[1];
+                const url = tag[2];
+                relayUrls.add(url);
+                identifierMap.set(url, identifier);
+            } else if (tag[0] === 'r' && tag[1] && tag[2] === 'hypertuna:relay') {
+                const url = tag[1];
+                relayUrls.add(url);
+                if (!identifierMap.has(url)) {
+                    const parts = url.split('/').filter(Boolean);
+                    if (parts.length >= 2) {
+                        const identifier = `${parts[parts.length - 2]}:${parts[parts.length - 1]}`;
+                        identifierMap.set(url, identifier);
+                    }
+                }
             }
         });
         
@@ -164,18 +176,28 @@ class NostrGroupClient {
         if (this.userRelayListEvent.content) {
             try {
                 const decrypted = NostrUtils.decrypt(
-                    this.user.privateKey, 
-                    this.user.pubkey, 
+                    this.user.privateKey,
+                    this.user.pubkey,
                     this.userRelayListEvent.content
                 );
                 const privateTags = JSON.parse(decrypted);
-                
+
                 privateTags.forEach(tag => {
-                    if (Array.isArray(tag) && tag[0] === 'r' && tag[1] && tag[2] === 'hypertuna:relay') {
-                        relayUrls.add(tag[1]);
-                        const urlParts = tag[1].split('/');
-                        const relayKey = urlParts[urlParts.length - 1];
-                        relayKeyMap.set(tag[1], relayKey);
+                    if (Array.isArray(tag) && tag[0] === 'group' && tag[4] === 'hypertuna:relay') {
+                        const identifier = tag[1];
+                        const url = tag[2];
+                        relayUrls.add(url);
+                        identifierMap.set(url, identifier);
+                    } else if (Array.isArray(tag) && tag[0] === 'r' && tag[1] && tag[2] === 'hypertuna:relay') {
+                        const url = tag[1];
+                        relayUrls.add(url);
+                        if (!identifierMap.has(url)) {
+                            const parts = url.split('/').filter(Boolean);
+                            if (parts.length >= 2) {
+                                const identifier = `${parts[parts.length - 2]}:${parts[parts.length - 1]}`;
+                                identifierMap.set(url, identifier);
+                            }
+                        }
                     }
                 });
             } catch (e) {
@@ -187,13 +209,10 @@ class NostrGroupClient {
         
         // Queue all relay connections
         for (const relayUrl of relayUrls) {
-            const relayKey = relayKeyMap.get(relayUrl);
-            if (relayKey) {
-                // Extract groupId from relay key (assuming they're the same)
-                const groupId = relayKey;
-                
-                // Queue the connection attempt
-                this.queueRelayConnection(groupId, relayUrl, relayKey);
+            const identifier = identifierMap.get(relayUrl);
+            if (identifier) {
+                console.log(`[NostrGroupClient] Queuing connection for ${identifier} at ${relayUrl}`);
+                this.queueRelayConnection(identifier, relayUrl);
             }
         }
         
@@ -204,16 +223,15 @@ class NostrGroupClient {
     /**
      * Queue a relay connection attempt
      */
-    queueRelayConnection(groupId, relayUrl, relayKey) {
-        if (!this.pendingRelayConnections.has(relayKey)) {
-            this.pendingRelayConnections.set(relayKey, {
-                groupId,
+    queueRelayConnection(publicIdentifier, relayUrl) {
+        if (!this.pendingRelayConnections.has(publicIdentifier)) {
+            this.pendingRelayConnections.set(publicIdentifier, {
+                identifier: publicIdentifier,
                 relayUrl,
-                relayKey,
                 attempts: 0,
                 status: 'pending'
             });
-            console.log(`[NostrGroupClient] Queued connection for relay ${relayKey}`);
+            console.log(`[NostrGroupClient] Queued connection for relay ${publicIdentifier}`);
         }
     }
 
@@ -221,7 +239,7 @@ class NostrGroupClient {
      * Process pending relay connections with worker readiness check
      */
     async processRelayConnectionQueue() {
-        for (const [relayKey, connection] of this.pendingRelayConnections) {
+        for (const [identifier, connection] of this.pendingRelayConnections) {
             if (connection.status === 'connecting' || connection.status === 'connected') {
                 continue;
             }
@@ -230,14 +248,14 @@ class NostrGroupClient {
             
             try {
                 // Wait for relay to be ready in worker
-                console.log(`[NostrGroupClient] Waiting for relay ${relayKey} to be ready...`);
+                console.log(`[NostrGroupClient] Waiting for relay ${identifier} to be ready...`);
                 
                 if (window.waitForRelayReady) {
                     try {
-                        await window.waitForRelayReady(relayKey, 15000); // 15 second timeout
-                        console.log(`[NostrGroupClient] Relay ${relayKey} is ready, connecting...`);
+                        await window.waitForRelayReady(identifier, 15000); // 15 second timeout
+                        console.log(`[NostrGroupClient] Relay ${identifier} is ready, connecting...`);
                     } catch (e) {
-                        console.log(`[NostrGroupClient] Relay ${relayKey} not ready yet: ${e.message}`);
+                        console.log(`[NostrGroupClient] Relay ${identifier} not ready yet: ${e.message}`);
                         connection.status = 'pending';
                         connection.attempts++;
                         
@@ -248,19 +266,19 @@ class NostrGroupClient {
                             }, 5000 * connection.attempts); // Exponential backoff
                         } else {
                             connection.status = 'failed';
-                            console.error(`[NostrGroupClient] Failed to connect to relay ${relayKey} after ${this.maxRetryAttempts} attempts`);
+                            console.error(`[NostrGroupClient] Failed to connect to relay ${identifier} after ${this.maxRetryAttempts} attempts`);
                         }
                         continue;
                     }
                 }
                 
                 // Now try to connect
-                await this.connectToGroupRelay(connection.groupId, connection.relayUrl);
+                await this.connectToGroupRelay(connection.identifier, connection.relayUrl);
                 connection.status = 'connected';
-                this.pendingRelayConnections.delete(relayKey);
+                this.pendingRelayConnections.delete(identifier);
                 
             } catch (e) {
-                console.error(`[NostrGroupClient] Error connecting to relay ${relayKey}:`, e);
+                console.error(`[NostrGroupClient] Error connecting to relay ${identifier}:`, e);
                 connection.status = 'failed';
             }
         }
@@ -280,13 +298,13 @@ class NostrGroupClient {
     /**
      * Handle relay ready notification from worker
      */
-    handleRelayReady(relayKey, gatewayUrl) {
-        console.log(`[NostrGroupClient] Relay ${relayKey} is now ready at ${gatewayUrl}`);
+    handleRelayReady(identifier, gatewayUrl) {
+        console.log(`[NostrGroupClient] Relay ${identifier} is now ready at ${gatewayUrl}`);
         
         // Check if this relay is in our pending connections
-        const pending = this.pendingRelayConnections.get(relayKey);
+        const pending = this.pendingRelayConnections.get(identifier);
         if (pending && pending.status === 'pending') {
-            console.log(`[NostrGroupClient] Found pending connection for ${relayKey}, processing...`);
+            console.log(`[NostrGroupClient] Found pending connection for ${identifier}, processing...`);
             this.processRelayConnectionQueue();
         }
     }
@@ -307,7 +325,7 @@ class NostrGroupClient {
     /**
      * Connect to a specific group relay
      */
-    async connectToGroupRelay(groupId, relayUrl) {
+    async connectToGroupRelay(publicIdentifier, relayUrl) {
         try {
             console.log(`[NostrGroupClient] Connecting to group relay: ${relayUrl}`);
             
@@ -317,7 +335,7 @@ class NostrGroupClient {
             
             while (!connected && attempts < 3) {
                 try {
-                    await this.relayManager.addTypedRelay(relayUrl, 'group', groupId);
+                    await this.relayManager.addTypedRelay(relayUrl, 'group', publicIdentifier);
                     connected = true;
                 } catch (e) {
                     attempts++;
@@ -330,21 +348,21 @@ class NostrGroupClient {
                 }
             }
             
-            this.groupRelayUrls.set(groupId, relayUrl);
+            this.groupRelayUrls.set(publicIdentifier, relayUrl);
             
             // Subscribe to group-specific events only on this relay
-            this._subscribeToGroupOnRelay(groupId, relayUrl);
+            this._subscribeToGroupOnRelay(publicIdentifier, relayUrl);
             
             console.log(`[NostrGroupClient] Successfully connected to group relay: ${relayUrl}`);
             
             // Emit event for UI update
-            this.emit('relay:connected', { groupId, relayUrl });
+            this.emit('relay:connected', { groupId: publicIdentifier, relayUrl });
             
         } catch (e) {
             console.error(`[NostrGroupClient] Failed to connect to group relay ${relayUrl}:`, e);
             
             // Emit failure event
-            this.emit('relay:failed', { groupId, relayUrl, error: e.message });
+            this.emit('relay:failed', { groupId: publicIdentifier, relayUrl, error: e.message });
             
             throw e;
         }
@@ -353,19 +371,19 @@ class NostrGroupClient {
     /**
      * Subscribe to group events only on the group's relay
      */
-    _subscribeToGroupOnRelay(groupId, relayUrl) {
+    _subscribeToGroupOnRelay(publicIdentifier, relayUrl) {
         // Subscribe to group metadata
-        this.relayManager.subscribeWithRouting(`group-meta-${groupId}`, [
-            { kinds: [NostrEvents.KIND_GROUP_METADATA], "#d": [groupId] },
-            { kinds: [NostrEvents.KIND_GROUP_MEMBER_LIST], "#d": [groupId] },
-            { kinds: [NostrEvents.KIND_GROUP_ADMIN_LIST], "#d": [groupId] }
+        this.relayManager.subscribeWithRouting(`group-meta-${publicIdentifier}`, [
+            { kinds: [NostrEvents.KIND_GROUP_METADATA], "#d": [publicIdentifier] },
+            { kinds: [NostrEvents.KIND_GROUP_MEMBER_LIST], "#d": [publicIdentifier] },
+            { kinds: [NostrEvents.KIND_GROUP_ADMIN_LIST], "#d": [publicIdentifier] }
         ], (event) => {
             this._processEvent(event, relayUrl);
         }, { targetRelays: [relayUrl] });
-        
+
         // Subscribe to group messages
-        this.relayManager.subscribeWithRouting(`group-messages-${groupId}`, [
-            { kinds: [NostrEvents.KIND_TEXT_NOTE], "#h": [groupId] }
+        this.relayManager.subscribeWithRouting(`group-messages-${publicIdentifier}`, [
+            { kinds: [NostrEvents.KIND_TEXT_NOTE], "#h": [publicIdentifier] }
         ], (event) => {
             this._processGroupMessageEvent(event);
         }, { targetRelays: [relayUrl] });
@@ -842,8 +860,8 @@ async fetchMultipleProfiles(pubkeys) {
             } else {
                 contentArr.push(groupTag, rTag);
             }
-            this.userRelayIds.add(relayId);
-            console.log('Added relay to user list:', relayId, { groupTag, rTag });
+            this.userRelayIds.add(publicIdentifier);
+            console.log('Added relay to user list:', publicIdentifier, { groupTag, rTag });
         } else {
             if (isPublic) {
                 remove(tags, groupTag);
@@ -852,8 +870,8 @@ async fetchMultipleProfiles(pubkeys) {
                 remove(contentArr, groupTag);
                 remove(contentArr, rTag);
             }
-            this.userRelayIds.delete(relayId);
-            console.log('Removed relay from user list:', relayId);
+            this.userRelayIds.delete(publicIdentifier);
+            console.log('Removed relay from user list:', publicIdentifier);
         }
 
         const newEvent = await NostrEvents.createUserRelayListEvent(tags, contentArr, this.user.privateKey);
@@ -867,9 +885,9 @@ async fetchMultipleProfiles(pubkeys) {
         
         // If adding a relay, connect to it
         if (add && gatewayUrl) {
-            const groupId = this.hypertunaGroups.get(relayId);
+            const groupId = this.hypertunaGroups.get(publicIdentifier);
             if (groupId) {
-                await this.connectToGroupRelay(groupId, gatewayUrl);
+                await this.connectToGroupRelay(publicIdentifier, gatewayUrl);
             }
         }
         
@@ -1709,7 +1727,7 @@ async fetchMultipleProfiles(pubkeys) {
             about: groupData.about ? String(groupData.about) : '',
             isPublic: Boolean(groupData.isPublic),
             isOpen: Boolean(groupData.isOpen),
-            relayKey: groupData.relayKey || null,
+            identifier: groupData.identifier || null,
             proxyServer: groupData.proxyServer || ''
         };
         
@@ -1722,7 +1740,7 @@ async fetchMultipleProfiles(pubkeys) {
             normalizedData.isPublic,
             normalizedData.isOpen,
             this.user.privateKey,
-            normalizedData.relayKey,
+            normalizedData.identifier,
             normalizedData.proxyServer,
             npub
         );

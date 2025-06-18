@@ -466,7 +466,8 @@ function handleWorkerMessage(message) {
         
         // Notify the UI that this relay is ready
         if (window.App && window.App.nostr) {
-          window.App.nostr.handleRelayReady(message.relayKey, message.gatewayUrl)
+          const identifier = message.publicIdentifier || message.relayKey
+          window.App.nostr.handleRelayReady(identifier, message.gatewayUrl)
         }
       }
       break
@@ -502,7 +503,8 @@ function handleWorkerMessage(message) {
           
         // Notify the UI that this relay is ready
         if (window.App && window.App.nostr) {
-          window.App.nostr.handleRelayReady(message.relayKey, message.gatewayUrl)
+          const identifier = message.publicIdentifier || message.relayKey
+          window.App.nostr.handleRelayReady(identifier, message.gatewayUrl)
         }
       }
       break
