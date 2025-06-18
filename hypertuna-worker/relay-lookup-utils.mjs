@@ -1,6 +1,5 @@
 // hypertuna-worker/relay-lookup-utils.mjs
-import { getRelayProfiles } from './hypertuna-relay-profile-manager-bare.mjs';
-import { activeRelays } from './hypertuna-relay-manager-adapter.mjs';
+import { activeRelays, getRelayProfiles } from './hypertuna-relay-manager-adapter.mjs';
 
 /**
  * Find a relay by its public identifier
