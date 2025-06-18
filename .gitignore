@@ -40,9 +40,12 @@ build/Release
 
 # Dependency directories
 hypertuna-worker/node_modules/
+hypertuna-worker/test/
 hypertuna-worker/package-lock.json
 hypertuna-desktop/node_modules/
+hypertuna-desktop/test/
 hypertuna-desktop/package-lock.json
+hypertuna-gateway/
 archive/
 jspm_packages/
 
