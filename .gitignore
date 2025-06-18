@@ -45,7 +45,6 @@ hypertuna-worker/package-lock.json
 hypertuna-desktop/node_modules/
 hypertuna-desktop/test/
 hypertuna-desktop/package-lock.json
-hypertuna-gateway/
 archive/
 jspm_packages/
 

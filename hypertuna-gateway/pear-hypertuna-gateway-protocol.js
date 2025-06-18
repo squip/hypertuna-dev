@@ -1,7 +1,7 @@
-// ./hypertuna-worker/relay-protocol-enhanced.mjs - Enhanced protocol for full HTTP-like communication
-import Protomux from 'protomux';
-import c from 'compact-encoding';
-import { EventEmitter } from 'bare-events';
+// pear-hypertuna-gateway-protocol.js - Enhanced protocol for full HTTP-like communication (CommonJS)
+const Protomux = require('protomux');
+const c = require('compact-encoding');
+const { EventEmitter } = require('events');
 
 const REQUEST_TIMEOUT = 30000; // 30 seconds
 
@@ -49,7 +49,7 @@ const httpResponseEncoding = {
   }
 };
 
-export class RelayProtocol extends EventEmitter {
+class RelayProtocol extends EventEmitter {
   constructor(stream, isServer = false) {
     super();
     
@@ -364,3 +364,5 @@ export class RelayProtocol extends EventEmitter {
     }
   }
 }
+
+module.exports = RelayProtocol;
