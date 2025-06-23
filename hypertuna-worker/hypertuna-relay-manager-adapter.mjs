@@ -23,9 +23,7 @@ const activeRelays = new Map();
 // Store relay members keyed by relay key or public identifier
 const relayMembers = new Map();
 
-export function getRelayMembers(relayKey) {
-    return relayMembers.get(relayKey) || [];
-}
+
 
 export function setRelayMembers(relayKey, members = []) {
     relayMembers.set(relayKey, members);
