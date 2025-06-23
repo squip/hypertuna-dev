@@ -39,6 +39,7 @@ class NostrGroupClient {
         // Mapping between public identifiers and internal relay keys (if available)
         this.publicToInternalMap = new Map();
         this.internalToPublicMap = new Map();
+        this.publishedMemberLists = new Set(); // Track groups with published member lists
 
         // Setup default event handlers
         this._setupEventHandlers();
@@ -1375,6 +1376,10 @@ async fetchMultipleProfiles(pubkeys) {
             if (isMember) {
                 this._subscribeToGroupContent(publicIdentifier);
             }
+
+            if (this.isGroupAdmin(publicIdentifier, this.user.pubkey) && !this.publishedMemberLists.has(publicIdentifier)) {
+                this.publishMemberList(publicIdentifier);
+            }
         }
     }
     
@@ -1408,6 +1413,10 @@ async fetchMultipleProfiles(pubkeys) {
                 groupId, 
                 isAdmin 
             });
+
+            if (isAdmin && !this.publishedMemberLists.has(groupId)) {
+                this.publishMemberList(groupId);
+            }
         }
     }
     
@@ -1699,6 +1708,79 @@ async fetchMultipleProfiles(pubkeys) {
 
     isRelayListReady() {
         return this.relayListLoaded;
+    }
+
+    /**
+     * Build full member list for a group by combining snapshot and updates
+     * @param {string} publicIdentifier - Group public identifier
+     * @returns {Promise<Array>} - Array of member pubkeys
+     */
+    async buildMemberList(publicIdentifier) {
+        if (!publicIdentifier) return [];
+
+        const admins = this.groupAdmins.get(publicIdentifier) || [];
+        const adminPubkey = admins.length > 0 ? admins[0].pubkey : null;
+        if (!adminPubkey) return [];
+
+        // Fetch latest member list event from the admin
+        const baseEvent = await new Promise(resolve => {
+            const subId = `member-base-${publicIdentifier}-${Date.now()}`;
+            let timeout;
+            this.relayManager.subscribe(subId, [
+                { kinds: [NostrEvents.KIND_GROUP_MEMBER_LIST], '#d': [publicIdentifier], authors: [adminPubkey], limit: 1 }
+            ], event => {
+                clearTimeout(timeout);
+                this.relayManager.unsubscribe(subId);
+                resolve(event);
+            });
+            timeout = setTimeout(() => {
+                this.relayManager.unsubscribe(subId);
+                resolve(null);
+            }, 3000);
+        });
+
+        if (!baseEvent || !(await NostrEvents.verifyAdminListEvent(baseEvent, adminPubkey))) {
+            return [];
+        }
+
+        const since = baseEvent.created_at;
+
+        // Collect membership update events after the snapshot
+        const updateEvents = await new Promise(resolve => {
+            const subId = `member-updates-${publicIdentifier}-${Date.now()}`;
+            const evs = [];
+            let timeout;
+            this.relayManager.subscribe(subId, [
+                { kinds: [NostrEvents.KIND_GROUP_PUT_USER, NostrEvents.KIND_GROUP_REMOVE_USER], '#h': [publicIdentifier], since }
+            ], event => {
+                evs.push(event);
+            });
+            timeout = setTimeout(() => {
+                this.relayManager.unsubscribe(subId);
+                resolve(evs);
+            }, 3000);
+        });
+
+        const baseMembers = NostrEvents.parseGroupMembers(baseEvent).map(m => m.pubkey);
+        const { added, removed } = NostrEvents.parseMembershipUpdates(updateEvents, since);
+
+        const memberSet = new Set(baseMembers);
+        added.forEach(pk => memberSet.add(pk));
+        removed.forEach(pk => memberSet.delete(pk));
+
+        const finalMembers = Array.from(memberSet);
+        this.groupMembers.set(publicIdentifier, finalMembers);
+
+        this.emit('group:members', { groupId: publicIdentifier, members: finalMembers });
+        if (this.user) {
+            const isMember = memberSet.has(this.user.pubkey);
+            this.emit('group:membership', { groupId: publicIdentifier, isMember });
+            if (isMember) {
+                this._subscribeToGroupContent(publicIdentifier);
+            }
+        }
+
+        return finalMembers;
     }
     
     /**
@@ -2127,6 +2209,46 @@ async fetchMultipleProfiles(pubkeys) {
         };
         
         return event;
+    }
+
+    /**
+     * Publish an updated member list for a group and notify the worker
+     * @param {string} publicIdentifier - Group ID
+     */
+    async publishMemberList(publicIdentifier) {
+        const members = this.getGroupMembers(publicIdentifier);
+        if (!this.user || members.length === 0) return;
+
+        if (this.publishedMemberLists.has(publicIdentifier)) return;
+        this.publishedMemberLists.add(publicIdentifier);
+
+        try {
+            const event = await NostrEvents.createGroupMemberListEvent(
+                publicIdentifier,
+                members,
+                this.user.privateKey
+            );
+
+            const relayUrl = this.groupRelayUrls.get(publicIdentifier);
+            if (relayUrl) {
+                await this.relayManager.publishToRelays(event, [relayUrl]);
+            }
+
+            if (window.workerPipe) {
+                const relayKey = this.publicToInternalMap.get(publicIdentifier) || publicIdentifier;
+                const msg = {
+                    type: 'update-members',
+                    data: { relayKey, members: members.map(m => m.pubkey) }
+                };
+                try {
+                    window.workerPipe.write(JSON.stringify(msg) + '\n');
+                } catch (e) {
+                    console.error('Failed to send member list to worker', e);
+                }
+            }
+        } catch (e) {
+            console.error('Error publishing member list', e);
+        }
     }
 
     /**

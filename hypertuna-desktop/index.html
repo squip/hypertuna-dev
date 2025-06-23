@@ -185,9 +185,9 @@
                         <!-- Members Tab -->
                         <div id="tab-members" class="tab-content">
                             <div class="members-container">
-                                <div id="member-list" class="member-list">
+                                <members-list id="member-list" class="member-list">
                                     <!-- Members will be populated here -->
-                                </div>
+                                </members-list>
                                 
                                 <div id="admin-panel" class="admin-panel hidden">
                                     <h3>Admin Actions</h3>
@@ -544,6 +544,7 @@
       import NostrIntegration from './NostrIntegration.js';
       import integrateNostrRelays from './AppIntegration.js';
       import { HypertunaUtils } from './HypertunaUtils.js';
+      import MembersList from './MembersList.js';
       // Initialize the original app logic
       const App = {
           currentPage: 'auth',

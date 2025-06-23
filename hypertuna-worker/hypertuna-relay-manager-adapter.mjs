@@ -20,6 +20,17 @@ import {
 // Store active relay managers
 const activeRelays = new Map();
 
+// Store relay members keyed by relay key or public identifier
+const relayMembers = new Map();
+
+export function getRelayMembers(relayKey) {
+    return relayMembers.get(relayKey) || [];
+}
+
+export function setRelayMembers(relayKey, members = []) {
+    relayMembers.set(relayKey, members);
+}
+
 // Store config reference
 let globalConfig = null;
 let globalUserKey = null;
@@ -90,13 +101,20 @@ export async function createRelay(options = {}) {
             relay_storage: defaultStorageDir,
             created_at: new Date().toISOString(),
             auto_connect: true,
-            is_active: true
+            is_active: true,
+            members: []
         };
         
         // Save relay profile
         const saved = await saveRelayProfile(profileInfo);
         if (!saved) {
             console.log('[RelayAdapter] Warning: Failed to save relay profile');
+        }
+
+        // Load members into in-memory map
+        setRelayMembers(relayKey, profileInfo.members || []);
+        if (publicIdentifier) {
+            setRelayMembers(publicIdentifier, profileInfo.members || []);
         }
         
         console.log('[RelayAdapter] Created relay:', relayKey);
@@ -230,7 +248,8 @@ export async function joinRelay(options = {}) {
                 relay_storage: defaultStorageDir,
                 joined_at: new Date().toISOString(),
                 auto_connect: true,
-                is_active: true
+                is_active: true,
+                members: []
             };
             
             await saveRelayProfile(profileInfo);
@@ -248,6 +267,12 @@ export async function joinRelay(options = {}) {
             }
 
             await saveRelayProfile(profileInfo);
+        }
+
+        // Load members into in-memory map
+        setRelayMembers(relayKey, profileInfo.members || []);
+        if (profileInfo.public_identifier) {
+            setRelayMembers(profileInfo.public_identifier, profileInfo.members || []);
         }
         
         console.log('[RelayAdapter] Joined relay:', relayKey);
@@ -311,7 +336,12 @@ export async function disconnectRelay(relayKey) {
         activeRelays.delete(relayKey);
         
         // Update profile
+        relayMembers.delete(relayKey);
         const profileInfo = await getRelayProfileByKey(relayKey);
+        if (profileInfo && profileInfo.public_identifier) {
+            relayMembers.delete(profileInfo.public_identifier);
+        }
+        // Update profile
         if (profileInfo) {
             profileInfo.last_disconnected_at = new Date().toISOString();
             profileInfo.is_active = false;
@@ -546,6 +576,20 @@ export async function updateRelaySubscriptions(relayKey, connectionKey, activeSu
   }
 
 /**
+ * Get the members list for a relay
+ * @param {string} relayKey - Relay key
+ * @returns {Promise<Array<string>>} - Array of pubkeys
+ */
+export async function getRelayMembers(relayKey) {
+    await ensureProfilesInitialized(globalUserKey);
+    const profile = await getRelayProfileByKey(relayKey);
+    if (profile && Array.isArray(profile.members)) {
+        return profile.members;
+    }
+    return [];
+}
+
+/**
  * Get active relays information with full details
  * @returns {Promise<Array>} - Array of active relay information
  */
@@ -604,4 +648,4 @@ function generateHexKey() {
 }
 
 // Export the active relays map for direct access if needed
-export { activeRelays };
+export { activeRelays, relayMembers };

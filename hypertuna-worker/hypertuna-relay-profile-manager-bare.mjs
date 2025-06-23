@@ -160,6 +160,19 @@ export async function saveRelayProfile(relayProfile) {
         await fs.writeFile(profilesPath, JSON.stringify({ relays: sanitized }, null, 2));
         console.log(`[ProfileManager] Successfully saved relay profile for ${relayProfile.relay_key}`);
         
+        // Update in-memory relay members map in adapter
+        try {
+            const { setRelayMembers } = await import('./hypertuna-relay-manager-adapter.mjs');
+            if (relayProfile.members) {
+                setRelayMembers(relayProfile.relay_key, relayProfile.members);
+                if (relayProfile.public_identifier) {
+                    setRelayMembers(relayProfile.public_identifier, relayProfile.members);
+                }
+            }
+        } catch (err) {
+            console.error('[ProfileManager] Failed to update relayMembers map:', err);
+        }
+
         return true;
     } catch (error) {
         console.error(`[ProfileManager] Error saving relay profile:`, error);
@@ -308,5 +321,24 @@ export async function getAutoConnectSettings() {
         console.error(`[ProfileManager] Error getting auto-connect settings:`, error);
         console.error(error.stack);
         return [];
+    }
+}
+
+/**
+ * Update the member list for a relay profile
+ * @param {string} relayKey - Relay key
+ * @param {Array<string>} members - Array of member pubkeys
+ * @returns {Promise<boolean>} - True if saved
+ */
+export async function updateRelayMembers(relayKey, members = []) {
+    try {
+        const profile = await getRelayProfileByKey(relayKey);
+        if (!profile) return false;
+        profile.members = members;
+        profile.updated_at = new Date().toISOString();
+        return await saveRelayProfile(profile);
+    } catch (error) {
+        console.error(`[ProfileManager] Error updating members for ${relayKey}:`, error);
+        return false;
     }
 }

@@ -738,7 +738,7 @@ body {
     padding: var(--space-md);
 }
 
-.member-list {
+members-list,.member-list {
     display: flex;
     flex-direction: column;
     gap: var(--space-sm);

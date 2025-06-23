@@ -9,6 +9,12 @@ import process from 'bare-process'
 import { promises as fs } from 'bare-fs'
 import { join } from 'bare-path'
 import crypto from 'bare-crypto'
+import {
+  getAllRelayProfiles,
+  getRelayProfileByKey,
+  saveRelayProfile,
+  updateRelayMembers
+} from './hypertuna-relay-profile-manager-bare.mjs'
 
 // In Pear, use the config.dir for the application directory
 const __dirname = Pear.config.dir || '.'
@@ -16,6 +22,8 @@ const __dirname = Pear.config.dir || '.'
 // Variable to store the relay server module
 let relayServer = null
 let isShuttingDown = false
+// Map of relayKey -> members array
+const relayMembers = new Map()
 
 
 function getUserKey(config) {
@@ -77,6 +85,21 @@ async function loadOrCreateConfig() {
   }
 }
 
+// Load member lists from saved relay profiles
+async function loadRelayMembers() {
+  try {
+    const profiles = await getAllRelayProfiles(global.userConfig?.userKey)
+    for (const profile of profiles) {
+      if (profile.relay_key && Array.isArray(profile.members)) {
+        relayMembers.set(profile.relay_key, profile.members)
+      }
+    }
+    console.log(`[Worker] Loaded members for ${relayMembers.size} relays`)
+  } catch (err) {
+    console.error('[Worker] Failed to load relay members:', err)
+  }
+}
+
 // Handle worker communication
 const workerPipe = Pear.worker.pipe()
 console.log('[Worker] Pipe object:', workerPipe ? 'exists' : 'null')
@@ -94,6 +117,13 @@ const sendMessage = (message) => {
   } else {
     console.log('[Worker] Cannot send message - pipe:', workerPipe ? 'exists' : 'null', 'shuttingDown:', isShuttingDown)
   }
+}
+
+function addMembersToRelays(relays) {
+  return relays.map(r => ({
+    ...r,
+    members: relayMembers.get(r.relayKey) || []
+  }))
 }
 
 // Make pipe and sendMessage globally available for the relay server
@@ -157,17 +187,20 @@ if (workerPipe) {
                 try {
                   // Call the relay server's create relay function
                   const result = await relayServer.createRelay(message.data)
-                  
+
                   sendMessage({
                     type: 'relay-created',
-                    data: result
+                    data: {
+                      ...result,
+                      members: relayMembers.get(result.relayKey) || []
+                    }
                   })
-                  
+
                   // Send updated relay list
                   const relays = await relayServer.getActiveRelays()
                   sendMessage({
                     type: 'relay-update',
-                    relays: relays
+                    relays: addMembersToRelays(relays)
                   })
                 } catch (err) {
                   sendMessage({
@@ -189,17 +222,20 @@ if (workerPipe) {
                 try {
                   // Call the relay server's join relay function
                   const result = await relayServer.joinRelay(message.data)
-                  
+
                   sendMessage({
                     type: 'relay-joined',
-                    data: result
+                    data: {
+                      ...result,
+                      members: relayMembers.get(result.relayKey) || []
+                    }
                   })
-                  
+
                   // Send updated relay list
                   const relays = await relayServer.getActiveRelays()
                   sendMessage({
                     type: 'relay-update',
-                    relays: relays
+                    relays: addMembersToRelays(relays)
                   })
                 } catch (err) {
                   sendMessage({
@@ -226,13 +262,25 @@ if (workerPipe) {
                   const relays = await relayServer.getActiveRelays()
                   sendMessage({
                     type: 'relay-update',
-                    relays: relays
+                    relays: addMembersToRelays(relays)
                   })
                 } catch (err) {
                   sendMessage({
                     type: 'error',
                     message: `Failed to disconnect relay: ${err.message}`
                   })
+                }
+              }
+              break
+
+            case 'update-members':
+              if (relayServer) {
+                try {
+                  const { relayKey, members } = message.data
+                  await updateRelayMembers(relayKey, members)
+                  sendMessage({ type: 'members-updated', relayKey })
+                } catch (err) {
+                  sendMessage({ type: 'error', message: `Failed to update members: ${err.message}` })
                 }
               }
               break
@@ -245,7 +293,7 @@ if (workerPipe) {
                   const relays = await relayServer.getActiveRelays()
                   sendMessage({
                     type: 'relay-update',
-                    relays: relays
+                    relays: addMembersToRelays(relays)
                   })
                 } catch (err) {
                   sendMessage({
@@ -384,8 +432,10 @@ async function main() {
             userKey: config.userKey,
             storage: config.storage
         };
-        
+
         console.log('[Worker] Set global user config for profile operations');
+
+        await loadRelayMembers();
       }
     }
     

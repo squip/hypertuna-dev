@@ -19,7 +19,8 @@ import {
   handleRelaySubscription,
   getActiveRelays,
   cleanupRelays,
-  updateRelaySubscriptions
+  updateRelaySubscriptions,
+  getRelayMembers
 } from './hypertuna-relay-manager-adapter.mjs';
 
 import { 
@@ -775,6 +776,23 @@ function setupProtocolHandlers(protocol) {
             console.log(`[RelayServer] Queueing response for relay ${relayKey}`);
             responses.push(response);
         };
+
+        // Membership enforcement
+        const members = await getRelayMembers(relayKey);
+        let event = null;
+        if (nostrMessage[0] === 'EVENT') {
+            event = nostrMessage.length === 2 ? nostrMessage[1] : nostrMessage[2];
+        }
+
+        if (event && Array.isArray(members) && members.length > 0 && !members.includes(event.pubkey)) {
+            console.warn(`[RelayServer] Rejected event from pubkey ${event.pubkey} for relay ${identifier}`);
+            updateMetrics(false);
+            return {
+                statusCode: 403,
+                headers: { 'content-type': 'application/json' },
+                body: Buffer.from(JSON.stringify({ error: 'Pubkey not authorized for relay' }))
+            };
+        }
         
         await handleRelayMessage(relayKey, nostrMessage, sendResponse, connectionKey);
         

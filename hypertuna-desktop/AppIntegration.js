@@ -9,6 +9,8 @@ import { NostrUtils } from './NostrUtils.js';
 import { HypertunaUtils } from './HypertunaUtils.js';
 import { ConfigLogger } from './ConfigLogger.js';
 import NostrEvents from './NostrEvents.js';  // Add this import
+import MembersList from './MembersList.js';
+
 
 /**
  * This function modifies the existing App object to use real nostr relays
@@ -1244,133 +1246,58 @@ App.syncHypertunaConfigToFile = async function() {
     App.loadGroupMembers = async function() {
         if (!this.currentUser || !this.currentGroupId) return;
         
-        try {
-            const memberList = document.getElementById('member-list');
-            memberList.innerHTML = '';
-            
-            // Get members and admins
-            const members = this.nostr.getGroupMembers(this.currentGroupId);
-            const admins = this.nostr.getGroupAdmins(this.currentGroupId);
-            
-            // Create a mapping of pubkeys to roles
-            const memberRoles = {};
-            
-            members.forEach(member => {
-                memberRoles[member.pubkey] = ['member'];
-            });
-            
-            admins.forEach(admin => {
-                memberRoles[admin.pubkey] = admin.roles || ['admin'];
-            });
-            
-            // Get profiles for all members
-            const profiles = {};
-            const pubkeys = Object.keys(memberRoles);
-            
-            // Fetch profiles for each member
-            for (const pubkey of pubkeys) {
-                try {
-                    const profile = await this.nostr.client.fetchUserProfile(pubkey);
-                    profiles[pubkey] = profile;
-                } catch (e) {
-                    profiles[pubkey] = { name: 'User_' + NostrUtils.truncatePubkey(pubkey) };
-                }
-            }
-            
-            // Display members
-            if (pubkeys.length === 0) {
-                memberList.innerHTML = `
-                    <div class="empty-state">
-                        <p>No members in this relay yet</p>
-                    </div>
-                `;
-                return;
-            }
-            
-            const isAdmin = this.nostr.isGroupAdmin(this.currentGroupId, this.currentUser.pubkey);
-            
-            pubkeys.forEach(pubkey => {
-                const profile = profiles[pubkey] || {};
-                const roles = memberRoles[pubkey] || ['member'];
-                const isCurrentUser = pubkey === this.currentUser.pubkey;
-                const npub = NostrUtils.hexToNpub(pubkey);
-                const displayPub = NostrUtils.truncateNpub(npub);
-                
-                const memberElement = document.createElement('div');
-                memberElement.className = 'member-item';
-                
-                const name = profile.name || 'User_' + NostrUtils.truncatePubkey(pubkey);
-                const firstLetter = name.charAt(0).toUpperCase();
-                const roleText = roles.includes('admin') ? 'Admin' : 'Member';
-                const roleClass = roles.includes('admin') ? 'admin' : '';
-                
-                let memberHTML = `
-                    <div class="member-avatar">
-                        ${profile.picture ? 
-                            `<img src="${profile.picture}" alt="${name}">` : 
-                            `<span>${firstLetter}</span>`
-                        }
-                    </div>
-                    <div class="member-info">
-                        <div class="member-name">${name}</div>
-                        <div class="member-pubkey">${displayPub}</div>
-                    </div>
-                    <span class="member-role ${roleClass}">${roleText}</span>
-                `;
-                
-                // Add admin actions if current user is an admin and this isn't the current user
-                if (isAdmin && !isCurrentUser) {
-                    memberHTML += `<div class="member-actions">`;
-                    
-                    // Promote to admin button
-                    if (!roles.includes('admin')) {
-                        memberHTML += `
-                            <button class="btn btn-secondary btn-small" data-action="promote" data-pubkey="${pubkey}">
-                                Make Admin
-                            </button>
-                        `;
-                    }
-                    
-                    // Remove member button
-                    memberHTML += `
-                        <button class="btn btn-danger btn-small" data-action="remove" data-pubkey="${pubkey}">
-                            Remove
-                        </button>
-                    `;
-                    
-                    memberHTML += `</div>`;
-                }
-                
-                memberElement.innerHTML = memberHTML;
-                
-                // Add event listeners for admin actions
-                if (isAdmin && !isCurrentUser) {
-                    const promoteBtn = memberElement.querySelector('[data-action="promote"]');
-                    if (promoteBtn) {
-                        promoteBtn.addEventListener('click', () => {
-                            this.updateMemberRole(pubkey, ['admin']);
-                        });
-                    }
-                    
-                    const removeBtn = memberElement.querySelector('[data-action="remove"]');
-                    if (removeBtn) {
-                        removeBtn.addEventListener('click', () => {
-                            this.removeMember(pubkey);
-                        });
-                    }
-                }
-                
-                memberList.appendChild(memberElement);
-            });
-            
-        } catch (e) {
-            console.error('Error loading members:', e);
-            document.getElementById('member-list').innerHTML = `
-                <div class="status-message error">
-                    Error loading members. Please try again.
-                </div>
-            `;
+        const container = document.getElementById("member-list");
+        if (!this.membersList) {
+            this.membersList = new MembersList(container, this.nostr.client, this.currentUser.pubkey);
+        } else {
+            this.membersList.container = container;
+            this.membersList.client = this.nostr.client;
+            this.membersList.setUserPubkey(this.currentUser.pubkey);
         }
+        const members = this.nostr.getGroupMembers(this.currentGroupId);
+        const admins = this.nostr.getGroupAdmins(this.currentGroupId);
+        try {
+            await this.membersList.render(members, admins);
+            container.addEventListener('promote', (e) => {
+                this.updateMemberRole(e.detail.pubkey, ['admin']);
+            });
+            
+            container.addEventListener('remove', (e) => {
+                this.removeMember(e.detail.pubkey);
+            });
+            
+            } catch (e) {
+            console.error("Error loading members:", e);
+            if (container) {
+                container.innerHTML = `
+                    <div class="status-message error">
+                        Error loading members. Please try again.
+                    </div>
+                `;
+                
+            }
+            
+        }
+    };
+
+    App.renderMembersList = async function(members) {
+        if (!this.currentUser || !this.currentGroupId) return;
+        const admins = this.nostr.getGroupAdmins(this.currentGroupId);
+        const container = document.getElementById("member-list");
+        if (!this.membersList) {
+            this.membersList = new MembersList(container, this.nostr.client, this.currentUser.pubkey);
+        } else {
+            this.membersList.container = container;
+            this.membersList.client = this.nostr.client;
+            this.membersList.setUserPubkey(this.currentUser.pubkey);
+        }
+        await this.membersList.render(members, admins);
+        container.addEventListener('promote', (e) => {
+            this.updateMemberRole(e.detail.pubkey, ['admin']);
+        });
+        container.addEventListener('remove', (e) => {
+            this.removeMember(e.detail.pubkey);
+        });
     };
 
     App.escapeHtml = function(text) {
