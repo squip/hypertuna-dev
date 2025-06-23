@@ -129,6 +129,16 @@ class NostrIntegration {
         this.client.on('group:members', ({ groupId, members }) => {
             console.log(`Updated group members for: ${groupId}`);
             this._throttledGroupUpdate();
+
+            if (window.workerPipe) {
+                const relayKey = this.client.publicToInternalMap?.get(groupId) || groupId;
+                const msg = { type: 'update-members', relayKey, members };
+                try {
+                    window.workerPipe.write(JSON.stringify(msg) + '\n');
+                } catch (err) {
+                    console.error('Failed to send update-members message:', err);
+                }
+            }
         });
         
         this.client.on('group:admins', ({ groupId, admins }) => {
