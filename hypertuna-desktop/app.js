@@ -146,6 +146,7 @@ async function startWorker() {
         
         // Start the worker process
         workerPipe = Pear.worker.run(workerLink, [])
+        window.workerPipe = workerPipe
         
         // IMPORTANT: Get the current user's config from localStorage instead of file
         let configToUse = {}
