@@ -27,6 +27,18 @@ function getRelayProfilesPath(userKey = null) {
     return join(getStorageDir(userKey), RELAY_PROFILES_FILE);
 }
 
+// Ensure a relay profile has the expected schema
+function ensureProfileSchema(profile) {
+    if (!profile) return null;
+    if (profile.admin_pubkey === undefined) {
+        profile.admin_pubkey = null;
+    }
+    if (!Array.isArray(profile.members)) {
+        profile.members = profile.admin_pubkey ? [profile.admin_pubkey] : [];
+    }
+    return profile;
+}
+
 /**
  * Initialize the relay profiles storage file if it doesn't exist
  * @returns {Promise<void>}
@@ -62,14 +74,14 @@ export async function getAllRelayProfiles(userKey = null) {
     try {
         // Ensure the storage file exists
         await initRelayProfilesStorage(userKey);
-        
+
         const profilesPath = getRelayProfilesPath(userKey);
 
-        
         // Read and parse the file
         const data = await fs.readFile(profilesPath, 'utf8');
         const profiles = JSON.parse(data);
-        return profiles.relays || [];
+        const relays = Array.isArray(profiles.relays) ? profiles.relays : [];
+        return relays.map(p => ensureProfileSchema(p));
     } catch (error) {
         console.error(`[ProfileManager] Error loading relay profiles: ${error.message}`);
         return [];
@@ -84,7 +96,8 @@ export async function getAllRelayProfiles(userKey = null) {
 export async function getRelayProfileByKey(relayKey) {
     try {
         const profiles = await getAllRelayProfiles();
-        return profiles.find(profile => profile.relay_key === relayKey) || null;
+        const profile = profiles.find(profile => profile.relay_key === relayKey) || null;
+        return ensureProfileSchema(profile);
     } catch (error) {
         console.error(`[ProfileManager] Error getting relay profile for key ${relayKey}: ${error.message}`);
         return null;
@@ -102,6 +115,9 @@ export async function saveRelayProfile(relayProfile) {
             console.error('[ProfileManager] Invalid relay profile data:', relayProfile);
             throw new Error('Invalid relay profile data');
         }
+
+        // Ensure schema fields exist
+        relayProfile = ensureProfileSchema(relayProfile);
         
         console.log(`[ProfileManager] Saving relay profile for ${relayProfile.relay_key}:`, {
             name: relayProfile.name,
@@ -140,7 +156,8 @@ export async function saveRelayProfile(relayProfile) {
         // Write updated profiles back to file
         const profilesPath = getRelayProfilesPath();
         console.log(`[ProfileManager] Writing ${profiles.length} profiles to ${profilesPath}`);
-        await fs.writeFile(profilesPath, JSON.stringify({ relays: profiles }, null, 2));
+        const sanitized = profiles.map(p => ensureProfileSchema(p));
+        await fs.writeFile(profilesPath, JSON.stringify({ relays: sanitized }, null, 2));
         console.log(`[ProfileManager] Successfully saved relay profile for ${relayProfile.relay_key}`);
         
         return true;
@@ -166,7 +183,8 @@ export async function removeRelayProfile(relayKey) {
         
         // Write updated profiles back to file
         const profilesPath = getRelayProfilesPath();
-        await fs.writeFile(profilesPath, JSON.stringify({ relays: newProfiles }, null, 2));
+        const sanitized = newProfiles.map(p => ensureProfileSchema(p));
+        await fs.writeFile(profilesPath, JSON.stringify({ relays: sanitized }, null, 2));
         
         return true;
     } catch (error) {
