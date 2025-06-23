@@ -1700,6 +1700,79 @@ async fetchMultipleProfiles(pubkeys) {
     isRelayListReady() {
         return this.relayListLoaded;
     }
+
+    /**
+     * Build full member list for a group by combining snapshot and updates
+     * @param {string} publicIdentifier - Group public identifier
+     * @returns {Promise<Array>} - Array of member pubkeys
+     */
+    async buildMemberList(publicIdentifier) {
+        if (!publicIdentifier) return [];
+
+        const admins = this.groupAdmins.get(publicIdentifier) || [];
+        const adminPubkey = admins.length > 0 ? admins[0].pubkey : null;
+        if (!adminPubkey) return [];
+
+        // Fetch latest member list event from the admin
+        const baseEvent = await new Promise(resolve => {
+            const subId = `member-base-${publicIdentifier}-${Date.now()}`;
+            let timeout;
+            this.relayManager.subscribe(subId, [
+                { kinds: [NostrEvents.KIND_GROUP_MEMBER_LIST], '#d': [publicIdentifier], authors: [adminPubkey], limit: 1 }
+            ], event => {
+                clearTimeout(timeout);
+                this.relayManager.unsubscribe(subId);
+                resolve(event);
+            });
+            timeout = setTimeout(() => {
+                this.relayManager.unsubscribe(subId);
+                resolve(null);
+            }, 3000);
+        });
+
+        if (!baseEvent || !(await NostrEvents.verifyAdminListEvent(baseEvent, adminPubkey))) {
+            return [];
+        }
+
+        const since = baseEvent.created_at;
+
+        // Collect membership update events after the snapshot
+        const updateEvents = await new Promise(resolve => {
+            const subId = `member-updates-${publicIdentifier}-${Date.now()}`;
+            const evs = [];
+            let timeout;
+            this.relayManager.subscribe(subId, [
+                { kinds: [NostrEvents.KIND_GROUP_PUT_USER, NostrEvents.KIND_GROUP_REMOVE_USER], '#h': [publicIdentifier], since }
+            ], event => {
+                evs.push(event);
+            });
+            timeout = setTimeout(() => {
+                this.relayManager.unsubscribe(subId);
+                resolve(evs);
+            }, 3000);
+        });
+
+        const baseMembers = NostrEvents.parseGroupMembers(baseEvent).map(m => m.pubkey);
+        const { added, removed } = NostrEvents.parseMembershipUpdates(updateEvents, since);
+
+        const memberSet = new Set(baseMembers);
+        added.forEach(pk => memberSet.add(pk));
+        removed.forEach(pk => memberSet.delete(pk));
+
+        const finalMembers = Array.from(memberSet);
+        this.groupMembers.set(publicIdentifier, finalMembers);
+
+        this.emit('group:members', { groupId: publicIdentifier, members: finalMembers });
+        if (this.user) {
+            const isMember = memberSet.has(this.user.pubkey);
+            this.emit('group:membership', { groupId: publicIdentifier, isMember });
+            if (isMember) {
+                this._subscribeToGroupContent(publicIdentifier);
+            }
+        }
+
+        return finalMembers;
+    }
     
     /**
      * Create a new group
