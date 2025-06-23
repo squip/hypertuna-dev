@@ -142,7 +142,20 @@ export async function saveRelayProfile(relayProfile) {
         console.log(`[ProfileManager] Writing ${profiles.length} profiles to ${profilesPath}`);
         await fs.writeFile(profilesPath, JSON.stringify({ relays: profiles }, null, 2));
         console.log(`[ProfileManager] Successfully saved relay profile for ${relayProfile.relay_key}`);
-        
+
+        // Update in-memory relay members map in adapter
+        try {
+            const { setRelayMembers } = await import('./hypertuna-relay-manager-adapter.mjs');
+            if (relayProfile.members) {
+                setRelayMembers(relayProfile.relay_key, relayProfile.members);
+                if (relayProfile.public_identifier) {
+                    setRelayMembers(relayProfile.public_identifier, relayProfile.members);
+                }
+            }
+        } catch (err) {
+            console.error('[ProfileManager] Failed to update relayMembers map:', err);
+        }
+
         return true;
     } catch (error) {
         console.error(`[ProfileManager] Error saving relay profile:`, error);
