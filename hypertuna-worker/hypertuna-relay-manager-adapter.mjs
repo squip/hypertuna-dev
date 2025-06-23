@@ -82,6 +82,8 @@ export async function createRelay(options = {}) {
             name: name || `Relay ${relayKey.substring(0, 8)}`,
             description: description || `Created on ${new Date().toLocaleString()}`,
             nostr_pubkey_hex: config.nostr_pubkey_hex || generateHexKey(),
+            admin_pubkey: config.nostr_pubkey_hex || null,
+            members: config.nostr_pubkey_hex ? [config.nostr_pubkey_hex] : [],
             relay_nostr_id: null,
             relay_key: relayKey, // Internal key
             public_identifier: publicIdentifier, // New public-facing identifier
@@ -221,6 +223,8 @@ export async function joinRelay(options = {}) {
                 name: name || `Joined Relay ${relayKey.substring(0, 8)}`,
                 description: description || `Relay joined on ${new Date().toLocaleString()}`,
                 nostr_pubkey_hex: config.nostr_pubkey_hex || generateHexKey(),
+                admin_pubkey: config.nostr_pubkey_hex || null,
+                members: config.nostr_pubkey_hex ? [config.nostr_pubkey_hex] : [],
                 relay_nostr_id: null,
                 relay_key: relayKey,
                 relay_storage: defaultStorageDir,
@@ -237,7 +241,12 @@ export async function joinRelay(options = {}) {
             profileInfo.is_active = true;
             if (name) profileInfo.name = name;
             if (description) profileInfo.description = description;
-            
+            if (!profileInfo.admin_pubkey) profileInfo.admin_pubkey = config.nostr_pubkey_hex || null;
+            if (!Array.isArray(profileInfo.members)) profileInfo.members = [];
+            if (config.nostr_pubkey_hex && !profileInfo.members.includes(config.nostr_pubkey_hex)) {
+                profileInfo.members.push(config.nostr_pubkey_hex);
+            }
+
             await saveRelayProfile(profileInfo);
         }
         
