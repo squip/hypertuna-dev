@@ -586,13 +586,59 @@ class NostrEvents {
         if (!event || event.kind !== this.KIND_GROUP_ADMIN_LIST) {
             return [];
         }
-        
+
         return event.tags
             .filter(tag => tag[0] === 'p')
             .map(tag => ({
                 pubkey: tag[1],
                 roles: tag.slice(2)
             }));
+    }
+
+    /**
+     * Verify a group member list event was signed by the expected admin
+     * @param {Object} event - Group member list event (kind 39002)
+     * @param {string} adminPubkey - Admin public key
+     * @returns {Promise<boolean>} - Whether the event is valid
+     */
+    static async verifyAdminListEvent(event, adminPubkey) {
+        if (!event || event.kind !== this.KIND_GROUP_MEMBER_LIST) return false;
+
+        const dTag = this._getTagValue(event, 'd');
+        if (!dTag || dTag !== adminPubkey) return false;
+        if (event.pubkey !== adminPubkey) return false;
+
+        return NostrUtils.verifySignature(event);
+    }
+
+    /**
+     * Parse membership update events
+     * @param {Array} events - Events to parse
+     * @param {number} sinceTimestamp - Only include events after this timestamp
+     * @returns {Object} - { added, removed }
+     */
+    static parseMembershipUpdates(events = [], sinceTimestamp = 0) {
+        const added = [];
+        const removed = [];
+
+        events.forEach(ev => {
+            if (!ev || ev.created_at <= sinceTimestamp) return;
+
+            if (ev.kind === this.KIND_GROUP_PUT_USER) {
+                ev.tags.forEach(tag => {
+                    if (tag[0] === 'p' && tag[1]) added.push(tag[1]);
+                });
+            } else if (ev.kind === this.KIND_GROUP_REMOVE_USER) {
+                ev.tags.forEach(tag => {
+                    if (tag[0] === 'p' && tag[1]) removed.push(tag[1]);
+                });
+            }
+        });
+
+        return {
+            added: [...new Set(added)],
+            removed: [...new Set(removed)]
+        };
     }
     
     /**
