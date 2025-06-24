@@ -14,7 +14,9 @@ import {
     getRelayProfileByKey, 
     saveRelayProfile, 
     removeRelayProfile,
-    importLegacyRelayProfiles 
+importLegacyRelayProfiles,
+updateRelayMemberSets,
+calculateMembers
 } from './hypertuna-relay-profile-manager-bare.mjs';
 
 // Store active relay managers
@@ -22,11 +24,13 @@ const activeRelays = new Map();
 
 // Store relay members keyed by relay key or public identifier
 const relayMembers = new Map();
+const relayMemberAdds = new Map();
+const relayMemberRemoves = new Map();
 
-
-
-export function setRelayMembers(relayKey, members = []) {
+export function setRelayMembers(relayKey, members = [], adds = null, removes = null) {
     relayMembers.set(relayKey, members);
+    if (adds) relayMemberAdds.set(relayKey, adds);
+    if (removes) relayMemberRemoves.set(relayKey, removes);
 }
 
 // Store config reference
@@ -93,6 +97,8 @@ export async function createRelay(options = {}) {
             nostr_pubkey_hex: config.nostr_pubkey_hex || generateHexKey(),
             admin_pubkey: config.nostr_pubkey_hex || null,
             members: config.nostr_pubkey_hex ? [config.nostr_pubkey_hex] : [],
+            member_adds: config.nostr_pubkey_hex ? [{ pubkey: config.nostr_pubkey_hex, ts: Date.now() }] : [],
+            member_removes: [],
             relay_nostr_id: null,
             relay_key: relayKey, // Internal key
             public_identifier: publicIdentifier, // New public-facing identifier
@@ -109,9 +115,9 @@ export async function createRelay(options = {}) {
         }
 
         // Load members into in-memory map
-        setRelayMembers(relayKey, profileInfo.members || []);
+        setRelayMembers(relayKey, profileInfo.members || [], profileInfo.member_adds || [], profileInfo.member_removes || []);
         if (publicIdentifier) {
-            setRelayMembers(publicIdentifier, profileInfo.members || []);
+            setRelayMembers(publicIdentifier, profileInfo.members || [], profileInfo.member_adds || [], profileInfo.member_removes || []);
         }
         
         console.log('[RelayAdapter] Created relay:', relayKey);
@@ -240,6 +246,8 @@ export async function joinRelay(options = {}) {
                 nostr_pubkey_hex: config.nostr_pubkey_hex || generateHexKey(),
                 admin_pubkey: config.nostr_pubkey_hex || null,
                 members: config.nostr_pubkey_hex ? [config.nostr_pubkey_hex] : [],
+                member_adds: config.nostr_pubkey_hex ? [{ pubkey: config.nostr_pubkey_hex, ts: Date.now() }] : [],
+                member_removes: [],
                 relay_nostr_id: null,
                 relay_key: relayKey,
                 relay_storage: defaultStorageDir,
@@ -266,9 +274,9 @@ export async function joinRelay(options = {}) {
         }
 
         // Load members into in-memory map
-        setRelayMembers(relayKey, profileInfo.members || []);
+        setRelayMembers(relayKey, profileInfo.members || [], profileInfo.member_adds || [], profileInfo.member_removes || []);
         if (profileInfo.public_identifier) {
-            setRelayMembers(profileInfo.public_identifier, profileInfo.members || []);
+            setRelayMembers(profileInfo.public_identifier, profileInfo.members || [], profileInfo.member_adds || [], profileInfo.member_removes || []);
         }
         
         console.log('[RelayAdapter] Joined relay:', relayKey);
@@ -578,9 +586,16 @@ export async function updateRelaySubscriptions(relayKey, connectionKey, activeSu
  */
 export async function getRelayMembers(relayKey) {
     await ensureProfilesInitialized(globalUserKey);
+    if (relayMembers.has(relayKey)) return relayMembers.get(relayKey);
+
     const profile = await getRelayProfileByKey(relayKey);
-    if (profile && Array.isArray(profile.members)) {
-        return profile.members;
+    if (profile) {
+        const members = calculateMembers(profile.member_adds || [], profile.member_removes || []);
+        setRelayMembers(relayKey, members, profile.member_adds || [], profile.member_removes || []);
+        if (profile.public_identifier) {
+            setRelayMembers(profile.public_identifier, members, profile.member_adds || [], profile.member_removes || []);
+        }
+        return members;
     }
     return [];
 }
@@ -644,4 +659,4 @@ function generateHexKey() {
 }
 
 // Export the active relays map for direct access if needed
-export { activeRelays, relayMembers };
+export { activeRelays, relayMembers, relayMemberAdds, relayMemberRemoves };

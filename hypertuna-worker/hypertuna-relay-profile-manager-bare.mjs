@@ -38,6 +38,12 @@ function ensureProfileSchema(profile) {
     } else if (profile.admin_pubkey && !profile.members.includes(profile.admin_pubkey)) {
         profile.members.unshift(profile.admin_pubkey);
     }
+    if (!Array.isArray(profile.member_adds)) {
+        profile.member_adds = [];
+    }
+    if (!Array.isArray(profile.member_removes)) {
+        profile.member_removes = [];
+    }
     return profile;
 }
 
@@ -361,6 +367,38 @@ export async function updateRelayMembers(identifier, members = []) {
         return saved ? profile : null;
     } catch (error) {
         console.error(`[ProfileManager] Error updating members for ${identifier}:`, error);
+        return null;
+    }
+}
+
+export function calculateMembers(adds = [], removes = []) {
+    const addMap = new Map(adds.map(a => [a.pubkey, a.ts]));
+    const removeMap = new Map(removes.map(r => [r.pubkey, r.ts]));
+    const final = [];
+    for (const [pubkey, ts] of addMap) {
+        const rts = removeMap.get(pubkey);
+        if (!rts || ts > rts) {
+            final.push(pubkey);
+        }
+    }
+    return final;
+}
+
+export async function updateRelayMemberSets(identifier, adds = [], removes = []) {
+    try {
+        let profile = await getRelayProfileByKey(identifier);
+        if (!profile) {
+            profile = await getRelayProfileByPublicIdentifier(identifier);
+        }
+        if (!profile) return null;
+        profile.member_adds = adds;
+        profile.member_removes = removes;
+        profile.members = calculateMembers(adds, removes);
+        profile.updated_at = new Date().toISOString();
+        const saved = await saveRelayProfile(profile);
+        return saved ? profile : null;
+    } catch (error) {
+        console.error(`[ProfileManager] Error updating member sets for ${identifier}:`, error);
         return null;
     }
 }

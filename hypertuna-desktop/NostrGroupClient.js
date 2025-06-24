@@ -40,6 +40,8 @@ class NostrGroupClient {
         this.publicToInternalMap = new Map();
         this.internalToPublicMap = new Map();
         this.publishedMemberLists = new Set(); // Track groups with published member lists
+        this.kind9000Sets = new Map(); // Map of groupId -> Map of pubkey -> {ts, roles}
+        this.kind9001Sets = new Map(); // Map of groupId -> Map of pubkey -> ts
 
         // Setup default event handlers
         this._setupEventHandlers();
@@ -1081,14 +1083,21 @@ async fetchMultipleProfiles(pubkeys) {
             return;
         }
         
-        // Subscribe to group member and admin lists using public identifier
+        // Subscribe to membership events using public identifier
         const actualSubId = this.relayManager.subscribe(subId, [
-            { 
+            {
                 kinds: [
                     NostrEvents.KIND_GROUP_MEMBER_LIST,
                     NostrEvents.KIND_GROUP_ADMIN_LIST
                 ],
-                "#d": [publicIdentifier] // Use public identifier in 'd' tag
+                "#d": [publicIdentifier]
+            },
+            {
+                kinds: [
+                    NostrEvents.KIND_GROUP_PUT_USER,
+                    NostrEvents.KIND_GROUP_REMOVE_USER
+                ],
+                "#h": [publicIdentifier]
             }
         ], (event) => {
             // Add all member pubkeys to relevant pubkeys
@@ -1103,6 +1112,10 @@ async fetchMultipleProfiles(pubkeys) {
                 this._processGroupMemberListEvent(event);
             } else if (event.kind === NostrEvents.KIND_GROUP_ADMIN_LIST) {
                 this._processGroupAdminListEvent(event);
+            } else if (event.kind === NostrEvents.KIND_GROUP_PUT_USER) {
+                this._processGroupAddUserEvent(event);
+            } else if (event.kind === NostrEvents.KIND_GROUP_REMOVE_USER) {
+                this._processGroupRemoveUserEvent(event);
             }
         });
         
@@ -1177,6 +1190,14 @@ async fetchMultipleProfiles(pubkeys) {
                 
             case NostrEvents.KIND_GROUP_ADMIN_LIST:
                 this._processGroupAdminListEvent(event);
+                break;
+
+            case NostrEvents.KIND_GROUP_PUT_USER:
+                this._processGroupAddUserEvent(event);
+                break;
+
+            case NostrEvents.KIND_GROUP_REMOVE_USER:
+                this._processGroupRemoveUserEvent(event);
                 break;
                 
             case NostrEvents.KIND_HYPERTUNA_RELAY:
@@ -1362,36 +1383,18 @@ async fetchMultipleProfiles(pubkeys) {
         // Extract public identifier from 'd' tag
         const publicIdentifier = NostrEvents._getTagValue(event, 'd');
         if (!publicIdentifier) return;
-        
-        const members = NostrEvents.parseGroupMembers(event);
-        this.groupMembers.set(publicIdentifier, members);
-        
-        // Add all member pubkeys to relevant pubkeys
-        members.forEach(member => {
-            this.relevantPubkeys.add(member.pubkey);
-        });
-        
-        // Emit events
-        this.emit('group:members', { 
-            groupId: publicIdentifier, // Using public identifier
-            members 
-        });
-        
-        // Check if current user is a member
-        if (this.user) {
-            const isMember = members.some(m => m.pubkey === this.user.pubkey);
-            this.emit('group:membership', { 
-                groupId: publicIdentifier,
-                isMember 
-            });
-            
-            if (isMember) {
-                this._subscribeToGroupContent(publicIdentifier);
-            }
 
-            if (this.isGroupAdmin(publicIdentifier, this.user.pubkey) && !this.publishedMemberLists.has(publicIdentifier)) {
-                this.publishMemberList(publicIdentifier);
-            }
+        const parsed = NostrEvents.parseGroupMembers(event);
+        const addMap = this.kind9000Sets.get(publicIdentifier) || new Map();
+        parsed.forEach(m => {
+            addMap.set(m.pubkey, { ts: event.created_at, roles: m.roles });
+            this.relevantPubkeys.add(m.pubkey);
+        });
+        this.kind9000Sets.set(publicIdentifier, addMap);
+        this._recomputeGroupMembers(publicIdentifier);
+
+        if (this.user && this.isGroupAdmin(publicIdentifier, this.user.pubkey) && !this.publishedMemberLists.has(publicIdentifier)) {
+            this.publishMemberList(publicIdentifier);
         }
     }
     
@@ -1472,7 +1475,39 @@ async fetchMultipleProfiles(pubkeys) {
             this._processGroupMemberListEvent(event);
         } else if (event.kind === NostrEvents.KIND_GROUP_ADMIN_LIST) {
             this._processGroupAdminListEvent(event);
+        } else if (event.kind === NostrEvents.KIND_GROUP_PUT_USER) {
+            this._processGroupAddUserEvent(event);
+        } else if (event.kind === NostrEvents.KIND_GROUP_REMOVE_USER) {
+            this._processGroupRemoveUserEvent(event);
         }
+    }
+
+    _processGroupAddUserEvent(event) {
+        const groupId = NostrEvents._getTagValue(event, 'h');
+        if (!groupId) return;
+        const addMap = this.kind9000Sets.get(groupId) || new Map();
+        event.tags.forEach(tag => {
+            if (tag[0] === 'p' && tag[1]) {
+                addMap.set(tag[1], { ts: event.created_at, roles: tag.slice(2) });
+                this.relevantPubkeys.add(tag[1]);
+            }
+        });
+        this.kind9000Sets.set(groupId, addMap);
+        this._recomputeGroupMembers(groupId);
+    }
+
+    _processGroupRemoveUserEvent(event) {
+        const groupId = NostrEvents._getTagValue(event, 'h');
+        if (!groupId) return;
+        const remMap = this.kind9001Sets.get(groupId) || new Map();
+        event.tags.forEach(tag => {
+            if (tag[0] === 'p' && tag[1]) {
+                remMap.set(tag[1], event.created_at);
+                this.relevantPubkeys.add(tag[1]);
+            }
+        });
+        this.kind9001Sets.set(groupId, remMap);
+        this._recomputeGroupMembers(groupId);
     }
     
     /**
@@ -1652,9 +1687,31 @@ async fetchMultipleProfiles(pubkeys) {
      * Get members of a group
      * @param {string} groupId - Group ID
      * @returns {Array} - Array of member objects
-     */
+    */
     getGroupMembers(groupId) {
+        if (this.kind9000Sets.has(groupId) || this.kind9001Sets.has(groupId)) {
+            this._recomputeGroupMembers(groupId);
+        }
         return this.groupMembers.get(groupId) || [];
+    }
+
+    _recomputeGroupMembers(groupId) {
+        const addMap = this.kind9000Sets.get(groupId) || new Map();
+        const removeMap = this.kind9001Sets.get(groupId) || new Map();
+        const members = [];
+        for (const [pubkey, info] of addMap.entries()) {
+            const rts = removeMap.get(pubkey);
+            if (!rts || info.ts > rts) {
+                members.push({ pubkey, roles: info.roles || ['member'] });
+            }
+        }
+        this.groupMembers.set(groupId, members);
+        this.emit('group:members', { groupId, members });
+        if (this.user) {
+            const isMember = members.some(m => m.pubkey === this.user.pubkey);
+            this.emit('group:membership', { groupId, isMember });
+        }
+        this._notifyMemberUpdate(groupId);
     }
     
     /**
@@ -1773,26 +1830,35 @@ async fetchMultipleProfiles(pubkeys) {
             }, 3000);
         });
 
-        const baseMembers = NostrEvents.parseGroupMembers(baseEvent).map(m => m.pubkey);
-        const { added, removed } = NostrEvents.parseMembershipUpdates(updateEvents, since);
+        const baseMembers = NostrEvents.parseGroupMembers(baseEvent);
+        const addMap = new Map();
+        baseMembers.forEach(m => addMap.set(m.pubkey, { ts: baseEvent.created_at, roles: m.roles }));
 
-        const memberSet = new Set(baseMembers);
-        added.forEach(pk => memberSet.add(pk));
-        removed.forEach(pk => memberSet.delete(pk));
+        const addEvents = updateEvents.filter(e => e.kind === NostrEvents.KIND_GROUP_PUT_USER);
+        const removeEvents = updateEvents.filter(e => e.kind === NostrEvents.KIND_GROUP_REMOVE_USER);
 
-        const finalMembers = Array.from(memberSet);
-        this.groupMembers.set(publicIdentifier, finalMembers);
+        addEvents.forEach(ev => {
+            ev.tags.forEach(tag => {
+                if (tag[0] === 'p' && tag[1]) {
+                    addMap.set(tag[1], { ts: ev.created_at, roles: tag.slice(2) });
+                }
+            });
+        });
 
-        this.emit('group:members', { groupId: publicIdentifier, members: finalMembers });
-        if (this.user) {
-            const isMember = memberSet.has(this.user.pubkey);
-            this.emit('group:membership', { groupId: publicIdentifier, isMember });
-            if (isMember) {
-                this._subscribeToGroupContent(publicIdentifier);
-            }
-        }
+        const remMap = new Map();
+        removeEvents.forEach(ev => {
+            ev.tags.forEach(tag => {
+                if (tag[0] === 'p' && tag[1]) {
+                    remMap.set(tag[1], ev.created_at);
+                }
+            });
+        });
 
-        return finalMembers;
+        this.kind9000Sets.set(publicIdentifier, addMap);
+        this.kind9001Sets.set(publicIdentifier, remMap);
+        this._recomputeGroupMembers(publicIdentifier);
+
+        return this.groupMembers.get(publicIdentifier);
     }
     
     /**
@@ -2096,15 +2162,10 @@ async fetchMultipleProfiles(pubkeys) {
         // Publish the event
         await this.relayManager.publish(event);
 
-        // Update local member list
-        const members = this.groupMembers.get(publicIdentifier) || [];
-        const existing = members.find(m => m.pubkey === pubkey);
-        if (existing) {
-            existing.roles = roles;
-        } else {
-            members.push({ pubkey, roles });
-        }
-        this.groupMembers.set(publicIdentifier, members);
+        const addMap = this.kind9000Sets.get(publicIdentifier) || new Map();
+        addMap.set(pubkey, { ts: event.created_at, roles });
+        this.kind9000Sets.set(publicIdentifier, addMap);
+        this._recomputeGroupMembers(publicIdentifier);
 
         // Emit update events
         this.emit('group:members', { groupId: publicIdentifier, members });
@@ -2144,15 +2205,16 @@ async fetchMultipleProfiles(pubkeys) {
 
         await this.relayManager.publish(event);
 
-        // Update local member list
-        const members = this.groupMembers.get(publicIdentifier) || [];
-        const filtered = members.filter(m => m.pubkey !== pubkey);
-        this.groupMembers.set(publicIdentifier, filtered);
+        const remMap = this.kind9001Sets.get(publicIdentifier) || new Map();
+        remMap.set(pubkey, event.created_at);
+        this.kind9001Sets.set(publicIdentifier, remMap);
+        this._recomputeGroupMembers(publicIdentifier);
 
         // Emit update events
-        this.emit('group:members', { groupId: publicIdentifier, members: filtered });
+        const members = this.groupMembers.get(publicIdentifier);
+        this.emit('group:members', { groupId: publicIdentifier, members });
         if (this.user) {
-            const isMember = filtered.some(m => m.pubkey === this.user.pubkey);
+            const isMember = members.some(m => m.pubkey === this.user.pubkey);
             this.emit('group:membership', { groupId: publicIdentifier, isMember });
         }
 
@@ -2291,7 +2353,9 @@ async fetchMultipleProfiles(pubkeys) {
                     data: {
                         relayKey,
                         publicIdentifier,
-                        members: members.map(m => m.pubkey)
+                        members: members.map(m => m.pubkey),
+                        member_adds: Array.from((this.kind9000Sets.get(publicIdentifier) || new Map()).entries()).map(([pk, info]) => ({ pubkey: pk, ts: info.ts })),
+                        member_removes: Array.from((this.kind9001Sets.get(publicIdentifier) || new Map()).entries()).map(([pk, ts]) => ({ pubkey: pk, ts }))
                     }
                 };
                 try {
@@ -2302,6 +2366,27 @@ async fetchMultipleProfiles(pubkeys) {
             }
         } catch (e) {
             console.error('Error publishing member list', e);
+        }
+    }
+
+    _notifyMemberUpdate(publicIdentifier) {
+        if (!window.workerPipe) return;
+        const relayKey = this.publicToInternalMap.get(publicIdentifier) || null;
+        const members = this.getGroupMembers(publicIdentifier);
+        const msg = {
+            type: 'update-members',
+            data: {
+                relayKey,
+                publicIdentifier,
+                members: members.map(m => m.pubkey),
+                member_adds: Array.from((this.kind9000Sets.get(publicIdentifier) || new Map()).entries()).map(([pk, info]) => ({ pubkey: pk, ts: info.ts })),
+                member_removes: Array.from((this.kind9001Sets.get(publicIdentifier) || new Map()).entries()).map(([pk, ts]) => ({ pubkey: pk, ts }))
+            }
+        };
+        try {
+            window.workerPipe.write(JSON.stringify(msg) + '\n');
+        } catch (e) {
+            console.error('Failed to send member update to worker', e);
         }
     }
 
