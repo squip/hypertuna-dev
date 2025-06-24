@@ -1711,7 +1711,7 @@ async fetchMultipleProfiles(pubkeys) {
             const isMember = members.some(m => m.pubkey === this.user.pubkey);
             this.emit('group:membership', { groupId, isMember });
         }
-        this._notifyMemberUpdate(groupId);
+        this._notifyMemberUpdate(groupId, members);
     }
     
     /**
@@ -2369,16 +2369,16 @@ async fetchMultipleProfiles(pubkeys) {
         }
     }
 
-    _notifyMemberUpdate(publicIdentifier) {
+    _notifyMemberUpdate(publicIdentifier, members = null) {
         if (!window.workerPipe) return;
         const relayKey = this.publicToInternalMap.get(publicIdentifier) || null;
-        const members = this.getGroupMembers(publicIdentifier);
+        const memberList = members || this.groupMembers.get(publicIdentifier) || [];
         const msg = {
             type: 'update-members',
             data: {
                 relayKey,
                 publicIdentifier,
-                members: members.map(m => m.pubkey),
+                members: memberList.map(m => m.pubkey),
                 member_adds: Array.from((this.kind9000Sets.get(publicIdentifier) || new Map()).entries()).map(([pk, info]) => ({ pubkey: pk, ts: info.ts })),
                 member_removes: Array.from((this.kind9001Sets.get(publicIdentifier) || new Map()).entries()).map(([pk, ts]) => ({ pubkey: pk, ts }))
             }
