@@ -1245,15 +1245,45 @@ App.syncHypertunaConfigToFile = async function() {
      */
     App.loadGroupMembers = async function() {
         if (!this.currentUser || !this.currentGroupId) return;
-
+    
+        // Debounce rapid calls
+        if (this._loadMembersTimeout) {
+            clearTimeout(this._loadMembersTimeout);
+        }
+        
+        this._loadMembersTimeout = setTimeout(async () => {
+            await this._doLoadGroupMembers();
+            delete this._loadMembersTimeout;
+        }, 100);
+    };
+    
+    App._doLoadGroupMembers = async function() {
+        if (!this.currentUser || !this.currentGroupId) return;
+    
+        const container = document.getElementById("member-list");
+        if (!container) return;
+        
+        // Show loading state
+        if (!this.membersList) {
+            container.innerHTML = '<div class="loading">Loading members...</div>';
+        }
+    
         // Ensure member list is built from history
         try {
             await this.nostr.client.buildMemberList(this.currentGroupId);
         } catch (err) {
             console.error('Failed to build member list', err);
         }
-
-        const container = document.getElementById("member-list");
+    
+        // Remove old event listeners before adding new ones
+        if (this._memberListeners) {
+            this._memberListeners.forEach(({ event, handler }) => {
+                container.removeEventListener(event, handler);
+            });
+            this._memberListeners = null;
+        }
+        
+        // Create or update the MembersList instance
         if (!this.membersList) {
             this.membersList = new MembersList(container, this.nostr.client, this.currentUser.pubkey);
         } else {
@@ -1261,29 +1291,46 @@ App.syncHypertunaConfigToFile = async function() {
             this.membersList.client = this.nostr.client;
             this.membersList.setUserPubkey(this.currentUser.pubkey);
         }
-        const members = this.nostr.getGroupMembers(this.currentGroupId);
-        const admins = this.nostr.getGroupAdmins(this.currentGroupId);
+        
         try {
+            // Get members and admins
+            const members = this.nostr.getGroupMembers(this.currentGroupId);
+            const admins = this.nostr.getGroupAdmins(this.currentGroupId);
+            
+            // Clear container before rendering
+            container.innerHTML = '';
+            
+            // Render the members list
             await this.membersList.render(members, admins);
-            container.addEventListener('promote', (e) => {
+            
+            // Create new event handlers
+            const promoteHandler = (e) => {
+                e.stopPropagation();
                 this.updateMemberRole(e.detail.pubkey, ['admin']);
-            });
+            };
             
-            container.addEventListener('remove', (e) => {
+            const removeHandler = (e) => {
+                e.stopPropagation();
                 this.removeMember(e.detail.pubkey);
-            });
+            };
             
-            } catch (e) {
+            // Add new listeners
+            container.addEventListener('promote', promoteHandler);
+            container.addEventListener('remove', removeHandler);
+            
+            // Store references for cleanup
+            this._memberListeners = [
+                { event: 'promote', handler: promoteHandler },
+                { event: 'remove', handler: removeHandler }
+            ];
+            
+        } catch (e) {
             console.error("Error loading members:", e);
-            if (container) {
-                container.innerHTML = `
-                    <div class="status-message error">
-                        Error loading members. Please try again.
-                    </div>
-                `;
-                
-            }
-            
+            container.innerHTML = `
+                <div class="status-message error">
+                    Error loading members. Please try again.
+                </div>
+            `;
         }
     };
 

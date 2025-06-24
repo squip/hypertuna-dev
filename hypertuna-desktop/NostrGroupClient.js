@@ -42,6 +42,9 @@ class NostrGroupClient {
         this.publishedMemberLists = new Set(); // Track groups with published member lists
         this.kind9000Sets = new Map(); // Map of groupId -> Map of pubkey -> {ts, roles}
         this.kind9001Sets = new Map(); // Map of groupId -> Map of pubkey -> ts
+        this.processedEvents = new Set(); // Track processed events
+        this._recomputeTimeouts = {}; // For throttling recomputes
+        this._pendingMemberUpdates = new Map(); // Track pending updates
 
         // Setup default event handlers
         this._setupEventHandlers();
@@ -1380,10 +1383,17 @@ async fetchMultipleProfiles(pubkeys) {
      * @private
      */
     _processGroupMemberListEvent(event) {
+        // Skip if we've already processed this event
+        if (this.processedEvents.has(event.id)) {
+            console.log(`Skipping duplicate member list event ${event.id}`);
+            return;
+        }
+        this.processedEvents.add(event.id);
+        
         // Extract public identifier from 'd' tag
         const publicIdentifier = NostrEvents._getTagValue(event, 'd');
         if (!publicIdentifier) return;
-
+    
         const parsed = NostrEvents.parseGroupMembers(event);
         const addMap = this.kind9000Sets.get(publicIdentifier) || new Map();
         parsed.forEach(m => {
@@ -1391,10 +1401,15 @@ async fetchMultipleProfiles(pubkeys) {
             this.relevantPubkeys.add(m.pubkey);
         });
         this.kind9000Sets.set(publicIdentifier, addMap);
-        this._recomputeGroupMembers(publicIdentifier);
-
+        
+        // Use throttled recompute instead of immediate
+        this._throttledRecomputeGroupMembers(publicIdentifier);
+    
         if (this.user && this.isGroupAdmin(publicIdentifier, this.user.pubkey) && !this.publishedMemberLists.has(publicIdentifier)) {
-            this.publishMemberList(publicIdentifier);
+            // Delay initial publish to avoid conflicts
+            setTimeout(() => {
+                this.publishMemberList(publicIdentifier);
+            }, 1000);
         }
     }
     
@@ -1699,18 +1714,40 @@ async fetchMultipleProfiles(pubkeys) {
         const addMap = this.kind9000Sets.get(groupId) || new Map();
         const removeMap = this.kind9001Sets.get(groupId) || new Map();
         const members = [];
+        
+        // Build unique member list
+        const seenPubkeys = new Set();
+        
         for (const [pubkey, info] of addMap.entries()) {
             const rts = removeMap.get(pubkey);
-            if (!rts || info.ts > rts) {
+            if ((!rts || info.ts > rts) && !seenPubkeys.has(pubkey)) {
                 members.push({ pubkey, roles: info.roles || ['member'] });
+                seenPubkeys.add(pubkey);
             }
         }
+        
+        // Check if members actually changed
+        const oldMembers = this.groupMembers.get(groupId) || [];
+        const hasChanged = members.length !== oldMembers.length || 
+            !members.every(m => oldMembers.some(om => om.pubkey === m.pubkey));
+        
+        if (!hasChanged) {
+            console.log(`No changes to members for group ${groupId}`);
+            return;
+        }
+        
         this.groupMembers.set(groupId, members);
-        this.emit('group:members', { groupId, members });
-        if (this.user) {
+        
+        // Only emit if we have listeners to avoid unnecessary work
+        if (this.eventListeners.has('group:members')) {
+            this.emit('group:members', { groupId, members });
+        }
+        
+        if (this.user && this.eventListeners.has('group:membership')) {
             const isMember = members.some(m => m.pubkey === this.user.pubkey);
             this.emit('group:membership', { groupId, isMember });
         }
+        
         this._notifyMemberUpdate(groupId, members);
     }
     
@@ -1786,79 +1823,117 @@ async fetchMultipleProfiles(pubkeys) {
      */
     async buildMemberList(publicIdentifier) {
         if (!publicIdentifier) return [];
-
-        const admins = this.groupAdmins.get(publicIdentifier) || [];
-        const adminPubkey = admins.length > 0 ? admins[0].pubkey : null;
-        if (!adminPubkey) return [];
-
-        // Fetch latest member list event from the admin
-        const baseEvent = await new Promise(resolve => {
-            const subId = `member-base-${publicIdentifier}-${Date.now()}`;
-            let timeout;
-            this.relayManager.subscribe(subId, [
-                { kinds: [NostrEvents.KIND_GROUP_MEMBER_LIST], '#d': [publicIdentifier], authors: [adminPubkey], limit: 1 }
-            ], event => {
-                clearTimeout(timeout);
-                this.relayManager.unsubscribe(subId);
-                resolve(event);
-            });
-            timeout = setTimeout(() => {
-                this.relayManager.unsubscribe(subId);
-                resolve(null);
-            }, 3000);
-        });
-
-        if (!baseEvent || !(await NostrEvents.verifyAdminListEvent(baseEvent, adminPubkey))) {
-            return [];
+    
+        // Check if we're already building for this group
+        const buildingKey = `building-${publicIdentifier}`;
+        if (this._pendingMemberUpdates.has(buildingKey)) {
+            console.log(`Already building member list for ${publicIdentifier}`);
+            return this.groupMembers.get(publicIdentifier) || [];
         }
-
-        const since = baseEvent.created_at;
-
-        // Collect membership update events after the snapshot
-        const updateEvents = await new Promise(resolve => {
-            const subId = `member-updates-${publicIdentifier}-${Date.now()}`;
-            const evs = [];
-            let timeout;
-            this.relayManager.subscribe(subId, [
-                { kinds: [NostrEvents.KIND_GROUP_PUT_USER, NostrEvents.KIND_GROUP_REMOVE_USER], '#h': [publicIdentifier], since }
-            ], event => {
-                evs.push(event);
-            });
-            timeout = setTimeout(() => {
+        
+        try {
+            // Mark as building
+            this._pendingMemberUpdates.set(buildingKey, true);
+    
+            const admins = this.groupAdmins.get(publicIdentifier) || [];
+            const adminPubkey = admins.length > 0 ? admins[0].pubkey : null;
+            if (!adminPubkey) return [];
+    
+            // Cancel any existing subscription for this group
+            const existingSubIds = Array.from(this.activeSubscriptions).filter(id => 
+                id.startsWith(`member-base-${publicIdentifier}`)
+            );
+            existingSubIds.forEach(subId => {
                 this.relayManager.unsubscribe(subId);
-                resolve(evs);
-            }, 3000);
-        });
-
-        const baseMembers = NostrEvents.parseGroupMembers(baseEvent);
-        const addMap = new Map();
-        baseMembers.forEach(m => addMap.set(m.pubkey, { ts: baseEvent.created_at, roles: m.roles }));
-
-        const addEvents = updateEvents.filter(e => e.kind === NostrEvents.KIND_GROUP_PUT_USER);
-        const removeEvents = updateEvents.filter(e => e.kind === NostrEvents.KIND_GROUP_REMOVE_USER);
-
-        addEvents.forEach(ev => {
-            ev.tags.forEach(tag => {
-                if (tag[0] === 'p' && tag[1]) {
-                    addMap.set(tag[1], { ts: ev.created_at, roles: tag.slice(2) });
-                }
+                this.activeSubscriptions.delete(subId);
             });
-        });
-
-        const remMap = new Map();
-        removeEvents.forEach(ev => {
-            ev.tags.forEach(tag => {
-                if (tag[0] === 'p' && tag[1]) {
-                    remMap.set(tag[1], ev.created_at);
-                }
+    
+            // Fetch latest member list event from the admin
+            const baseEvent = await new Promise(resolve => {
+                const subId = `member-base-${publicIdentifier}-${Date.now()}`;
+                let timeout;
+                
+                this.relayManager.subscribe(subId, [
+                    { kinds: [NostrEvents.KIND_GROUP_MEMBER_LIST], '#d': [publicIdentifier], authors: [adminPubkey], limit: 1 }
+                ], event => {
+                    clearTimeout(timeout);
+                    this.relayManager.unsubscribe(subId);
+                    this.activeSubscriptions.delete(subId);
+                    resolve(event);
+                });
+                
+                this.activeSubscriptions.add(subId);
+                
+                timeout = setTimeout(() => {
+                    this.relayManager.unsubscribe(subId);
+                    this.activeSubscriptions.delete(subId);
+                    resolve(null);
+                }, 3000);
             });
-        });
-
-        this.kind9000Sets.set(publicIdentifier, addMap);
-        this.kind9001Sets.set(publicIdentifier, remMap);
-        this._recomputeGroupMembers(publicIdentifier);
-
-        return this.groupMembers.get(publicIdentifier);
+    
+            if (!baseEvent || !(await NostrEvents.verifyAdminListEvent(baseEvent, adminPubkey))) {
+                return [];
+            }
+    
+            const since = baseEvent.created_at;
+    
+            // Collect membership update events after the snapshot
+            const updateEvents = await new Promise(resolve => {
+                const subId = `member-updates-${publicIdentifier}-${Date.now()}`;
+                const evs = [];
+                let timeout;
+                
+                this.relayManager.subscribe(subId, [
+                    { kinds: [NostrEvents.KIND_GROUP_PUT_USER, NostrEvents.KIND_GROUP_REMOVE_USER], '#h': [publicIdentifier], since }
+                ], event => {
+                    evs.push(event);
+                });
+                
+                this.activeSubscriptions.add(subId);
+                
+                timeout = setTimeout(() => {
+                    this.relayManager.unsubscribe(subId);
+                    this.activeSubscriptions.delete(subId);
+                    resolve(evs);
+                }, 3000);
+            });
+    
+            const baseMembers = NostrEvents.parseGroupMembers(baseEvent);
+            const addMap = new Map();
+            baseMembers.forEach(m => addMap.set(m.pubkey, { ts: baseEvent.created_at, roles: m.roles }));
+    
+            const addEvents = updateEvents.filter(e => e.kind === NostrEvents.KIND_GROUP_PUT_USER);
+            const removeEvents = updateEvents.filter(e => e.kind === NostrEvents.KIND_GROUP_REMOVE_USER);
+    
+            addEvents.forEach(ev => {
+                ev.tags.forEach(tag => {
+                    if (tag[0] === 'p' && tag[1]) {
+                        addMap.set(tag[1], { ts: ev.created_at, roles: tag.slice(2) });
+                    }
+                });
+            });
+    
+            const remMap = new Map();
+            removeEvents.forEach(ev => {
+                ev.tags.forEach(tag => {
+                    if (tag[0] === 'p' && tag[1]) {
+                        remMap.set(tag[1], ev.created_at);
+                    }
+                });
+            });
+    
+            this.kind9000Sets.set(publicIdentifier, addMap);
+            this.kind9001Sets.set(publicIdentifier, remMap);
+            
+            // Use synchronous recompute to avoid timing issues
+            this._recomputeGroupMembers(publicIdentifier);
+    
+            return this.groupMembers.get(publicIdentifier);
+            
+        } finally {
+            // Clear building flag
+            this._pendingMemberUpdates.delete(buildingKey);
+        }
     }
     
     /**
@@ -1996,6 +2071,21 @@ async fetchMultipleProfiles(pubkeys) {
         }
 
         return eventsCollection;
+    }
+
+    _throttledRecomputeGroupMembers(groupId) {
+        if (this._recomputeTimeouts && this._recomputeTimeouts[groupId]) {
+            clearTimeout(this._recomputeTimeouts[groupId]);
+        }
+        
+        if (!this._recomputeTimeouts) {
+            this._recomputeTimeouts = {};
+        }
+        
+        this._recomputeTimeouts[groupId] = setTimeout(() => {
+            this._recomputeGroupMembers(groupId);
+            delete this._recomputeTimeouts[groupId];
+        }, 300); // 300ms debounce
     }
     
     /**
@@ -2149,36 +2239,60 @@ async fetchMultipleProfiles(pubkeys) {
             throw new Error('You must be an admin to add members');
         }
         
-        const event = await NostrEvents.createPutUserEvent(
-            publicIdentifier, // Pass public identifier
-            pubkey,
-            roles,
-            this.user.privateKey
-        );
-
-        // Add this pubkey to relevant pubkeys
-        this.relevantPubkeys.add(pubkey);
-
-        // Publish the event
-        await this.relayManager.publish(event);
-
-        const addMap = this.kind9000Sets.get(publicIdentifier) || new Map();
-        addMap.set(pubkey, { ts: event.created_at, roles });
-        this.kind9000Sets.set(publicIdentifier, addMap);
-        this._recomputeGroupMembers(publicIdentifier);
-
-        // Emit update events
-        this.emit('group:members', { groupId: publicIdentifier, members });
-        if (this.user) {
-            const isMember = members.some(m => m.pubkey === this.user.pubkey);
-            this.emit('group:membership', { groupId: publicIdentifier, isMember });
+        // Check if there's already a pending update for this member
+        const pendingKey = `${publicIdentifier}-${pubkey}`;
+        if (this._pendingMemberUpdates.has(pendingKey)) {
+            console.log(`Member update already pending for ${pubkey}`);
+            return this._pendingMemberUpdates.get(pendingKey);
         }
-
-        // Allow republishing of the member list
-        this.publishedMemberLists.delete(publicIdentifier);
-        await this.publishMemberList(publicIdentifier);
-
-        return event;
+        
+        try {
+            // Create the put user event
+            const event = await NostrEvents.createPutUserEvent(
+                publicIdentifier,
+                pubkey,
+                roles,
+                this.user.privateKey
+            );
+            
+            // Mark this update as pending
+            this._pendingMemberUpdates.set(pendingKey, event);
+            
+            // Add this pubkey to relevant pubkeys
+            this.relevantPubkeys.add(pubkey);
+            
+            // Update local state immediately (optimistic update)
+            const addMap = this.kind9000Sets.get(publicIdentifier) || new Map();
+            addMap.set(pubkey, { ts: event.created_at, roles });
+            this.kind9000Sets.set(publicIdentifier, addMap);
+            
+            // Use throttled recompute to prevent rapid re-renders
+            this._throttledRecomputeGroupMembers(publicIdentifier);
+            
+            // Publish the event
+            await this.relayManager.publish(event);
+            
+            // Clear the published member lists flag to allow republishing
+            this.publishedMemberLists.delete(publicIdentifier);
+            
+            // Wait a bit to allow any other rapid updates to complete
+            await new Promise(resolve => setTimeout(resolve, 500));
+            
+            // Publish the updated member list only if no other updates are pending
+            if (!this._recomputeTimeouts[publicIdentifier]) {
+                await this.publishMemberList(publicIdentifier);
+            }
+            
+            // Clear the pending update
+            this._pendingMemberUpdates.delete(pendingKey);
+            
+            return event;
+            
+        } catch (error) {
+            // Clear the pending update on error
+            this._pendingMemberUpdates.delete(pendingKey);
+            throw error;
+        }
     }
     
     /**

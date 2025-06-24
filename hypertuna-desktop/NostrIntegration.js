@@ -21,9 +21,13 @@ class NostrIntegration {
         // Track last update to prevent excessive updates
         this.lastGroupUpdateTime = 0;
         this.updateThrottleTime = 1000; // 1 second throttle
-
+    
         // Prevent repeated connection attempts
         this.connecting = false;
+        
+        // Add timeout trackers for debouncing
+        this._memberUpdateTimeout = null;
+        this._workerUpdateTimeout = null;
     }
     
     /**
@@ -132,26 +136,52 @@ class NostrIntegration {
         
         this.client.on('group:members', ({ groupId, members }) => {
             console.log(`Updated group members for: ${groupId}`);
-            if (this.app.currentPage === 'group-detail' && this.app.currentGroupId === groupId) {
-                this.app.renderMembersList(members);
-            }
-            this._throttledGroupUpdate();
-
-            if (window.workerPipe) {
-                const relayKey = this.client.publicToInternalMap?.get(groupId) || null;
-                const msg = {
-                    type: 'update-members',
-                    data: {
-                        relayKey,
-                        publicIdentifier: groupId,
-                        members: members.map(m => m.pubkey)
-                    }
-                };
-                try {
-                    window.workerPipe.write(JSON.stringify(msg) + '\n');
-                } catch (err) {
-                    console.error('Failed to send update-members message:', err);
+            
+            // Only update if viewing this specific group
+            if (this.app.currentPage === 'group-detail' && 
+                this.app.currentGroupId === groupId) {
+                
+                // Clear any pending member update
+                if (this._memberUpdateTimeout) {
+                    clearTimeout(this._memberUpdateTimeout);
                 }
+                
+                // Debounce the update to prevent rapid re-renders
+                this._memberUpdateTimeout = setTimeout(() => {
+                    // Use loadGroupMembers instead of renderMembersList
+                    // This ensures proper cleanup and re-initialization
+                    this.app.loadGroupMembers();
+                    delete this._memberUpdateTimeout;
+                }, 300);
+            }
+            
+            // Still throttle general group updates
+            this._throttledGroupUpdate();
+        
+            // Send update to worker if available
+            if (window.workerPipe) {
+                // Debounce worker updates too
+                if (this._workerUpdateTimeout) {
+                    clearTimeout(this._workerUpdateTimeout);
+                }
+                
+                this._workerUpdateTimeout = setTimeout(() => {
+                    const relayKey = this.client.publicToInternalMap?.get(groupId) || null;
+                    const msg = {
+                        type: 'update-members',
+                        data: {
+                            relayKey,
+                            publicIdentifier: groupId,
+                            members: members.map(m => m.pubkey)
+                        }
+                    };
+                    try {
+                        window.workerPipe.write(JSON.stringify(msg) + '\n');
+                    } catch (err) {
+                        console.error('Failed to send update-members message:', err);
+                    }
+                    delete this._workerUpdateTimeout;
+                }, 500); // Slightly longer delay for worker updates
             }
         });
         
