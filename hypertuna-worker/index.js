@@ -278,10 +278,18 @@ if (workerPipe) {
             case 'update-members':
               if (relayServer) {
                 try {
-                  const { relayKey, members } = message.data
-                  await updateRelayMembers(relayKey, members)
-                  relayMembers.set(relayKey, members)
-                  sendMessage({ type: 'members-updated', relayKey })
+                  const { relayKey, publicIdentifier, members } = message.data
+                  const id = relayKey || publicIdentifier
+                  const profile = await updateRelayMembers(id, members)
+                  if (profile) {
+                    relayMembers.set(profile.relay_key, members)
+                    if (profile.public_identifier) {
+                      relayMembers.set(profile.public_identifier, members)
+                    }
+                    sendMessage({ type: 'members-updated', relayKey: profile.relay_key })
+                  } else {
+                    sendMessage({ type: 'error', message: 'Relay profile not found' })
+                  }
                 } catch (err) {
                   sendMessage({ type: 'error', message: `Failed to update members: ${err.message}` })
                 }

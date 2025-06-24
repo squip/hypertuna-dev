@@ -107,6 +107,22 @@ export async function getRelayProfileByKey(relayKey) {
 }
 
 /**
+ * Get a relay profile by its public identifier
+ * @param {string} publicIdentifier - Public identifier string
+ * @returns {Promise<Object|null>} - The relay profile or null if not found
+ */
+export async function getRelayProfileByPublicIdentifier(publicIdentifier) {
+    try {
+        const profiles = await getAllRelayProfiles();
+        const profile = profiles.find(p => p.public_identifier === publicIdentifier) || null;
+        return ensureProfileSchema(profile);
+    } catch (error) {
+        console.error(`[ProfileManager] Error getting relay profile for identifier ${publicIdentifier}: ${error.message}`);
+        return null;
+    }
+}
+
+/**
  * Add or update a relay profile in the storage file
  * @param {Object} relayProfile - The relay profile to add or update
  * @returns {Promise<boolean>} - True if successful, false otherwise
@@ -332,15 +348,19 @@ export async function getAutoConnectSettings() {
  * @param {Array<string>} members - Array of member pubkeys
  * @returns {Promise<boolean>} - True if saved
  */
-export async function updateRelayMembers(relayKey, members = []) {
+export async function updateRelayMembers(identifier, members = []) {
     try {
-        const profile = await getRelayProfileByKey(relayKey);
-        if (!profile) return false;
+        let profile = await getRelayProfileByKey(identifier);
+        if (!profile) {
+            profile = await getRelayProfileByPublicIdentifier(identifier);
+        }
+        if (!profile) return null;
         profile.members = members;
         profile.updated_at = new Date().toISOString();
-        return await saveRelayProfile(profile);
+        const saved = await saveRelayProfile(profile);
+        return saved ? profile : null;
     } catch (error) {
-        console.error(`[ProfileManager] Error updating members for ${relayKey}:`, error);
-        return false;
+        console.error(`[ProfileManager] Error updating members for ${identifier}:`, error);
+        return null;
     }
 }

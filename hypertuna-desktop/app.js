@@ -457,6 +457,10 @@ function handleWorkerMessage(message) {
       if (message.relayKey) {
         console.log(`[App] Relay initialized: ${message.relayKey}`)
         initializedRelays.add(message.relayKey)
+
+        if (window.App && window.App.nostr && message.publicIdentifier) {
+          window.App.nostr.registerRelayMapping(message.relayKey, message.publicIdentifier)
+        }
         
         // Resolve any waiting promises for this relay
         const resolver = relayReadyResolvers.get(message.relayKey)
@@ -531,6 +535,9 @@ function handleWorkerMessage(message) {
       if (resolver) resolver(message)
       if (message.data.success) {
         addLog(`Relay created successfully: ${message.data.relayKey}`, 'status')
+        if (window.App && window.App.nostr && message.data.publicIdentifier) {
+          window.App.nostr.registerRelayMapping(message.data.relayKey, message.data.publicIdentifier)
+        }
       } else {
         addLog(`Failed to create relay: ${message.data.error}`, 'error')
       }
@@ -539,6 +546,9 @@ function handleWorkerMessage(message) {
     case 'relay-joined':
       if (message.data.success) {
         addLog(`Joined relay successfully: ${message.data.relayKey}`, 'status')
+        if (window.App && window.App.nostr && message.data.publicIdentifier) {
+          window.App.nostr.registerRelayMapping(message.data.relayKey, message.data.publicIdentifier)
+        }
       } else {
         addLog(`Failed to join relay: ${message.data.error}`, 'error')
       }
@@ -713,6 +723,9 @@ function updateRelayList(relayData) {
   
   relayList.innerHTML = '';
   relays.forEach(relay => {
+    if (window.App && window.App.nostr && relay.relayKey && relay.publicIdentifier) {
+      window.App.nostr.registerRelayMapping(relay.relayKey, relay.publicIdentifier)
+    }
     const relayElement = document.createElement('div');
     relayElement.className = 'relay-item';
     
