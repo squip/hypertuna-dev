@@ -65,7 +65,9 @@ export async function initRelayProfilesStorage(userKey = null) {
             // File exists, no need to create
         } catch {
             // File doesn't exist, create it with an empty array
-            await fs.writeFile(profilesPath, JSON.stringify({ relays: [] }, null, 2));
+            const tmp = profilesPath + '.tmp';
+            await fs.writeFile(tmp, JSON.stringify({ relays: [] }, null, 2));
+            await fs.rename(tmp, profilesPath);
             console.log(`[ProfileManager] Created relay profiles storage file at ${profilesPath}`);
         }
     } catch (error) {
@@ -80,14 +82,21 @@ export async function initRelayProfilesStorage(userKey = null) {
  */
 export async function getAllRelayProfiles(userKey = null) {
     try {
-        // Ensure the storage file exists
         await initRelayProfilesStorage(userKey);
 
         const profilesPath = getRelayProfilesPath(userKey);
 
-        // Read and parse the file
         const data = await fs.readFile(profilesPath, 'utf8');
-        const profiles = JSON.parse(data);
+        let profiles;
+        try {
+            profiles = JSON.parse(data);
+        } catch (parseErr) {
+            console.error(`[ProfileManager] Error parsing relay profiles: ${parseErr.message}`);
+            const tmp = profilesPath + '.tmp';
+            await fs.writeFile(tmp, JSON.stringify({ relays: [] }, null, 2));
+            await fs.rename(tmp, profilesPath);
+            return [];
+        }
         const relays = Array.isArray(profiles.relays) ? profiles.relays : [];
         return relays.map(p => ensureProfileSchema(p));
     } catch (error) {
@@ -181,7 +190,9 @@ export async function saveRelayProfile(relayProfile) {
         const profilesPath = getRelayProfilesPath();
         console.log(`[ProfileManager] Writing ${profiles.length} profiles to ${profilesPath}`);
         const sanitized = profiles.map(p => ensureProfileSchema(p));
-        await fs.writeFile(profilesPath, JSON.stringify({ relays: sanitized }, null, 2));
+        const tmpPath = profilesPath + '.tmp';
+        await fs.writeFile(tmpPath, JSON.stringify({ relays: sanitized }, null, 2));
+        await fs.rename(tmpPath, profilesPath);
         console.log(`[ProfileManager] Successfully saved relay profile for ${relayProfile.relay_key}`);
         
         // Update in-memory relay members map in adapter
@@ -221,7 +232,9 @@ export async function removeRelayProfile(relayKey) {
         // Write updated profiles back to file
         const profilesPath = getRelayProfilesPath();
         const sanitized = newProfiles.map(p => ensureProfileSchema(p));
-        await fs.writeFile(profilesPath, JSON.stringify({ relays: sanitized }, null, 2));
+        const tmpPath = profilesPath + '.tmp';
+        await fs.writeFile(tmpPath, JSON.stringify({ relays: sanitized }, null, 2));
+        await fs.rename(tmpPath, profilesPath);
         
         return true;
     } catch (error) {
