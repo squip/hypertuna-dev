@@ -13,7 +13,9 @@ import {
   getAllRelayProfiles,
   getRelayProfileByKey,
   saveRelayProfile,
-  updateRelayMembers
+  updateRelayMembers,
+  updateRelayMemberSets,
+  calculateMembers
 } from './hypertuna-relay-profile-manager-bare.mjs'
 
 // In Pear, use the config.dir for the application directory
@@ -24,6 +26,8 @@ let relayServer = null
 let isShuttingDown = false
 // Map of relayKey -> members array
 const relayMembers = new Map()
+const relayMemberAdds = new Map()
+const relayMemberRemoves = new Map()
 
 
 function getUserKey(config) {
@@ -90,8 +94,16 @@ async function loadRelayMembers() {
   try {
     const profiles = await getAllRelayProfiles(global.userConfig?.userKey)
     for (const profile of profiles) {
-      if (profile.relay_key && Array.isArray(profile.members)) {
-        relayMembers.set(profile.relay_key, profile.members)
+      if (profile.relay_key) {
+        const members = calculateMembers(profile.member_adds || [], profile.member_removes || [])
+        relayMembers.set(profile.relay_key, members)
+        relayMemberAdds.set(profile.relay_key, profile.member_adds || [])
+        relayMemberRemoves.set(profile.relay_key, profile.member_removes || [])
+        if (profile.public_identifier) {
+          relayMembers.set(profile.public_identifier, members)
+          relayMemberAdds.set(profile.public_identifier, profile.member_adds || [])
+          relayMemberRemoves.set(profile.public_identifier, profile.member_removes || [])
+        }
       }
     }
     console.log(`[Worker] Loaded members for ${relayMembers.size} relays`)
@@ -278,13 +290,23 @@ if (workerPipe) {
             case 'update-members':
               if (relayServer) {
                 try {
-                  const { relayKey, publicIdentifier, members } = message.data
+                  const { relayKey, publicIdentifier, members, member_adds, member_removes } = message.data
                   const id = relayKey || publicIdentifier
-                  const profile = await updateRelayMembers(id, members)
+                  let profile
+                  if (member_adds || member_removes) {
+                    profile = await updateRelayMemberSets(id, member_adds || [], member_removes || [])
+                  } else {
+                    profile = await updateRelayMembers(id, members)
+                  }
                   if (profile) {
-                    relayMembers.set(profile.relay_key, members)
+                    const finalMembers = profile.members || members
+                    relayMembers.set(profile.relay_key, finalMembers)
+                    relayMemberAdds.set(profile.relay_key, profile.member_adds || [])
+                    relayMemberRemoves.set(profile.relay_key, profile.member_removes || [])
                     if (profile.public_identifier) {
-                      relayMembers.set(profile.public_identifier, members)
+                      relayMembers.set(profile.public_identifier, finalMembers)
+                      relayMemberAdds.set(profile.public_identifier, profile.member_adds || [])
+                      relayMemberRemoves.set(profile.public_identifier, profile.member_removes || [])
                     }
                     sendMessage({ type: 'members-updated', relayKey: profile.relay_key })
                   } else {
