@@ -315,12 +315,24 @@ class NostrGroupClient {
      */
     handleAllRelaysReady() {
         console.log(`[NostrGroupClient] All stored relays are ready`);
-        
+
         // Process any remaining pending connections
         this.processRelayConnectionQueue();
-        
+
         // Emit event that we're fully initialized
         this.emit('relays:ready');
+    }
+
+    /**
+     * Register a mapping between internal relay key and public identifier
+     * so that membership updates can be routed correctly.
+     * @param {string} relayKey - Internal relay key
+     * @param {string} publicIdentifier - Public identifier string
+     */
+    registerRelayMapping(relayKey, publicIdentifier) {
+        if (!relayKey || !publicIdentifier) return;
+        this.publicToInternalMap.set(publicIdentifier, relayKey);
+        this.internalToPublicMap.set(relayKey, publicIdentifier);
     }
 
     /**
@@ -2077,13 +2089,34 @@ async fetchMultipleProfiles(pubkeys) {
             roles,
             this.user.privateKey
         );
-        
+
         // Add this pubkey to relevant pubkeys
         this.relevantPubkeys.add(pubkey);
-        
+
         // Publish the event
         await this.relayManager.publish(event);
-        
+
+        // Update local member list
+        const members = this.groupMembers.get(publicIdentifier) || [];
+        const existing = members.find(m => m.pubkey === pubkey);
+        if (existing) {
+            existing.roles = roles;
+        } else {
+            members.push({ pubkey, roles });
+        }
+        this.groupMembers.set(publicIdentifier, members);
+
+        // Emit update events
+        this.emit('group:members', { groupId: publicIdentifier, members });
+        if (this.user) {
+            const isMember = members.some(m => m.pubkey === this.user.pubkey);
+            this.emit('group:membership', { groupId: publicIdentifier, isMember });
+        }
+
+        // Allow republishing of the member list
+        this.publishedMemberLists.delete(publicIdentifier);
+        await this.publishMemberList(publicIdentifier);
+
         return event;
     }
     
@@ -2108,8 +2141,25 @@ async fetchMultipleProfiles(pubkeys) {
             pubkey,
             this.user.privateKey
         );
-        
+
         await this.relayManager.publish(event);
+
+        // Update local member list
+        const members = this.groupMembers.get(publicIdentifier) || [];
+        const filtered = members.filter(m => m.pubkey !== pubkey);
+        this.groupMembers.set(publicIdentifier, filtered);
+
+        // Emit update events
+        this.emit('group:members', { groupId: publicIdentifier, members: filtered });
+        if (this.user) {
+            const isMember = filtered.some(m => m.pubkey === this.user.pubkey);
+            this.emit('group:membership', { groupId: publicIdentifier, isMember });
+        }
+
+        // Allow republishing of the member list
+        this.publishedMemberLists.delete(publicIdentifier);
+        await this.publishMemberList(publicIdentifier);
+
         return event;
     }
     
@@ -2219,7 +2269,7 @@ async fetchMultipleProfiles(pubkeys) {
         const members = this.getGroupMembers(publicIdentifier);
         if (!this.user || members.length === 0) return;
 
-        if (this.publishedMemberLists.has(publicIdentifier)) return;
+        // Track that we've published at least once but allow republishing
         this.publishedMemberLists.add(publicIdentifier);
 
         try {
@@ -2235,10 +2285,14 @@ async fetchMultipleProfiles(pubkeys) {
             }
 
             if (window.workerPipe) {
-                const relayKey = this.publicToInternalMap.get(publicIdentifier) || publicIdentifier;
+                const relayKey = this.publicToInternalMap.get(publicIdentifier) || null;
                 const msg = {
                     type: 'update-members',
-                    data: { relayKey, members: members.map(m => m.pubkey) }
+                    data: {
+                        relayKey,
+                        publicIdentifier,
+                        members: members.map(m => m.pubkey)
+                    }
                 };
                 try {
                     window.workerPipe.write(JSON.stringify(msg) + '\n');

@@ -54,6 +54,10 @@ class NostrIntegration {
         await this.client.connectToGroupRelay(groupId, relayUrl);
     }
 
+    registerRelayMapping(relayKey, publicIdentifier) {
+        this.client.registerRelayMapping(relayKey, publicIdentifier);
+    }
+
     /**
      * Handle relay ready notification from worker
      */
@@ -134,10 +138,14 @@ class NostrIntegration {
             this._throttledGroupUpdate();
 
             if (window.workerPipe) {
-                const relayKey = this.client.publicToInternalMap?.get(groupId) || groupId;
+                const relayKey = this.client.publicToInternalMap?.get(groupId) || null;
                 const msg = {
                     type: 'update-members',
-                    data: { relayKey, members: members.map(m => m.pubkey) }
+                    data: {
+                        relayKey,
+                        publicIdentifier: groupId,
+                        members: members.map(m => m.pubkey)
+                    }
                 };
                 try {
                     window.workerPipe.write(JSON.stringify(msg) + '\n');
