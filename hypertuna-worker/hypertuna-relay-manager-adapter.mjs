@@ -99,8 +99,7 @@ export async function createRelay(options = {}) {
             relay_storage: defaultStorageDir,
             created_at: new Date().toISOString(),
             auto_connect: true,
-            is_active: true,
-            members: []
+            is_active: true
         };
         
         // Save relay profile
@@ -246,8 +245,7 @@ export async function joinRelay(options = {}) {
                 relay_storage: defaultStorageDir,
                 joined_at: new Date().toISOString(),
                 auto_connect: true,
-                is_active: true,
-                members: []
+                is_active: true
             };
             
             await saveRelayProfile(profileInfo);

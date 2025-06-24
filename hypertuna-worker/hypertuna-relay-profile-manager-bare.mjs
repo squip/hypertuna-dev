@@ -35,6 +35,8 @@ function ensureProfileSchema(profile) {
     }
     if (!Array.isArray(profile.members)) {
         profile.members = profile.admin_pubkey ? [profile.admin_pubkey] : [];
+    } else if (profile.admin_pubkey && !profile.members.includes(profile.admin_pubkey)) {
+        profile.members.unshift(profile.admin_pubkey);
     }
     return profile;
 }

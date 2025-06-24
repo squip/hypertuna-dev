@@ -187,6 +187,7 @@ if (workerPipe) {
                 try {
                   // Call the relay server's create relay function
                   const result = await relayServer.createRelay(message.data)
+                  relayMembers.set(result.relayKey, result.profile?.members || [])
 
                   sendMessage({
                     type: 'relay-created',
@@ -222,6 +223,7 @@ if (workerPipe) {
                 try {
                   // Call the relay server's join relay function
                   const result = await relayServer.joinRelay(message.data)
+                  relayMembers.set(result.relayKey, result.profile?.members || [])
 
                   sendMessage({
                     type: 'relay-joined',
@@ -278,6 +280,7 @@ if (workerPipe) {
                 try {
                   const { relayKey, members } = message.data
                   await updateRelayMembers(relayKey, members)
+                  relayMembers.set(relayKey, members)
                   sendMessage({ type: 'members-updated', relayKey })
                 } catch (err) {
                   sendMessage({ type: 'error', message: `Failed to update members: ${err.message}` })

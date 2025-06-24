@@ -135,7 +135,10 @@ class NostrIntegration {
 
             if (window.workerPipe) {
                 const relayKey = this.client.publicToInternalMap?.get(groupId) || groupId;
-                const msg = { type: 'update-members', relayKey, members };
+                const msg = {
+                    type: 'update-members',
+                    data: { relayKey, members: members.map(m => m.pubkey) }
+                };
                 try {
                     window.workerPipe.write(JSON.stringify(msg) + '\n');
                 } catch (err) {
