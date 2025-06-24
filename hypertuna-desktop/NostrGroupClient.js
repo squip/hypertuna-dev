@@ -2083,6 +2083,27 @@ async fetchMultipleProfiles(pubkeys) {
         
         // Publish the event
         await this.relayManager.publish(event);
+
+        // Update local member list
+        const members = this.groupMembers.get(publicIdentifier) || [];
+        const existing = members.find(m => m.pubkey === pubkey);
+        if (existing) {
+            existing.roles = roles;
+        } else {
+            members.push({ pubkey, roles });
+        }
+        this.groupMembers.set(publicIdentifier, members);
+
+        // Emit update events
+        this.emit('group:members', { groupId: publicIdentifier, members });
+        if (this.user) {
+            const isMember = members.some(m => m.pubkey === this.user.pubkey);
+            this.emit('group:membership', { groupId: publicIdentifier, isMember });
+        }
+
+        // Allow republishing of the member list
+        this.publishedMemberLists.delete(publicIdentifier);
+        await this.publishMemberList(publicIdentifier);
         
         return event;
     }
@@ -2110,6 +2131,23 @@ async fetchMultipleProfiles(pubkeys) {
         );
         
         await this.relayManager.publish(event);
+
+        // Update local member list
+        const members = this.groupMembers.get(publicIdentifier) || [];
+        const filtered = members.filter(m => m.pubkey !== pubkey);
+        this.groupMembers.set(publicIdentifier, filtered);
+
+        // Emit update events
+        this.emit('group:members', { groupId: publicIdentifier, members: filtered });
+        if (this.user) {
+            const isMember = filtered.some(m => m.pubkey === this.user.pubkey);
+            this.emit('group:membership', { groupId: publicIdentifier, isMember });
+        }
+
+        // Allow republishing of the member list
+        this.publishedMemberLists.delete(publicIdentifier);
+        await this.publishMemberList(publicIdentifier);
+
         return event;
     }
     
@@ -2219,7 +2257,8 @@ async fetchMultipleProfiles(pubkeys) {
         const members = this.getGroupMembers(publicIdentifier);
         if (!this.user || members.length === 0) return;
 
-        if (this.publishedMemberLists.has(publicIdentifier)) return;
+        // if (this.publishedMemberLists.has(publicIdentifier)) return;
+        // Track that we've published at least once but allow republishing
         this.publishedMemberLists.add(publicIdentifier);
 
         try {

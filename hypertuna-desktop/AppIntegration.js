@@ -1246,6 +1246,13 @@ App.syncHypertunaConfigToFile = async function() {
     App.loadGroupMembers = async function() {
         if (!this.currentUser || !this.currentGroupId) return;
         
+        // Ensure member list is built from history
+        try {
+            await this.nostr.client.buildMemberList(this.currentGroupId);
+        } catch (err) {
+            console.error('Failed to build member list', err);
+        }
+
         const container = document.getElementById("member-list");
         if (!this.membersList) {
             this.membersList = new MembersList(container, this.nostr.client, this.currentUser.pubkey);
