@@ -81,7 +81,7 @@ class WebSocketRelayManager {
      * @param {string} groupId - Optional group ID for group relays
      */
     async addTypedRelay(url, type = 'discovery', groupId = null) {
-        await this.addRelay(url);
+        // Store the type before connecting
         this.relayTypes.set(url, type);
         
         if (type === 'discovery') {
@@ -90,7 +90,20 @@ class WebSocketRelayManager {
             this.groupRelays.set(groupId, url);
         }
         
-        console.log(`Added ${type} relay: ${url}${groupId ? ' for group ' + groupId : ''}`);
+        console.log(`Adding ${type} relay: ${url}${groupId ? ' for group ' + groupId : ''}`);
+        
+        try {
+            await this.addRelay(url);
+        } catch (error) {
+            // Clean up on failure
+            this.relayTypes.delete(url);
+            if (type === 'discovery') {
+                this.discoveryRelays.delete(url);
+            } else if (type === 'group' && groupId) {
+                this.groupRelays.delete(groupId);
+            }
+            throw error;
+        }
     }
 
     /**
@@ -198,12 +211,16 @@ class WebSocketRelayManager {
         if (!url.startsWith('wss://') && !url.startsWith('ws://')) {
             url = 'wss://' + url;
         }
-
+    
         // Check if already connected
         if (this.relays.has(url)) {
-            return Promise.resolve();
+            const existing = this.relays.get(url);
+            if (existing.status === 'open' || existing.status === 'connecting') {
+                console.log(`Relay ${url} already connected or connecting`);
+                return Promise.resolve();
+            }
         }
-
+    
         return new Promise((resolve, reject) => {
             try {
                 const ws = new WebSocket(url);
@@ -211,16 +228,17 @@ class WebSocketRelayManager {
                     conn: ws,
                     status: 'connecting',
                     subscriptions: new Map(),
-                    pendingMessages: []
+                    pendingMessages: [],
+                    type: 'discovery' // Default type
                 };
                 
                 this.relays.set(url, relayData);
-
+    
                 ws.onopen = () => {
                     console.log(`Connected to relay: ${url}`);
                     relayData.status = 'open';
                     
-                    // Send any pending messages with rate limiting
+                    // Send any pending messages
                     if (relayData.pendingMessages.length > 0) {
                         relayData.pendingMessages.forEach(msg => {
                             this._queueRequest(() => {
@@ -232,10 +250,8 @@ class WebSocketRelayManager {
                         relayData.pendingMessages = [];
                     }
                     
-                    // Apply global subscriptions to this relay
-                    this.globalSubscriptions.forEach((subData, subId) => {
-                        this._subscribeOnRelay(url, subId, subData.filters);
-                    });
+                    // Only apply subscriptions that are meant for this relay
+                    this._applyRelevantSubscriptions(url);
                     
                     // Notify connect listeners
                     this.connectCallbacks.forEach(callback => callback(url));
@@ -283,6 +299,55 @@ class WebSocketRelayManager {
                 reject(e);
             }
         });
+    }
+
+    /**
+     * Apply only relevant subscriptions to a relay
+     * @private
+     */
+    _applyRelevantSubscriptions(relayUrl) {
+        const relayType = this.relayTypes.get(relayUrl) || 'discovery';
+        
+        this.globalSubscriptions.forEach((subData, subId) => {
+            // Check if this subscription should be applied to this relay
+            if (this._shouldApplySubscription(subData, relayUrl, relayType)) {
+                this._subscribeOnRelay(relayUrl, subId, subData.filters);
+            }
+        });
+    }
+
+    /**
+     * Determine if a subscription should be applied to a specific relay
+     * @private
+     */
+    _shouldApplySubscription(subData, relayUrl, relayType) {
+        // If subscription has specific target relays, only apply if this relay is one of them
+        if (subData.targetRelays && subData.targetRelays.length > 0) {
+            return subData.targetRelays.includes(relayUrl);
+        }
+        
+        // For group relays, only apply group-specific subscriptions
+        if (relayType === 'group') {
+            const groupId = Array.from(this.groupRelays.entries())
+                .find(([gid, url]) => url === relayUrl)?.[0];
+                
+            if (groupId) {
+                // Check if this is a group-specific subscription
+                const subId = this.reverseSubscriptionMap.get(subData.shortId) || '';
+                return subId.includes(groupId);
+            }
+        }
+        
+        // For discovery relays, apply non-group-specific subscriptions
+        if (relayType === 'discovery') {
+            const subId = this.reverseSubscriptionMap.get(subData.shortId) || '';
+            // Don't apply group-specific subscriptions to discovery relays
+            return !subId.includes('group-meta-') && 
+                !subId.includes('group-messages-') && 
+                !subId.includes('group-members-');
+        }
+        
+        return false;
     }
 
     /**

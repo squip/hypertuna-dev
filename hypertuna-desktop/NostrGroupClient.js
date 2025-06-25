@@ -45,6 +45,8 @@ class NostrGroupClient {
         this.processedEvents = new Set(); // Track processed events
         this._recomputeTimeouts = {}; // For throttling recomputes
         this._pendingMemberUpdates = new Map(); // Track pending updates
+        this.subscriptionsByFilter = new Map(); // Map of filter hash -> subscription IDs
+        this.groupSubscriptions = new Map(); // Map of groupId -> Set of subscription IDs
 
         // Setup default event handlers
         this._setupEventHandlers();
@@ -119,6 +121,25 @@ class NostrGroupClient {
         
         this.isInitialized = true;
         return this;
+    }
+
+    /**
+     * Generate a hash for subscription filters to detect duplicates
+     * @param {Array} filters - Subscription filters
+     * @returns {string} - Hash of the filters
+     */
+    _hashFilters(filters) {
+        return JSON.stringify(filters);
+    }
+
+    /**
+     * Check if a subscription with the same filters already exists
+     * @param {Array} filters - Subscription filters
+     * @returns {string|null} - Existing subscription ID or null
+     */
+    _findExistingSubscription(filters) {
+        const filterHash = this._hashFilters(filters);
+        return this.subscriptionsByFilter.get(filterHash) || null;
     }
 
     /**
@@ -390,35 +411,65 @@ class NostrGroupClient {
      * Subscribe to group events only on the group's relay
      */
     _subscribeToGroupOnRelay(publicIdentifier, relayUrl) {
-        // Create unique subscription IDs for each type of subscription
-        const metaSubId = `group-meta-${publicIdentifier}-${Date.now()}`;
-        const messagesSubId = `group-messages-${publicIdentifier}-${Date.now()}`;
-        
-        // Subscribe to group metadata with a unique subscription ID
-        this.relayManager.subscribeWithRouting(metaSubId, [
+        // Define the filters for metadata subscription
+        const metadataFilters = [
             { kinds: [NostrEvents.KIND_GROUP_METADATA], "#d": [publicIdentifier] },
             { kinds: [NostrEvents.KIND_GROUP_MEMBER_LIST], "#d": [publicIdentifier] },
             { kinds: [NostrEvents.KIND_GROUP_ADMIN_LIST], "#d": [publicIdentifier] }
-        ], (event) => {
-            // Only process metadata-related events
-            if (event.kind === NostrEvents.KIND_GROUP_METADATA ||
-                event.kind === NostrEvents.KIND_GROUP_MEMBER_LIST ||
-                event.kind === NostrEvents.KIND_GROUP_ADMIN_LIST) {
-                this._processEvent(event, relayUrl);
-            }
+        ];
+
+        // Check if we already have this subscription
+        const existingMetaSub = this._findExistingSubscription(metadataFilters);
+        if (existingMetaSub) {
+            console.log(`Reusing existing metadata subscription ${existingMetaSub} for ${publicIdentifier}`);
+            return;
+        }
+
+        // Create unique subscription ID
+        const metaSubId = `group-meta-${publicIdentifier}-${Date.now()}`;
+        
+        // Track the subscription
+        const metaFilterHash = this._hashFilters(metadataFilters);
+        this.subscriptionsByFilter.set(metaFilterHash, metaSubId);
+        
+        // Track by group
+        if (!this.groupSubscriptions.has(publicIdentifier)) {
+            this.groupSubscriptions.set(publicIdentifier, new Set());
+        }
+        this.groupSubscriptions.get(publicIdentifier).add(metaSubId);
+
+        // Subscribe to group metadata
+        this.relayManager.subscribeWithRouting(metaSubId, metadataFilters, (event) => {
+            this._processEvent(event, relayUrl);
         }, { targetRelays: [relayUrl] });
-    
-        // Subscribe to group messages with a separate unique subscription ID
-        this.relayManager.subscribeWithRouting(messagesSubId, [
+
+        // Define filters for messages
+        const messageFilters = [
             { kinds: [NostrEvents.KIND_TEXT_NOTE], "#h": [publicIdentifier] }
-        ], (event) => {
-            // Only process message events (kind 1)
+        ];
+
+        // Check for existing message subscription
+        const existingMsgSub = this._findExistingSubscription(messageFilters);
+        if (existingMsgSub) {
+            console.log(`Reusing existing message subscription ${existingMsgSub} for ${publicIdentifier}`);
+            return;
+        }
+
+        const messagesSubId = `group-messages-${publicIdentifier}-${Date.now()}`;
+        
+        // Track the message subscription
+        const msgFilterHash = this._hashFilters(messageFilters);
+        this.subscriptionsByFilter.set(msgFilterHash, messagesSubId);
+        this.groupSubscriptions.get(publicIdentifier).add(messagesSubId);
+
+        // Subscribe to group messages
+        this.relayManager.subscribeWithRouting(messagesSubId, messageFilters, (event) => {
             if (event.kind === NostrEvents.KIND_TEXT_NOTE) {
                 this._processGroupMessageEvent(event);
             }
         }, { targetRelays: [relayUrl] });
         
-        // Track these subscriptions for cleanup
+        // Track these subscriptions
         this.activeSubscriptions.add(metaSubId);
         this.activeSubscriptions.add(messagesSubId);
     }
@@ -1096,15 +1147,8 @@ async fetchMultipleProfiles(pubkeys) {
     _subscribeToGroupMembership(publicIdentifier) {
         if (!publicIdentifier) return;
         
-        // Use a timestamp to ensure uniqueness
-        const subId = `group-members-${publicIdentifier}-${Date.now()}`;
-        
-        if (this.activeSubscriptions.has(subId)) {
-            return;
-        }
-        
-        // Subscribe to membership events using unique subscription ID
-        const actualSubId = this.relayManager.subscribe(subId, [
+        // Define the membership filters
+        const membershipFilters = [
             {
                 kinds: [
                     NostrEvents.KIND_GROUP_MEMBER_LIST,
@@ -1119,15 +1163,37 @@ async fetchMultipleProfiles(pubkeys) {
                 ],
                 "#h": [publicIdentifier]
             }
-        ], (event) => {
-            // Add all member pubkeys to relevant pubkeys
+        ];
+        
+        // Check if we already have this subscription
+        const existingSubId = this._findExistingSubscription(membershipFilters);
+        if (existingSubId) {
+            console.log(`Already subscribed to membership for ${publicIdentifier} with ${existingSubId}`);
+            return;
+        }
+        
+        // Create unique subscription ID
+        const subId = `group-members-${publicIdentifier}-${Date.now()}`;
+        
+        // Track the subscription
+        const filterHash = this._hashFilters(membershipFilters);
+        this.subscriptionsByFilter.set(filterHash, subId);
+        
+        // Track by group
+        if (!this.groupSubscriptions.has(publicIdentifier)) {
+            this.groupSubscriptions.set(publicIdentifier, new Set());
+        }
+        this.groupSubscriptions.get(publicIdentifier).add(subId);
+        
+        // Subscribe to membership events
+        const actualSubId = this.relayManager.subscribe(subId, membershipFilters, (event) => {
+            // Process membership events
             event.tags.forEach(tag => {
                 if (tag[0] === 'p' && tag[1]) {
                     this.relevantPubkeys.add(tag[1]);
                 }
             });
             
-            // Process the event based on its kind
             switch (event.kind) {
                 case NostrEvents.KIND_GROUP_MEMBER_LIST:
                     this._processGroupMemberListEvent(event);
@@ -1290,64 +1356,60 @@ async fetchMultipleProfiles(pubkeys) {
      * @param {Object} event - Group metadata event (kind 39000)
      * @private
      */
-     _processGroupMetadataEvent(event) {
-        console.log(`Processing group metadata event with ID: ${event.id.substring(0, 8)}... and kind: ${event.kind}`);
-        console.log(`Event content: ${event.content}`);
-        console.log(`Event tags:`, JSON.stringify(event.tags));
-        
-        // Check if this is a Hypertuna event by looking for the identifier tag
-        const isHypertunaEvent = event.tags.some(tag => tag[0] === 'i' && tag[1] === 'hypertuna:relay');
-        console.log(`Is Hypertuna event: ${isHypertunaEvent}`);
+    _processGroupMetadataEvent(event) {
+        console.log(`Processing group metadata event with ID: ${event.id.substring(0, 8)}...`);
         
         const groupData = NostrEvents.parseGroupMetadata(event);
         if (!groupData) {
-            console.warn(`Failed to parse group metadata from event: ${event.id.substring(0, 8)}...`);
+            console.warn(`Failed to parse group metadata from event`);
             return;
         }
 
-        // The groupData.id will now be the public identifier
         const publicIdentifier = groupData.id;
         
-        console.log(`Parsed group data with public identifier: ${publicIdentifier}`);
-        
-        console.log(`Parsed group data:`, {
-            id: groupData.id,
-            name: groupData.name,
-            hypertunaId: groupData.hypertunaId,
-            createdAt: groupData.createdAt,
-            pubkey: groupData.event?.pubkey?.substring(0, 8) + '...'
-        });
-        
-        // Check if this is a Hypertuna group
-        const hypertunaId = NostrEvents._getTagValue(event, 'hypertuna');
-        console.log(`Extracted hypertunaId: ${hypertunaId}`);
-        
-        // Only process the most recent event for each group ID
-        const existingGroup = this.groups.get(groupData.id);
-        if (existingGroup && existingGroup.createdAt > groupData.createdAt) {
-            console.log(`Skipping older metadata event for group ${groupData.id}`);
+        // Check if this is a duplicate or older event
+        const existingGroup = this.groups.get(publicIdentifier);
+        if (existingGroup && existingGroup.createdAt >= groupData.createdAt) {
+            console.log(`Skipping older/duplicate metadata event for group ${publicIdentifier}`);
             return;
         }
         
-        // Update or add group
-        this.groups.set(groupData.id, groupData);
-        console.log(`Group ${groupData.id} added to groups map. Total groups: ${this.groups.size}`);
+        // Update group data
+        this.groups.set(publicIdentifier, groupData);
         
         // Store hypertuna mapping if available
         if (groupData.hypertunaId) {
             this.hypertunaGroups.set(groupData.hypertunaId, publicIdentifier);
             this.groupHypertunaIds.set(publicIdentifier, groupData.hypertunaId);
-            console.log(`Stored hypertuna mapping: ${hypertunaId} -> ${groupData.id}`);
         }
         
         // Emit event
         this.emit('group:metadata', { 
-            groupId: publicIdentifier, // Now using public identifier
+            groupId: publicIdentifier,
             group: groupData 
         });
         
-        // Subscribe to membership events for this group
-        this._subscribeToGroupMembership(publicIdentifier);
+        // Only subscribe to membership if not already subscribed
+        const membershipFilters = [
+            {
+                kinds: [
+                    NostrEvents.KIND_GROUP_MEMBER_LIST,
+                    NostrEvents.KIND_GROUP_ADMIN_LIST
+                ],
+                "#d": [publicIdentifier]
+            },
+            {
+                kinds: [
+                    NostrEvents.KIND_GROUP_PUT_USER,
+                    NostrEvents.KIND_GROUP_REMOVE_USER
+                ],
+                "#h": [publicIdentifier]
+            }
+        ];
+        
+        if (!this._findExistingSubscription(membershipFilters)) {
+            this._subscribeToGroupMembership(publicIdentifier);
+        }
     }
     
     /**
@@ -1569,22 +1631,26 @@ async fetchMultipleProfiles(pubkeys) {
     unsubscribeFromGroup(groupId) {
         if (!groupId) return;
         
-        // Find all subscriptions related to this group
-        const subscriptionsToRemove = [];
+        // Get all subscriptions for this group
+        const groupSubs = this.groupSubscriptions.get(groupId);
+        if (!groupSubs) return;
         
-        this.activeSubscriptions.forEach(subId => {
-            // Match any subscription that contains the groupId
-            if (subId.includes(groupId)) {
-                subscriptionsToRemove.push(subId);
-            }
-        });
-        
-        // Unsubscribe from each found subscription
-        subscriptionsToRemove.forEach(subId => {
+        // Unsubscribe from each
+        groupSubs.forEach(subId => {
             console.log(`Unsubscribing from: ${subId}`);
             this.relayManager.unsubscribe(subId);
             this.activeSubscriptions.delete(subId);
+            
+            // Clean up filter tracking
+            this.subscriptionsByFilter.forEach((storedSubId, filterHash) => {
+                if (storedSubId === subId) {
+                    this.subscriptionsByFilter.delete(filterHash);
+                }
+            });
         });
+        
+        // Remove group tracking
+        this.groupSubscriptions.delete(groupId);
     }
     
     /**
@@ -2535,6 +2601,9 @@ async fetchMultipleProfiles(pubkeys) {
             this.relayManager.unsubscribe(subId);
         });
         this.activeSubscriptions.clear();
+        
+        // Clear subscription tracking
+        this.subscriptionsByFilter.clear()
         
         // Clear all cached data
         this.groups.clear();
