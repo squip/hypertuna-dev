@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Nostr Token Auth</title>
+  <script src="https://bundle.run/noble-secp256k1@1.2.14"></script>
+  <script src="https://bundle.run/browserify-cipher@1.0.1"></script>
+  <script src="https://bundle.run/bech32@2.0.0"></script>
+  <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.1/build/qrcode.min.js"></script>
+  <style>
+    body { font-family: sans-serif; max-width: 600px; margin: 2rem auto; padding: 1rem; }
+    input, textarea { width: 100%; margin-bottom: 10px; padding: 0.5rem; }
+    button { padding: 0.5rem 1rem; font-size: 16px; }
+    pre { background: #f4f4f4; padding: 1rem; overflow-x: auto; }
+    #qr { margin-top: 1rem; text-align: center; }
+  </style>
+</head>
+<body>
+  <h2>Nostr Token Auth</h2>
+  <label>Private Key (hex or nsec):</label>
+  <input id="privkey" type="text" placeholder="Enter your private key" />
+
+  <button onclick="startAuth()">Begin Authentication</button>
+
+  <div id="qr"></div>
+  <h3>Status:</h3>
+  <pre id="log"></pre>
+
+  <script>
+    const log = (...args) => {
+      const logElem = document.getElementById('log');
+      logElem.textContent += args.join(' ') + "\n";
+    };
+
+    function hexToBytes(hex) {
+      return Uint8Array.from(hex.match(/.{1,2}/g).map(b => parseInt(b, 16)));
+    }
+
+    function decodeNsec(nsec) {
+      try {
+        const decoded = bech32.bech32.decode(nsec, 90);
+        if (decoded.prefix !== 'nsec') throw new Error('Invalid prefix');
+        const bytes = new Uint8Array(bech32.bech32.fromWords(decoded.words));
+        return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
+      } catch (e) {
+        log('❌ Error decoding nsec:', e.message);
+        return null;
+      }
+    }
+
+    async function encrypt(privkeyHex, pubkeyHex, text) {
+      // Convert hex private key to bytes
+      const privkeyBytes = hexToBytes(privkeyHex);
+      // Get shared secret (make sure to prepend 02 to compressed pubkey)
+      const shared = await nobleSecp256k1.getSharedSecret(privkeyBytes, '02' + pubkeyHex, true);
+      // Use the same key derivation as the server - slice from index 1 to 33
+      const key = shared.slice(1, 33);
+      
+      // Log the key properly
+      const keyHex = Array.from(key).map(b => b.toString(16).padStart(2, '0')).join('');
+      log('🔑 Client AES key:', keyHex);
+      
+      // Generate random IV
+      const iv = crypto.getRandomValues(new Uint8Array(16));
+      
+      // Create cipher with the key as Uint8Array
+      const cipher = browserifyCipher.createCipheriv('aes-256-cbc', key, iv);
+      let enc = cipher.update(text, 'utf8', 'base64');
+      enc += cipher.final('base64');
+      
+      const ivBase64 = btoa(String.fromCharCode(...iv));
+      log('🧊 IV (base64):', ivBase64);
+      log('📦 Ciphertext:', enc);
+      
+      return { ciphertext: enc, iv: ivBase64 };
+    }
+
+    async function startAuth() {
+      const input = document.getElementById('privkey').value.trim();
+      if (!input) return alert('Enter your private key');
+      let privKeyHex = input;
+      if (input.startsWith('nsec')) {
+        privKeyHex = decodeNsec(input);
+        if (!privKeyHex) return;
+      }
+
+      const pubKeyBytes = hexToBytes(privKeyHex);
+      const pubKeyArray = nobleSecp256k1.getPublicKey(pubKeyBytes, true);
+      // Convert Uint8Array to hex string and remove the first byte (compression flag)
+      const pubKey = Array.from(pubKeyArray).map(b => b.toString(16).padStart(2, '0')).join('').substring(2);
+      log('🔑 Your pubkey:', pubKey);
+      
+      const challengeRes = await fetch('/begin-auth', {
+        method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: `pubkey=${pubKey}`
+      });
+      const { challenge, relayPubKey } = await challengeRes.json();
+      log('📣 Challenge:', challenge);
+      log('🔐 Relay pubkey:', relayPubKey);
+
+      const { ciphertext, iv } = await encrypt(privKeyHex, relayPubKey, challenge);
+      const verifyRes = await fetch('/verify-ownership', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pubkey: pubKey, ciphertext, iv })
+      });
+
+      const result = await verifyRes.json();
+      if (result.error) {
+        log('❌ Error:', result.error);
+        return;
+      }
+
+      const token = result.token;
+      const wsUrl = `ws://localhost:8080?token=${token}`;
+      log('✅ Token generated. Relay URL:');
+      log(wsUrl);
+
+      const qrDiv = document.getElementById('qr');
+      qrDiv.innerHTML = '';
+      QRCode.toCanvas(wsUrl, { width: 220 }, (err, canvas) => {
+        if (err) return log('❌ QR generation error');
+        qrDiv.appendChild(canvas);
+      });
+    }
+  </script>
+</body>
+</html>
