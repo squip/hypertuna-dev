@@ -390,21 +390,37 @@ class NostrGroupClient {
      * Subscribe to group events only on the group's relay
      */
     _subscribeToGroupOnRelay(publicIdentifier, relayUrl) {
-        // Subscribe to group metadata
-        this.relayManager.subscribeWithRouting(`group-meta-${publicIdentifier}`, [
+        // Create unique subscription IDs for each type of subscription
+        const metaSubId = `group-meta-${publicIdentifier}-${Date.now()}`;
+        const messagesSubId = `group-messages-${publicIdentifier}-${Date.now()}`;
+        
+        // Subscribe to group metadata with a unique subscription ID
+        this.relayManager.subscribeWithRouting(metaSubId, [
             { kinds: [NostrEvents.KIND_GROUP_METADATA], "#d": [publicIdentifier] },
             { kinds: [NostrEvents.KIND_GROUP_MEMBER_LIST], "#d": [publicIdentifier] },
             { kinds: [NostrEvents.KIND_GROUP_ADMIN_LIST], "#d": [publicIdentifier] }
         ], (event) => {
-            this._processEvent(event, relayUrl);
+            // Only process metadata-related events
+            if (event.kind === NostrEvents.KIND_GROUP_METADATA ||
+                event.kind === NostrEvents.KIND_GROUP_MEMBER_LIST ||
+                event.kind === NostrEvents.KIND_GROUP_ADMIN_LIST) {
+                this._processEvent(event, relayUrl);
+            }
         }, { targetRelays: [relayUrl] });
-
-        // Subscribe to group messages
-        this.relayManager.subscribeWithRouting(`group-messages-${publicIdentifier}`, [
+    
+        // Subscribe to group messages with a separate unique subscription ID
+        this.relayManager.subscribeWithRouting(messagesSubId, [
             { kinds: [NostrEvents.KIND_TEXT_NOTE], "#h": [publicIdentifier] }
         ], (event) => {
-            this._processGroupMessageEvent(event);
+            // Only process message events (kind 1)
+            if (event.kind === NostrEvents.KIND_TEXT_NOTE) {
+                this._processGroupMessageEvent(event);
+            }
         }, { targetRelays: [relayUrl] });
+        
+        // Track these subscriptions for cleanup
+        this.activeSubscriptions.add(metaSubId);
+        this.activeSubscriptions.add(messagesSubId);
     }
     
     /**
@@ -1080,13 +1096,14 @@ async fetchMultipleProfiles(pubkeys) {
     _subscribeToGroupMembership(publicIdentifier) {
         if (!publicIdentifier) return;
         
-        const subId = `group-members-${publicIdentifier}`;
+        // Use a timestamp to ensure uniqueness
+        const subId = `group-members-${publicIdentifier}-${Date.now()}`;
         
         if (this.activeSubscriptions.has(subId)) {
             return;
         }
         
-        // Subscribe to membership events using public identifier
+        // Subscribe to membership events using unique subscription ID
         const actualSubId = this.relayManager.subscribe(subId, [
             {
                 kinds: [
@@ -1110,15 +1127,20 @@ async fetchMultipleProfiles(pubkeys) {
                 }
             });
             
-            // Process the event
-            if (event.kind === NostrEvents.KIND_GROUP_MEMBER_LIST) {
-                this._processGroupMemberListEvent(event);
-            } else if (event.kind === NostrEvents.KIND_GROUP_ADMIN_LIST) {
-                this._processGroupAdminListEvent(event);
-            } else if (event.kind === NostrEvents.KIND_GROUP_PUT_USER) {
-                this._processGroupAddUserEvent(event);
-            } else if (event.kind === NostrEvents.KIND_GROUP_REMOVE_USER) {
-                this._processGroupRemoveUserEvent(event);
+            // Process the event based on its kind
+            switch (event.kind) {
+                case NostrEvents.KIND_GROUP_MEMBER_LIST:
+                    this._processGroupMemberListEvent(event);
+                    break;
+                case NostrEvents.KIND_GROUP_ADMIN_LIST:
+                    this._processGroupAdminListEvent(event);
+                    break;
+                case NostrEvents.KIND_GROUP_PUT_USER:
+                    this._processGroupAddUserEvent(event);
+                    break;
+                case NostrEvents.KIND_GROUP_REMOVE_USER:
+                    this._processGroupRemoveUserEvent(event);
+                    break;
             }
         });
         
@@ -1547,19 +1569,19 @@ async fetchMultipleProfiles(pubkeys) {
     unsubscribeFromGroup(groupId) {
         if (!groupId) return;
         
-        // Find and remove subscriptions related to this group
+        // Find all subscriptions related to this group
         const subscriptionsToRemove = [];
         
         this.activeSubscriptions.forEach(subId => {
-            if (subId.includes(groupId) || 
-                subId.includes(`group-members-${groupId.substring(0, 8)}`) ||
-                subId.includes(`group-content-${groupId.substring(0, 8)}`)) {
+            // Match any subscription that contains the groupId
+            if (subId.includes(groupId)) {
                 subscriptionsToRemove.push(subId);
             }
         });
         
         // Unsubscribe from each found subscription
         subscriptionsToRemove.forEach(subId => {
+            console.log(`Unsubscribing from: ${subId}`);
             this.relayManager.unsubscribe(subId);
             this.activeSubscriptions.delete(subId);
         });

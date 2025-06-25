@@ -1,9 +1,12 @@
+// MembersList.js - Enhanced with deduplication
 import { NostrUtils } from "./NostrUtils.js";
+
 export default class MembersList {
   constructor(container, client, currentUserPubkey) {
     this.container = container;
     this.client = client;
     this.currentUserPubkey = currentUserPubkey;
+    this.renderedMembers = new Set(); // Track rendered members to prevent duplicates
   }
 
   setUserPubkey(pubkey) {
@@ -12,7 +15,10 @@ export default class MembersList {
 
   async render(members = [], admins = []) {
     if (!this.container) return;
+    
+    // Clear container and reset tracked members
     this.container.innerHTML = '';
+    this.renderedMembers.clear();
 
     // Create a map to ensure unique members
     const uniqueMembers = new Map();
@@ -58,7 +64,7 @@ export default class MembersList {
 
     // Fetch profiles for all members
     const profiles = {};
-    const memberPubkeys = membersList.map(m => m.pubkey); // This was the missing variable
+    const memberPubkeys = membersList.map(m => m.pubkey);
     
     for (const pk of memberPubkeys) {
         try {
@@ -71,9 +77,18 @@ export default class MembersList {
 
     const isCurrentUserAdmin = admins.some(a => a.pubkey === this.currentUserPubkey);
 
-    // Render each member
+    // Render each member (with deduplication check)
     for (const member of membersList) {
         const pk = member.pubkey;
+        
+        // Skip if already rendered (extra safety check)
+        if (this.renderedMembers.has(pk)) {
+            console.warn(`Skipping duplicate render for member: ${pk}`);
+            continue;
+        }
+        
+        this.renderedMembers.add(pk);
+        
         const profile = profiles[pk];
         const roles = member.roles || ['member'];
         const npub = NostrUtils.hexToNpub(pk);
@@ -85,6 +100,8 @@ export default class MembersList {
 
         const item = document.createElement('div');
         item.className = 'member-item';
+        item.dataset.pubkey = pk; // Add data attribute for easy identification
+        
         item.innerHTML = `
             <div class="member-avatar">${profile.picture ? `<img src="${profile.picture}" alt="${name}">` : `<span>${first}</span>`}</div>
             <div class="member-info">
@@ -103,20 +120,28 @@ export default class MembersList {
                 promote.dataset.action = 'promote';
                 promote.dataset.pubkey = pk;
                 promote.textContent = 'Make Admin';
-                promote.addEventListener("click", () => {
-                    this.container.dispatchEvent(new CustomEvent("promote", { detail: { pubkey: pk } }));
+                promote.addEventListener("click", (e) => {
+                    e.stopPropagation();
+                    this.container.dispatchEvent(new CustomEvent("promote", { 
+                        detail: { pubkey: pk },
+                        bubbles: true
+                    }));
                 });
                 actions.appendChild(promote);
             }
 
             const remove = document.createElement('button');
             remove.className = 'btn btn-danger btn-small';
-            remove.addEventListener("click", () => {
-                this.container.dispatchEvent(new CustomEvent("remove", { detail: { pubkey: pk } }));
-            });
             remove.dataset.action = 'remove';
             remove.dataset.pubkey = pk;
             remove.textContent = 'Remove';
+            remove.addEventListener("click", (e) => {
+                e.stopPropagation();
+                this.container.dispatchEvent(new CustomEvent("remove", { 
+                    detail: { pubkey: pk },
+                    bubbles: true
+                }));
+            });
             actions.appendChild(remove);
 
             item.appendChild(actions);
@@ -124,5 +149,15 @@ export default class MembersList {
 
         this.container.appendChild(item);
     }
-}
+  }
+  
+  // New method to check if a member is already rendered
+  isMemberRendered(pubkey) {
+    return this.renderedMembers.has(pubkey);
+  }
+  
+  // New method to clear the rendered members set
+  clearRenderedMembers() {
+    this.renderedMembers.clear();
+  }
 }

@@ -1251,6 +1251,12 @@ App.syncHypertunaConfigToFile = async function() {
             clearTimeout(this._loadMembersTimeout);
         }
         
+        // Prevent concurrent loads
+        if (this._loadingMembers) {
+            console.log('Member loading already in progress, skipping');
+            return;
+        }
+        
         this._loadMembersTimeout = setTimeout(async () => {
             await this._doLoadGroupMembers();
             delete this._loadMembersTimeout;
@@ -1259,11 +1265,17 @@ App.syncHypertunaConfigToFile = async function() {
     
     App._doLoadGroupMembers = async function() {
         if (!this.currentUser || !this.currentGroupId) return;
+        
+        // Set loading flag
+        this._loadingMembers = true;
     
         const container = document.getElementById("member-list");
-        if (!container) return;
+        if (!container) {
+            this._loadingMembers = false;
+            return;
+        }
         
-        // Show loading state
+        // Show loading state only if membersList doesn't exist
         if (!this.membersList) {
             container.innerHTML = '<div class="loading">Loading members...</div>';
         }
@@ -1287,6 +1299,8 @@ App.syncHypertunaConfigToFile = async function() {
         if (!this.membersList) {
             this.membersList = new MembersList(container, this.nostr.client, this.currentUser.pubkey);
         } else {
+            // Clear rendered members tracking when updating
+            this.membersList.clearRenderedMembers();
             this.membersList.container = container;
             this.membersList.client = this.nostr.client;
             this.membersList.setUserPubkey(this.currentUser.pubkey);
@@ -1297,21 +1311,30 @@ App.syncHypertunaConfigToFile = async function() {
             const members = this.nostr.getGroupMembers(this.currentGroupId);
             const admins = this.nostr.getGroupAdmins(this.currentGroupId);
             
-            // Clear container before rendering
+            console.log(`Loading members for group ${this.currentGroupId}:`, {
+                memberCount: members.length,
+                adminCount: admins.length
+            });
+            
+            // Clear container before rendering to ensure clean slate
             container.innerHTML = '';
             
             // Render the members list
             await this.membersList.render(members, admins);
             
-            // Create new event handlers
+            // Create new event handlers with proper cleanup
             const promoteHandler = (e) => {
                 e.stopPropagation();
-                this.updateMemberRole(e.detail.pubkey, ['admin']);
+                if (e.detail && e.detail.pubkey) {
+                    this.updateMemberRole(e.detail.pubkey, ['admin']);
+                }
             };
             
             const removeHandler = (e) => {
                 e.stopPropagation();
-                this.removeMember(e.detail.pubkey);
+                if (e.detail && e.detail.pubkey) {
+                    this.removeMember(e.detail.pubkey);
+                }
             };
             
             // Add new listeners
@@ -1331,6 +1354,9 @@ App.syncHypertunaConfigToFile = async function() {
                     Error loading members. Please try again.
                 </div>
             `;
+        } finally {
+            // Clear loading flag
+            this._loadingMembers = false;
         }
     };
 

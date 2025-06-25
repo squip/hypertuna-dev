@@ -5,20 +5,73 @@
 
 class WebSocketRelayManager {
     constructor() {
-        this.relays = new Map(); // Map of relay URL -> {conn: WebSocket, status: 'connecting'|'open'|'closed', subscriptions: Map}
-        this.globalSubscriptions = new Map(); // Map of subscriptionId -> {filters, callbacks}
-        this.eventCallbacks = []; // Array of callbacks for received events
-        this.connectCallbacks = []; // Callbacks for relay connections
-        this.disconnectCallbacks = []; // Callbacks for relay disconnections
+        this.relays = new Map();
+        this.globalSubscriptions = new Map();
+        this.eventCallbacks = [];
+        this.connectCallbacks = [];
+        this.disconnectCallbacks = [];
         
         // Add rate limiting
         this.requestQueue = [];
         this.processingQueue = false;
         this.lastRequestTime = 0;
-        this.minTimeBetweenRequests = 50; // 50ms between requests to avoid "too fast" errors
-        this.relayTypes = new Map(); // Map of relay URL -> type ('discovery' | 'group')
-        this.groupRelays = new Map(); // Map of groupId -> relay URL
-        this.discoveryRelays = new Set(); // Set of discovery relay URLs
+        this.minTimeBetweenRequests = 50;
+        this.relayTypes = new Map();
+        this.groupRelays = new Map();
+        this.discoveryRelays = new Set();
+        
+        // NEW: Add subscription ID counter and mapping
+        this.subscriptionCounter = 0;
+        this.subscriptionIdMap = new Map(); // Maps original ID to unique short ID
+        this.reverseSubscriptionMap = new Map(); // Maps short ID back to original
+    }
+
+    /**
+     * Generate a unique short subscription ID
+     * @param {string} subscriptionId - The original subscription ID
+     * @returns {string} - A unique short subscription ID
+     * @private
+     */
+    _generateUniqueShortId(subscriptionId) {
+        // Check if we already have a mapping for this subscription
+        if (this.subscriptionIdMap.has(subscriptionId)) {
+            return this.subscriptionIdMap.get(subscriptionId);
+        }
+        
+        // Generate a new unique short ID
+        this.subscriptionCounter++;
+        const shortId = `sub${this.subscriptionCounter}`;
+        
+        // Store the bidirectional mapping
+        this.subscriptionIdMap.set(subscriptionId, shortId);
+        this.reverseSubscriptionMap.set(shortId, subscriptionId);
+        
+        console.log(`Mapped subscription: ${subscriptionId} -> ${shortId}`);
+        
+        return shortId;
+    }
+
+    /**
+     * Get the original subscription ID from a short ID
+     * @param {string} shortId - The short subscription ID
+     * @returns {string|null} - The original subscription ID or null
+     * @private
+     */
+    _getOriginalSubscriptionId(shortId) {
+        return this.reverseSubscriptionMap.get(shortId) || null;
+    }
+
+    /**
+     * Clean up subscription mappings when unsubscribing
+     * @param {string} subscriptionId - The original subscription ID
+     * @private
+     */
+    _cleanupSubscriptionMappings(subscriptionId) {
+        const shortId = this.subscriptionIdMap.get(subscriptionId);
+        if (shortId) {
+            this.subscriptionIdMap.delete(subscriptionId);
+            this.reverseSubscriptionMap.delete(shortId);
+        }
     }
 
     /**
@@ -50,19 +103,18 @@ class WebSocketRelayManager {
     subscribeWithRouting(subscriptionId, filters, callback, options = {}) {
         const { targetRelays = null, suppressGlobalEvents = false } = options;
         
-        // If specific target relays are specified, only subscribe to those
+        // Generate unique short ID for this subscription
+        const shortSubId = this._generateUniqueShortId(subscriptionId);
+        
         if (targetRelays && targetRelays.length > 0) {
-            const shortSubId = this._shortenSubscriptionId(subscriptionId);
-            
             this.globalSubscriptions.set(subscriptionId, {
                 shortId: shortSubId,
                 filters,
                 callbacks: callback ? [callback] : [],
                 suppressGlobalEvents,
-                targetRelays // Store target relays
+                targetRelays
             });
             
-            // Only subscribe on specified relays
             targetRelays.forEach(relayUrl => {
                 if (this.relays.has(relayUrl) && this.relays.get(relayUrl).status === 'open') {
                     this._subscribeOnRelay(relayUrl, subscriptionId, filters);
@@ -72,7 +124,6 @@ class WebSocketRelayManager {
             return subscriptionId;
         }
         
-        // Otherwise use normal subscription
         return this.subscribe(subscriptionId, filters, callback, options);
     }
 
@@ -376,14 +427,14 @@ _validateEvent(event) {
      * @param {Function} callback - Function to call when events arrive
      */
     subscribe(subscriptionId, filters, callback, options = {}) {
-        // Create a shorter subscription ID for the wire protocol
-        const shortSubId = this._shortenSubscriptionId(subscriptionId);
+        // Generate unique short ID for this subscription
+        const shortSubId = this._generateUniqueShortId(subscriptionId);
     
-        // Check for existing subscription with same filters
+        // Check for existing subscription
         if (this.globalSubscriptions.has(subscriptionId)) {
             const existing = this.globalSubscriptions.get(subscriptionId);
             if (JSON.stringify(existing.filters) === JSON.stringify(filters)) {
-                console.log(`Subscription ${subscriptionId} already exists, skipping`);
+                console.log(`Subscription ${subscriptionId} already exists with same filters`);
                 if (callback) existing.callbacks.push(callback);
                 return subscriptionId;
             }
@@ -394,20 +445,17 @@ _validateEvent(event) {
     
         console.log(`Creating subscription: ${subscriptionId} (${shortSubId})`);
         console.log(`Subscription filters:`, JSON.stringify(filters));
-        console.log(`Subscription options:`, options);
-    
-        // Add to global subscriptions with the original ID as key
+        
         this.globalSubscriptions.set(subscriptionId, {
             shortId: shortSubId,
             filters,
             callbacks: callback ? [callback] : [],
-            suppressGlobalEvents: options.suppressGlobalEvents || false // Add this
+            suppressGlobalEvents: options.suppressGlobalEvents || false
         });
     
         // Apply to all connected relays
         this.relays.forEach((relay, url) => {
             if (relay.status === 'open') {
-                console.log(`Sending subscription to relay: ${url}`);
                 this._subscribeOnRelay(url, subscriptionId, filters);
             }
         });
@@ -427,8 +475,14 @@ _validateEvent(event) {
             return;
         }
     
-        // Get the short ID for this subscription
-        const shortSubId = this.globalSubscriptions.get(subscriptionId).shortId;
+        // Get the unique short ID for this subscription
+        const subData = this.globalSubscriptions.get(subscriptionId);
+        if (!subData) {
+            console.error(`No subscription data found for ${subscriptionId}`);
+            return;
+        }
+        
+        const shortSubId = subData.shortId;
     
         // Avoid duplicate subscriptions on the relay
         if (relay.subscriptions.has(subscriptionId)) {
@@ -439,17 +493,16 @@ _validateEvent(event) {
             }
         }
 
-        // Create a REQ message
+        // Create a REQ message with the unique short ID
         const reqMsg = JSON.stringify(['REQ', shortSubId, ...filters]);
         console.log(`REQ message to ${relayUrl}:`, reqMsg);
         
-        // Queue the subscription request
         this._queueRequest(() => {
             if (relay.status === 'open') {
                 relay.conn.send(reqMsg);
-                console.log(`Subscription ${shortSubId} sent to ${relayUrl}`);
+                console.log(`Subscription ${subscriptionId} (${shortSubId}) sent to ${relayUrl}`);
                 
-                // Track subscription on this relay using the original ID as key
+                // Track subscription on this relay
                 relay.subscriptions.set(subscriptionId, {
                     shortId: shortSubId,
                     filters: filters
@@ -466,7 +519,6 @@ _validateEvent(event) {
      * @param {string} subscriptionId - The subscription ID to close
      */
     unsubscribe(subscriptionId) {
-        // Remove from global subscriptions
         const subData = this.globalSubscriptions.get(subscriptionId);
         if (!subData) return;
         
@@ -487,6 +539,9 @@ _validateEvent(event) {
                 relay.subscriptions.delete(subscriptionId);
             }
         });
+        
+        // Clean up subscription mappings
+        this._cleanupSubscriptionMappings(subscriptionId);
     }
 
     /**
@@ -695,30 +750,26 @@ async testPublish() {
     
         const messageType = message[0];
     
-        console.log(`Relay message from ${relayUrl}: ${messageType}`, message);
-    
         if (messageType === 'EVENT') {
-            // ["EVENT", <subscription_id>, <event>]
             if (message.length < 3) return;
             
             const shortSubId = message[1];
             const event = message[2];
             
-            // Find the original subscription ID from the short ID
-            let originalSubId = null;
-            this.globalSubscriptions.forEach((subData, subId) => {
-                if (subData.shortId === shortSubId) {
-                    originalSubId = subId;
-                }
-            });
+            // Get the original subscription ID from our mapping
+            const originalSubId = this._getOriginalSubscriptionId(shortSubId);
             
-            // If we can't find the subscription, ignore the event
-            if (!originalSubId) return;
+            if (!originalSubId) {
+                console.warn(`Unknown subscription ID: ${shortSubId}`);
+                return;
+            }
             
-            // Notify global subscription callbacks
+            console.log(`Received event for subscription: ${originalSubId} (${shortSubId})`);
+            
+            // Get subscription data
             const subscription = this.globalSubscriptions.get(originalSubId);
             if (subscription) {
-                // Always call subscription-specific callbacks
+                // Call subscription-specific callbacks
                 subscription.callbacks.forEach(callback => {
                     try {
                         callback(event, relayUrl, originalSubId);
@@ -736,23 +787,26 @@ async testPublish() {
                             console.error('Error in event callback:', e);
                         }
                     });
-                } else {
-                    console.log(`Global events suppressed for subscription ${originalSubId}`);
                 }
             }
         }
         else if (messageType === 'EOSE') {
-            // ["EOSE", <subscription_id>]
-            // End of stored events, we could notify listeners if needed
-            // console.log(`End of stored events for subscription ${message[1]} from ${relayUrl}`);
+            // End of stored events
+            const shortSubId = message[1];
+            const originalSubId = this._getOriginalSubscriptionId(shortSubId);
+            console.log(`End of stored events for subscription ${originalSubId || shortSubId}`);
         }
         else if (messageType === 'NOTICE') {
-            // ["NOTICE", <message>]
             console.log(`Notice from ${relayUrl}: ${message[1]}`);
         }
         else if (messageType === 'OK') {
-            // ["OK", <event_id>, <success>, <message>]
-            // We handle these in the publish method
+            // Handle OK responses
+            if (message.length >= 3) {
+                const eventId = message[1];
+                const success = message[2];
+                const errorMsg = message.length > 3 ? message[3] : '';
+                console.log(`OK from ${relayUrl}: ${eventId.substring(0, 8)}... - ${success ? 'success' : 'failed'}${errorMsg ? ': ' + errorMsg : ''}`);
+            }
         }
     }
 }
