@@ -22,11 +22,84 @@ const {
   checkPeerHealthWithHyperswarm,
   forwardRequestToPeer,
   forwardMessageToPeerHyperswarm,
-  getEventsFromPeerHyperswarm
-} = require('./pear-hypertuna-gateway-client');
+  getEventsFromPeerHyperswarm,
+  forwardJoinRequestToPeer,
+  forwardCallbackToPeer
+} = require('./pear-sec-hypertuna-gateway-client');
 
 let nostrClient = null;
 let directoryUpdater = null;
+
+
+// ============================
+// IP Hashing Utilities
+// ============================
+
+/**
+ * Normalize IP addresses to handle IPv6 localhost and IPv4-mapped IPv6
+ * @param {string} ip - Raw IP address
+ * @returns {string} - Normalized IP address
+ */
+function normalizeIp(ip) {
+  if (!ip) return '127.0.0.1';
+  
+  // Handle IPv6 localhost
+  if (ip === '::1') return '127.0.0.1';
+  
+  // Handle IPv4-mapped IPv6 addresses
+  if (ip.startsWith('::ffff:')) {
+    return ip.replace('::ffff:', '');
+  }
+  
+  return ip;
+}
+
+/**
+ * Get /24 subnet from IP address
+ * @param {string} ip - IP address
+ * @returns {string} - First 3 octets of IP
+ */
+function get24Subnet(ip) {
+  const normalized = normalizeIp(ip);
+  const parts = normalized.split('.');
+  
+  // Ensure we have a valid IPv4 address
+  if (parts.length !== 4) {
+    console.error(`[Gateway] Invalid IP format for subnet calculation: ${normalized}`);
+    return normalized; // Return as-is if not valid IPv4
+  }
+  
+  return parts.slice(0, 3).join('.');
+}
+
+/**
+ * Generate SHA256 hash of subnet
+ * @param {string} subnet - Subnet string
+ * @returns {string} - Hex hash of subnet
+ */
+function hashSubnet(subnet) {
+  return crypto.createHash('sha256').update(subnet).digest('hex');
+}
+
+/**
+ * Extract and hash client subnet from request
+ * @param {Object} req - Express request object
+ * @returns {string} - Hashed subnet
+ */
+function getHashedClientSubnet(req) {
+  // Try various headers for client IP (useful when behind proxies)
+  const clientIp = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || 
+                   req.headers['x-real-ip'] ||
+                   req.socket.remoteAddress ||
+                   req.connection.remoteAddress;
+  
+  const subnet = get24Subnet(clientIp);
+  const hashedSubnet = hashSubnet(subnet);
+  
+  console.log(`[Gateway] Client IP: ${normalizeIp(clientIp)}, Subnet: ${subnet}, Hash: ${hashedSubnet.substring(0, 8)}...`);
+  
+  return hashedSubnet;
+}
 
 // ============================
 // Core Classes (Enhanced for Hyperswarm)
@@ -222,8 +295,13 @@ const wss = new WebSocket.Server({ server });
 app.use(express.json());
 app.use((req, res, next) => {
   console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
+  
+  // Add hashed subnet to request object
+  req.hashedSubnet = getHashedClientSubnet(req);
+  
   next();
 });
+
 
 // Root route handler
 app.get('/', (req, res) => {
@@ -272,13 +350,18 @@ async function forwardMessageToPeer(peerPublicKey, identifier, message, connecti
       peer = healthyPeer;
     }
 
-    // Use Hyperswarm to forward message
+    // Get the connection's subnet hash from wsConnections
+    const wsConnection = wsConnections.get(connectionKey);
+    const subnetHash = wsConnection?.subnetHash || '';
+
+    // Use Hyperswarm to forward message with subnet hash
     return await forwardMessageToPeerHyperswarm(
       peer.publicKey,
       identifier,
       message,
       connectionKey,
-      connectionPool
+      connectionPool,
+      subnetHash // Add this parameter
     );
   } catch (error) {
     await peerHealthManager.recordFailure(peer.publicKey);
@@ -294,25 +377,42 @@ wss.on('connection', (ws, req) => {
   const pathname = url.parse(req.url).pathname;
   const parts = pathname.split('/').filter(Boolean);
   const identifier = parts.length >= 2 ? `${parts[0]}:${parts[1]}` : parts[0];
+  
+  // Extract token from query string
+  const parsedUrl = url.parse(req.url, true);
+  const authToken = parsedUrl.query.token || null;
 
   console.log(`[${new Date().toISOString()}] New WebSocket connection for relay: ${identifier}`);
+  console.log(`[${new Date().toISOString()}] Has auth token: ${!!authToken}`);
 
   if (activeRelays.has(identifier)) {
-    handleWebSocket(ws, identifier);
+    handleWebSocket(ws, identifier, authToken);
   } else {
     console.log(`[${new Date().toISOString()}] Invalid relay identifier: ${identifier}. Closing connection.`);
     ws.close(1008, 'Invalid relay key');
   }
 });
 
-function handleWebSocket(ws, identifier) {
+// Update handleWebSocket to accept and store the auth token
+function handleWebSocket(ws, identifier, authToken = null) {
   const connectionKey = generateConnectionKey();
+  const subnetHash = getHashedClientSubnet({ socket: ws._socket });
+  
   console.log(`[${new Date().toISOString()}] New WebSocket connection established:`, {
     identifier,
-    connectionKey
+    connectionKey,
+    subnetHash: subnetHash.substring(0, 8) + '...',
+    hasAuthToken: !!authToken
   });
 
-  wsConnections.set(connectionKey, { ws, relayKey: identifier });
+  wsConnections.set(connectionKey, { 
+    ws, 
+    relayKey: identifier,
+    subnetHash,
+    authToken // Store the auth token
+  });
+  
+  // Rest of the function remains the same...
   const messageQueue = new MessageQueue();
   messageQueues.set(connectionKey, messageQueue);
 
@@ -322,6 +422,7 @@ function handleWebSocket(ws, identifier) {
     return;
   }
 
+  // Update the forwardMessageToPeer call in the message handler to include auth
   ws.on('message', async (message) => {
     const processMessage = async (msg) => {
       console.log(`[${new Date().toISOString()}] Processing WebSocket message for relay ${identifier}`);
@@ -334,7 +435,16 @@ function handleWebSocket(ws, identifier) {
       }
 
       try {
-        const responses = await forwardMessageToPeer(healthyPeer.publicKey, identifier, msg, connectionKey);
+        // Get connection data including auth token
+        const connData = wsConnections.get(connectionKey);
+        
+        const responses = await forwardMessageToPeer(
+          healthyPeer.publicKey, 
+          identifier, 
+          msg, 
+          connectionKey,
+          connData.authToken // Pass the auth token
+        );
         for (const response of responses) {
           if (response && response.length > 0) {
             if (ws.readyState === WebSocket.OPEN) {
@@ -686,6 +796,243 @@ app.post('/register', async (req, res) => {
     status: 'active',
     timestamp: new Date().toISOString()
   });
+});
+
+// ============================
+// Join Relay Endpoint
+// ============================
+
+app.post('/post/join/:identifier', async (req, res) => {
+  const identifier = req.params.identifier;
+  console.log(`[${new Date().toISOString()}] ========================================`);
+  console.log(`[${new Date().toISOString()}] JOIN REQUEST RECEIVED`);
+  console.log(`[${new Date().toISOString()}] Relay: ${identifier}`);
+  console.log(`[${new Date().toISOString()}] Client subnet hash: ${req.hashedSubnet?.substring(0, 8)}...`);
+  
+  try {
+    // Extract request data
+    const { event } = req.body;
+    
+    if (!event) {
+      console.error(`[${new Date().toISOString()}] Missing event in join request`);
+      return res.status(400).json({
+        error: 'Missing required field: event'
+      });
+    }
+    
+    console.log(`[${new Date().toISOString()}] Event kind: ${event.kind}`);
+    console.log(`[${new Date().toISOString()}] User pubkey: ${event.pubkey?.substring(0, 8)}...`);
+    
+    // Find healthy peer for this relay
+    const healthyPeer = await findHealthyPeerForRelay(identifier);
+    if (!healthyPeer) {
+      console.error(`[${new Date().toISOString()}] No healthy peers found for relay ${identifier}`);
+      return res.status(503).json({
+        error: 'No healthy peers available for this relay'
+      });
+    }
+    
+    console.log(`[${new Date().toISOString()}] Selected peer: ${healthyPeer.publicKey.substring(0, 8)}...`);
+    
+    // Generate callback URLs that route back through the gateway
+    const protocol = req.protocol;
+    const host = req.get('host');
+    const baseUrl = `${protocol}://${host}`;
+    
+    const callbackUrls = {
+      verifyUrl: `${baseUrl}/callback/verify-ownership/${identifier}`,
+      finalUrl: `${baseUrl}/callback/finalize-auth/${identifier}`
+    };
+    
+    console.log(`[${new Date().toISOString()}] Callback URLs:`, callbackUrls);
+    
+    // Forward the join request to the peer
+    const requestData = {
+      event,
+      requesterSubnetHash: req.hashedSubnet,
+      callbackUrls
+    };
+    
+    const joinResponse = await forwardJoinRequestToPeer(
+      healthyPeer,
+      identifier,
+      requestData,
+      connectionPool
+    );
+    
+    // Store peer info for callbacks
+    if (!global.joinSessions) {
+      global.joinSessions = new Map();
+    }
+    
+    const sessionKey = `${event.pubkey}-${identifier}`;
+    global.joinSessions.set(sessionKey, {
+      peerPublicKey: healthyPeer.publicKey,
+      identifier,
+      pubkey: event.pubkey,
+      subnetHash: req.hashedSubnet,
+      timestamp: Date.now()
+    });
+    
+    // Clean up old sessions
+    for (const [key, session] of global.joinSessions) {
+      if (Date.now() - session.timestamp > 5 * 60 * 1000) { // 5 minutes
+        global.joinSessions.delete(key);
+      }
+    }
+    
+    console.log(`[${new Date().toISOString()}] Join session stored: ${sessionKey}`);
+    console.log(`[${new Date().toISOString()}] Returning challenge to client`);
+    console.log(`[${new Date().toISOString()}] ========================================`);
+    
+    res.json(joinResponse);
+    
+  } catch (error) {
+    console.error(`[${new Date().toISOString()}] ========================================`);
+    console.error(`[${new Date().toISOString()}] JOIN REQUEST ERROR`);
+    console.error(`[${new Date().toISOString()}] Error:`, error.message);
+    console.error(`[${new Date().toISOString()}] Stack:`, error.stack);
+    console.error(`[${new Date().toISOString()}] ========================================`);
+    
+    res.status(500).json({
+      error: 'Internal server error',
+      message: error.message
+    });
+  }
+});
+
+// Add callback endpoints
+app.post('/callback/verify-ownership/:identifier', async (req, res) => {
+  const identifier = req.params.identifier;
+  console.log(`[${new Date().toISOString()}] ========================================`);
+  console.log(`[${new Date().toISOString()}] VERIFY OWNERSHIP CALLBACK`);
+  console.log(`[${new Date().toISOString()}] Relay: ${identifier}`);
+  
+  try {
+    const { pubkey, ciphertext, iv } = req.body;
+    
+    if (!pubkey || !ciphertext || !iv) {
+      return res.status(400).json({
+        error: 'Missing required fields'
+      });
+    }
+    
+    console.log(`[${new Date().toISOString()}] Pubkey: ${pubkey.substring(0, 8)}...`);
+    
+    // Get session info
+    const sessionKey = `${pubkey}-${identifier}`;
+    const session = global.joinSessions?.get(sessionKey);
+    
+    if (!session) {
+      console.error(`[${new Date().toISOString()}] No session found for ${sessionKey}`);
+      return res.status(400).json({
+        error: 'Session not found or expired'
+      });
+    }
+    
+    console.log(`[${new Date().toISOString()}] Found session for peer: ${session.peerPublicKey.substring(0, 8)}...`);
+    
+    // Find the peer
+    const peer = activePeers.find(p => p.publicKey === session.peerPublicKey);
+    if (!peer) {
+      console.error(`[${new Date().toISOString()}] Peer no longer active`);
+      return res.status(503).json({
+        error: 'Peer no longer available'
+      });
+    }
+    
+    // Forward to peer
+    const result = await forwardCallbackToPeer(
+      peer,
+      '/verify-ownership',
+      { pubkey, ciphertext, iv },
+      connectionPool
+    );
+    
+    if (result.success) {
+      // Update session with token
+      session.token = result.token;
+      console.log(`[${new Date().toISOString()}] Verification successful, token generated`);
+    }
+    
+    console.log(`[${new Date().toISOString()}] ========================================`);
+    
+    res.json(result);
+    
+  } catch (error) {
+    console.error(`[${new Date().toISOString()}] Verify ownership error:`, error);
+    res.status(500).json({
+      error: 'Verification failed',
+      message: error.message
+    });
+  }
+});
+
+app.post('/callback/finalize-auth/:identifier', async (req, res) => {
+  const identifier = req.params.identifier;
+  console.log(`[${new Date().toISOString()}] ========================================`);
+  console.log(`[${new Date().toISOString()}] FINALIZE AUTH CALLBACK`);
+  console.log(`[${new Date().toISOString()}] Relay: ${identifier}`);
+  
+  try {
+    const { pubkey } = req.body;
+    
+    if (!pubkey) {
+      return res.status(400).json({
+        error: 'Missing pubkey'
+      });
+    }
+    
+    // Get session info
+    const sessionKey = `${pubkey}-${identifier}`;
+    const session = global.joinSessions?.get(sessionKey);
+    
+    if (!session || !session.token) {
+      console.error(`[${new Date().toISOString()}] No valid session found`);
+      return res.status(400).json({
+        error: 'Session not found or verification not completed'
+      });
+    }
+    
+    console.log(`[${new Date().toISOString()}] Finalizing auth for ${pubkey.substring(0, 8)}...`);
+    
+    // Find the peer
+    const peer = activePeers.find(p => p.publicKey === session.peerPublicKey);
+    if (!peer) {
+      console.error(`[${new Date().toISOString()}] Peer no longer active`);
+      return res.status(503).json({
+        error: 'Peer no longer available'
+      });
+    }
+    
+    // Forward to peer for finalization
+    const result = await forwardCallbackToPeer(
+      peer,
+      '/finalize-auth',
+      { 
+        pubkey, 
+        token: session.token,
+        identifier,
+        subnetHash: session.subnetHash
+      },
+      connectionPool
+    );
+    
+    // Clean up session
+    global.joinSessions.delete(sessionKey);
+    
+    console.log(`[${new Date().toISOString()}] Auth finalized, returning to client`);
+    console.log(`[${new Date().toISOString()}] ========================================`);
+    
+    res.json(result);
+    
+  } catch (error) {
+    console.error(`[${new Date().toISOString()}] Finalize auth error:`, error);
+    res.status(500).json({
+      error: 'Finalization failed',
+      message: error.message
+    });
+  }
 });
 
 // HTTP Request Handling for non-WebSocket paths

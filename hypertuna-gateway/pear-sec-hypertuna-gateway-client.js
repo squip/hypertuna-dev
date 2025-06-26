@@ -444,20 +444,31 @@ class EnhancedHyperswarmPool {
   }
  }
  
-async function forwardMessageToPeerHyperswarm(peerPublicKey, identifier, message, connectionKey, connectionPool) {
+ async function forwardMessageToPeerHyperswarm(peerPublicKey, identifier, message, connectionKey, connectionPool, subnetHash, authToken) {
   try {
     console.log(`[ForwardMessage] ========================================`);
     console.log(`[ForwardMessage] FORWARDING RELAY MESSAGE`);
     console.log(`[ForwardMessage] Relay: ${identifier}`);
     console.log(`[ForwardMessage] Connection: ${connectionKey}`);
     console.log(`[ForwardMessage] Peer: ${peerPublicKey.substring(0, 8)}...`);
+    console.log(`[ForwardMessage] Has auth: ${!!authToken}`);
+    console.log(`[ForwardMessage] Subnet: ${subnetHash?.substring(0, 8)}...`);
     
     const connection = await connectionPool.getConnection(peerPublicKey);
+    
+    // Build headers
+    const headers = { 'content-type': 'application/json' };
+    if (authToken) {
+      headers['x-auth-token'] = authToken;
+    }
+    if (subnetHash) {
+      headers['x-subnet-hash'] = subnetHash;
+    }
     
     const response = await connection.sendRequest({
       method: 'POST',
       path: `/post/relay/${identifier}`,
-      headers: { 'content-type': 'application/json' },
+      headers,
       body: Buffer.from(JSON.stringify({ message, connectionKey }))
     });
     
@@ -481,17 +492,93 @@ async function forwardMessageToPeerHyperswarm(peerPublicKey, identifier, message
     console.error(`[ForwardMessage] ========================================`);
     throw error;
   }
- }
- 
-async function getEventsFromPeerHyperswarm(peerPublicKey, identifier, connectionKey, connectionPool) {
+}
+
+ async function forwardJoinRequestToPeer(peer, identifier, requestData, connectionPool) {
   try {
-    console.log(`[GetEvents] Checking for events - relay: ${identifier}, connection: ${connectionKey}`);
+    console.log(`[ForwardJoin] ========================================`);
+    console.log(`[ForwardJoin] FORWARDING JOIN REQUEST`);
+    console.log(`[ForwardJoin] Relay: ${identifier}`);
+    console.log(`[ForwardJoin] Peer: ${peer.publicKey.substring(0, 8)}...`);
+    console.log(`[ForwardJoin] Has event: ${!!requestData.event}`);
+    console.log(`[ForwardJoin] Subnet hash: ${requestData.requesterSubnetHash?.substring(0, 8)}...`);
+    
+    const connection = await connectionPool.getConnection(peer.publicKey);
+    
+    const response = await connection.sendRequest({
+      method: 'POST',
+      path: `/post/join/${identifier}`,
+      headers: { 'content-type': 'application/json' },
+      body: Buffer.from(JSON.stringify(requestData))
+    });
+    
+    console.log(`[ForwardJoin] Response status: ${response.statusCode}`);
+    
+    if (response.statusCode !== 200) {
+      const errorBody = response.body.toString();
+      console.error(`[ForwardJoin] Join request failed: ${errorBody}`);
+      throw new Error(`Peer returned status ${response.statusCode}: ${errorBody}`);
+    }
+    
+    const joinResponse = JSON.parse(response.body.toString());
+    console.log(`[ForwardJoin] Response received:`, {
+      hasChallenge: !!joinResponse.challenge,
+      hasRelayPubkey: !!joinResponse.relayPubkey,
+      verifyUrl: joinResponse.verifyUrl,
+      finalUrl: joinResponse.finalUrl
+    });
+    
+    console.log(`[ForwardJoin] ========================================`);
+    
+    return joinResponse;
+    
+  } catch (error) {
+    console.error(`[ForwardJoin] ========================================`);
+    console.error(`[ForwardJoin] FORWARD FAILED`);
+    console.error(`[ForwardJoin] Error:`, error.message);
+    console.error(`[ForwardJoin] ========================================`);
+    throw error;
+  }
+}
+
+// Add callback endpoint forwarding
+async function forwardCallbackToPeer(peer, path, requestData, connectionPool) {
+  try {
+    console.log(`[ForwardCallback] Forwarding ${path} to peer ${peer.publicKey.substring(0, 8)}...`);
+    
+    const connection = await connectionPool.getConnection(peer.publicKey);
+    
+    const response = await connection.sendRequest({
+      method: 'POST',
+      path: path,
+      headers: { 'content-type': 'application/json' },
+      body: Buffer.from(JSON.stringify(requestData))
+    });
+    
+    console.log(`[ForwardCallback] Response status: ${response.statusCode}`);
+    
+    if (response.statusCode !== 200) {
+      const errorBody = response.body.toString();
+      throw new Error(`Callback failed: ${errorBody}`);
+    }
+    
+    return JSON.parse(response.body.toString());
+    
+  } catch (error) {
+    console.error(`[ForwardCallback] Error:`, error.message);
+    throw error;
+  }
+}
+ 
+ async function getEventsFromPeerHyperswarm(peerPublicKey, relayKey, connectionKey, connectionPool) {
+  try {
+    console.log(`[GetEvents] Checking for events - relay: ${relayKey}, connection: ${connectionKey}`);
     
     const connection = await connectionPool.getConnection(peerPublicKey);
     
     const response = await connection.sendRequest({
       method: 'GET',
-      path: `/get/relay/${identifier}/${connectionKey}`,
+      path: `/get/relay/${relayKey}/${connectionKey}`,
       headers: { 'accept': 'application/json' }
     });
     
@@ -515,6 +602,8 @@ async function getEventsFromPeerHyperswarm(peerPublicKey, identifier, connection
   checkPeerHealthWithHyperswarm,
   forwardRequestToPeer,
   forwardMessageToPeerHyperswarm,
-  getEventsFromPeerHyperswarm
- };
+  getEventsFromPeerHyperswarm,
+  forwardJoinRequestToPeer,
+  forwardCallbackToPeer
+};
  
