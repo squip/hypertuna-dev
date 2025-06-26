@@ -9,8 +9,7 @@ import https from 'bare-https';
 import { URL } from 'bare-url';
 import { initializeChallengeManager, getChallengeManager } from './challenge-manager.mjs';
 import { getRelayAuthStore } from './relay-auth-store.mjs';
-
-// Import relay management functions
+import { NostrUtils } from './nostr-utils.js';
 import {
   createRelay as createRelayManager,
   joinRelay as joinRelayManager,
@@ -36,8 +35,6 @@ import {
   getRelayProfileByKey,
   getRelayProfileByPublicIdentifier
 } from './hypertuna-relay-profile-manager-bare.mjs';
-import { NostrUtils } from './nostr-utils.js';
-import NostrEvents from '../hypertuna-desktop/NostrEvents.js'; // We'll need to adapt this for Bare
 
 
 // Global state
@@ -820,13 +817,27 @@ function setupProtocolHandlers(protocol) {
       const body = JSON.parse(request.body.toString());
       const { pubkey, token, identifier, subnetHash } = body;
       
+      // Resolve the public identifier to the internal relay key
+      let internalRelayKey = identifier;
+      if (identifier.includes(':')) {
+        const resolvedKey = await getRelayKeyFromPublicIdentifier(identifier);
+        if (resolvedKey) {
+          internalRelayKey = resolvedKey;
+          console.log(`[RelayServer] Resolved public identifier ${identifier} to internal relay key ${internalRelayKey.substring(0, 8)}...`);
+        } else {
+          console.warn(`[RelayServer] Could not resolve public identifier ${identifier} to an internal relay key. Using public identifier as key.`);
+        }
+      }
+      
       if (!pubkey || !token || !identifier || !subnetHash) {
-        console.error(`[RelayServer] Missing required fields`);
+        // This check should ideally happen earlier, but for now, it's fine here.
+        // The `internalRelayKey` might still be the `identifier` if resolution failed.
+        console.error(`[RelayServer] Missing required fields for finalization`);
         updateMetrics(false);
         return {
           statusCode: 400,
           headers: { 'content-type': 'application/json' },
-          body: Buffer.from(JSON.stringify({ error: 'Missing required fields' }))
+          body: Buffer.from(JSON.stringify({ error: 'Missing required fields for finalization' }))
         };
       }
       
@@ -838,7 +849,7 @@ function setupProtocolHandlers(protocol) {
       const authStore = getRelayAuthStore();
       
       // Store the authentication
-      authStore.addAuth(identifier, pubkey, token, subnetHash);
+      authStore.addAuth(internalRelayKey, pubkey, token, subnetHash);
       
       // Get relay profile to update members
       let profile = await getRelayProfileByKey(identifier);
@@ -1309,6 +1320,9 @@ protocol.handle('/authorize', async (request) => {
   // Handle relay subscriptions (from gateway)
   protocol.handle('/get/relay/:identifier/:connectionKey', async (request) => {
     const identifier = request.params.identifier;
+    // Extract auth token and subnet hash from request headers
+    const authToken = request.headers['x-auth-token'];
+    const subnetHash = request.headers['x-subnet-hash'];
     const connectionKey = request.params.connectionKey;
     
     console.log(`[RelayServer] Checking subscriptions for identifier: ${identifier}, connectionKey: ${connectionKey}`);
@@ -1328,6 +1342,62 @@ protocol.handle('/authorize', async (request) => {
                 };
             }
             console.log(`[RelayServer] Resolved public identifier ${identifier} to relay key ${relayKey.substring(0, 8)}...`);
+        }
+
+        // Get auth store and check if relay is protected
+        const authStore = getRelayAuthStore();
+        const authorizedPubkeys = authStore.getAuthorizedPubkeys(relayKey);
+
+        // Get relay profile to check auth configuration
+        let profile = await getRelayProfileByKey(relayKey);
+        if (!profile && identifier !== relayKey) {
+          profile = await getRelayProfileByPublicIdentifier(identifier);
+        }
+
+        const requiresAuth = authorizedPubkeys.length > 0 ||
+                            profile?.auth_config?.requiresAuth ||
+                            false;
+
+        console.log(`[RelayServer] Relay ${identifier} requires auth for read: ${requiresAuth}`);
+        console.log(`[RelayServer] Authorized pubkeys count: ${authorizedPubkeys.length}`);
+
+        // Handle authentication for protected relays
+        if (requiresAuth) {
+          // This endpoint is implicitly for REQ messages (fetching events for a subscription)
+          // Check if public read access is explicitly allowed
+          if (profile?.auth_config?.publicRead !== true) {
+            if (!authToken || !subnetHash) {
+              console.warn(`[RelayServer] Missing auth for read access on protected relay`);
+              updateMetrics(false);
+              return {
+                statusCode: 200, // Return 200 for valid NOSTR NOTICE response
+                headers: { 'content-type': 'application/json' },
+                body: Buffer.from(JSON.stringify([
+                  ['NOTICE', 'Authentication required for read access']
+                ]))
+              };
+            }
+
+            // Verify auth
+            const auth = authStore.verifyAuth(relayKey, authToken, subnetHash);
+            if (!auth) {
+              console.warn(`[RelayServer] Invalid auth for read access`);
+              updateMetrics(false);
+              return {
+                statusCode: 200, // Return 200 for valid NOSTR NOTICE response
+                headers: { 'content-type': 'application/json' },
+                body: Buffer.from(JSON.stringify([
+                  ['NOTICE', 'Invalid authentication']
+                ]))
+              };
+            }
+
+            console.log(`[RelayServer] Read access authenticated for ${auth.pubkey.substring(0, 8)}...`);
+            // Update last used timestamp
+            auth.lastUsed = Date.now();
+          } else {
+            console.log(`[RelayServer] Relay ${identifier} allows public read access despite requiring auth.`);
+          }
         }
         
         const [events, activeSubscriptionsUpdated] = await handleRelaySubscription(relayKey, connectionKey);
@@ -1412,12 +1482,8 @@ async function publishMemberAddEvent(identifier, pubkey, token, subnetHash) {
       pubkey: config.nostr_pubkey_hex
     };
     
-    // Sign the event
-    const eventId = await getEventHash(event);
-    event.id = eventId;
-    
-    const signature = await signEvent(event, config.nostr_nsec_hex);
-    event.sig = signature;
+    // Use NostrUtils to sign the event, which also generates the ID
+    event = await NostrUtils.signEvent(event, config.nostr_nsec_hex);
     
     // Publish to the relay
     await publishEventToRelay(identifier, event);
@@ -1455,29 +1521,6 @@ async function isRelayAuthProtected(identifier) {
     console.error(`[RelayServer] Error checking auth status:`, error);
     return false;
   }
-}
-
-// Helper function to get event hash
-async function getEventHash(event) {
-  const serialized = JSON.stringify([
-    0,
-    event.pubkey,
-    event.created_at,
-    event.kind,
-    event.tags,
-    event.content
-  ]);
-  
-  const hash = crypto.createHash('sha256').update(serialized).digest();
-  return Buffer.from(hash).toString('hex');
-}
-
-// Helper function to sign event
-async function signEvent(event, privateKey) {
-  const { nobleSecp256k1 } = await import('./pure-secp256k1-bare.js');
-  
-  const signature = await nobleSecp256k1.schnorr.sign(event.id, privateKey);
-  return Buffer.from(signature).toString('hex');
 }
 
 // Helper function to publish event to relay

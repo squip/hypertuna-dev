@@ -91,7 +91,7 @@ export class NostrUtils {
         
         // Generate the event ID (sha256 returns Uint8Array)
         const hashBytes = await secp.utils.sha256(
-            new TextEncoder().encode(eventData)
+            Buffer.from(eventData, 'utf8')
         );
         event.id = this.bytesToHex(hashBytes);
         
@@ -126,7 +126,7 @@ export class NostrUtils {
             ]);
             
             const hashBytes = await secp.utils.sha256(
-                new TextEncoder().encode(eventData)
+                Buffer.from(eventData, 'utf8')
             );
             const id = this.bytesToHex(hashBytes);
             

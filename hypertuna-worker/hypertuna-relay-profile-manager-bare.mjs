@@ -56,12 +56,42 @@ function ensureProfileSchema(profile) {
             authorizedUsers: [] // Array of { pubkey, token, subnets }
         };
     }
+    // NEW: Add auth_adds and auth_removes for granular control
+    if (!Array.isArray(profile.auth_adds)) {
+        profile.auth_adds = [];
+    }
+    if (!Array.isArray(profile.auth_removes)) {
+        profile.auth_removes = [];
+    }
     
     return profile;
 }
 
+// NEW FUNCTION: Calculate the final list of authorized users
+export function calculateAuthorizedUsers(auth_adds = [], auth_removes = []) {
+    const addMap = new Map(); // pubkey -> { token, subnets, ts }
+    for (const auth of auth_adds) {
+        addMap.set(auth.pubkey, auth);
+    }
+
+    const removeMap = new Map(); // pubkey -> ts
+    for (const rem of auth_removes) {
+        removeMap.set(rem.pubkey, rem.ts);
+    }
+
+    const finalAuthorizedUsers = [];
+    for (const [pubkey, auth] of addMap.entries()) {
+        const removeTs = removeMap.get(pubkey);
+        // An authorization is valid if it hasn't been removed, or if it was re-added after removal
+        if (!removeTs || auth.ts > removeTs) {
+            finalAuthorizedUsers.push(auth);
+        }
+    }
+    return finalAuthorizedUsers;
+}
+
 // Add a function to update auth token for a user
-export async function updateRelayAuthToken(identifier, pubkey, token, subnetHash) {
+export async function updateRelayAuthToken(identifier, pubkey, token, newSubnetHashes = []) {
     try {
         let profile = await getRelayProfileByKey(identifier);
         if (!profile) {
@@ -72,27 +102,39 @@ export async function updateRelayAuthToken(identifier, pubkey, token, subnetHash
         // Ensure schema
         profile = ensureProfileSchema(profile);
         
-        // Update auth tokens
-        profile.auth_tokens[pubkey] = token;
+        // NEW: Update auth_adds array
+        const existingAuthAddIndex = profile.auth_config.auth_adds.findIndex(a => a.pubkey === pubkey);
+        const newAuthEntry = { pubkey, token, subnets: newSubnetHashes, ts: Date.now() };
+
+        if (existingAuthAddIndex !== -1) {
+            // Update existing entry
+            const existingAuth = profile.auth_adds[existingAuthAddIndex];
+            existingAuth.token = token; // Always update token
+            // Merge new subnets with existing ones
+            newSubnetHashes.forEach(newHash => {
+                if (!existingAuth.subnets.includes(newHash)) {
+                    existingAuth.subnets.push(newHash);
+                }
+            });
+            // Ensure subnets array is unique
+            existingAuth.subnets = [...new Set(existingAuth.subnets)];
+
+            // Update timestamp
+            existingAuth.ts = newAuthEntry.ts;
+        } else {
+            // Add new entry
+            profile.auth_config.auth_adds.push(newAuthEntry);
+        }
+
+        // NEW: Remove from auth_removes if it exists there (re-adding a removed user)
+        profile.auth_config.auth_removes = profile.auth_config.auth_removes.filter(r => r.pubkey !== pubkey);
         
         // Update auth config
         profile.auth_config.requiresAuth = true;
         profile.auth_config.tokenProtected = true;
         
-        // Update authorized users
-        const existingUser = profile.auth_config.authorizedUsers.find(u => u.pubkey === pubkey);
-        if (existingUser) {
-            existingUser.token = token;
-            if (!existingUser.subnets.includes(subnetHash)) {
-                existingUser.subnets.push(subnetHash);
-            }
-        } else {
-            profile.auth_config.authorizedUsers.push({
-                pubkey,
-                token,
-                subnets: [subnetHash]
-            });
-        }
+        // Recalculate authorizedUsers based on the updated auth_adds and auth_removes
+        profile.auth_config.authorizedUsers = calculateAuthorizedUsers(profile.auth_config.auth_adds, profile.auth_config.auth_removes);
         
         profile.updated_at = new Date().toISOString();
         const saved = await saveRelayProfile(profile);
@@ -102,6 +144,37 @@ export async function updateRelayAuthToken(identifier, pubkey, token, subnetHash
         console.error(`[ProfileManager] Error updating auth token for ${identifier}:`, error);
         return null;
     }
+}
+
+// NEW FUNCTION: Remove authorization for a user
+export async function removeRelayAuth(identifier, pubkey) {
+    let profile = await getRelayProfileByKey(identifier);
+    if (!profile) {
+        profile = await getRelayProfileByPublicIdentifier(identifier);
+    }
+    if (!profile) return null;
+
+    profile = ensureProfileSchema(profile);
+
+    // Add to auth_removes
+    const existingAuthRemoveIndex = profile.auth_config.auth_removes.findIndex(r => r.pubkey === pubkey);
+    const removeTimestamp = Date.now();
+    if (existingAuthRemoveIndex !== -1) {
+        profile.auth_config.auth_removes[existingAuthRemoveIndex].ts = removeTimestamp;
+    } else {
+        profile.auth_config.auth_removes.push({ pubkey, ts: removeTimestamp });
+    }
+
+    // Remove from auth_adds (if it exists there)
+    profile.auth_config.auth_adds = profile.auth_config.auth_adds.filter(a => a.pubkey !== pubkey);
+
+    profile.updated_at = new Date().toISOString();
+
+    // Recalculate authorizedUsers
+    profile.auth_config.authorizedUsers = calculateAuthorizedUsers(profile.auth_config.auth_adds, profile.auth_config.auth_removes);
+
+    const saved = await saveRelayProfile(profile);
+    return saved ? profile : null;
 }
 
 /**
@@ -208,6 +281,14 @@ export async function saveRelayProfile(relayProfile) {
 
         // Ensure schema fields exist
         relayProfile = ensureProfileSchema(relayProfile);
+
+        // NEW: Ensure `authorizedUsers` is derived from `auth_adds` and `auth_removes` before saving
+        if (relayProfile.auth_config) {
+            relayProfile.auth_config.authorizedUsers = calculateAuthorizedUsers(
+                relayProfile.auth_config.auth_adds,
+                relayProfile.auth_config.auth_removes
+            );
+        }
         
         console.log(`[ProfileManager] Saving relay profile for ${relayProfile.relay_key}:`, {
             name: relayProfile.name,

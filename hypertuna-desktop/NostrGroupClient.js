@@ -1592,11 +1592,38 @@ async fetchMultipleProfiles(pubkeys) {
     _processGroupAddUserEvent(event) {
         const groupId = NostrEvents._getTagValue(event, 'h');
         if (!groupId) return;
+
         const addMap = this.kind9000Sets.get(groupId) || new Map();
         event.tags.forEach(tag => {
             if (tag[0] === 'p' && tag[1]) {
-                addMap.set(tag[1], { ts: event.created_at, roles: tag.slice(2) });
-                this.relevantPubkeys.add(tag[1]);
+                const pubkey = tag[1];
+                const rolesAndAuthData = tag.slice(2); // e.g., ['member', token, subnetHash]
+                const actualRoles = [rolesAndAuthData[0]]; // 'member' or 'admin'
+                const token = rolesAndAuthData[1]; // The auth token
+                const subnetHashes = rolesAndAuthData.slice(2); // All subsequent elements are subnet hashes
+
+                addMap.set(pubkey, { ts: event.created_at, roles: actualRoles });
+                this.relevantPubkeys.add(pubkey);
+
+                // If token and subnetHash are present, send to worker for auth data update
+                if (token && subnetHash && window.workerPipe) {
+                    const relayKey = this.publicToInternalMap.get(groupId) || null;
+                    const msg = {
+                        type: 'update-auth-data',
+                        data: {
+                            relayKey,
+                            publicIdentifier: groupId,
+                            pubkey,
+                            token,
+                            subnetHashes // Pass the array of subnet hashes
+                        }
+                    };
+                    try {
+                        window.workerPipe.write(JSON.stringify(msg) + '\n');
+                    } catch (e) {
+                        console.error('Failed to send update-auth-data to worker', e);
+                    }
+                }
             }
         });
         this.kind9000Sets.set(groupId, addMap);
@@ -1609,8 +1636,27 @@ async fetchMultipleProfiles(pubkeys) {
         const remMap = this.kind9001Sets.get(groupId) || new Map();
         event.tags.forEach(tag => {
             if (tag[0] === 'p' && tag[1]) {
+                const pubkey = tag[1];
                 remMap.set(tag[1], event.created_at);
                 this.relevantPubkeys.add(tag[1]);
+
+                // NEW: Send message to worker to remove auth data
+                if (window.workerPipe) {
+                    const relayKey = this.publicToInternalMap.get(groupId) || null;
+                    const msg = {
+                        type: 'remove-auth-data',
+                        data: {
+                            relayKey,
+                            publicIdentifier: groupId,
+                            pubkey
+                        }
+                    };
+                    try {
+                        window.workerPipe.write(JSON.stringify(msg) + '\n');
+                    } catch (e) {
+                        console.error('Failed to send remove-auth-data to worker', e);
+                    }
+                }
             }
         });
         this.kind9001Sets.set(groupId, remMap);

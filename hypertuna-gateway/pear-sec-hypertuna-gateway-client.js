@@ -570,16 +570,24 @@ async function forwardCallbackToPeer(peer, path, requestData, connectionPool) {
   }
 }
  
- async function getEventsFromPeerHyperswarm(peerPublicKey, relayKey, connectionKey, connectionPool) {
+ async function getEventsFromPeerHyperswarm(peerPublicKey, relayKey, connectionKey, connectionPool, authToken = null, subnetHash = null) {
   try {
     console.log(`[GetEvents] Checking for events - relay: ${relayKey}, connection: ${connectionKey}`);
     
     const connection = await connectionPool.getConnection(peerPublicKey);
     
+    const headers = { 'accept': 'application/json' };
+    if (authToken) {
+      headers['x-auth-token'] = authToken;
+    }
+    if (subnetHash) {
+      headers['x-subnet-hash'] = subnetHash;
+    }
+
     const response = await connection.sendRequest({
       method: 'GET',
       path: `/get/relay/${relayKey}/${connectionKey}`,
-      headers: { 'accept': 'application/json' }
+      headers: headers
     });
     
     if (response.statusCode !== 200) {

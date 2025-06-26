@@ -13,7 +13,9 @@ import {
   getAllRelayProfiles,
   getRelayProfileByKey,
   saveRelayProfile,
-  updateRelayMembers,
+  removeRelayAuth, // <-- NEW IMPORT
+  updateRelayMembers, // This is likely not used directly anymore for member_adds/removes
+  updateRelayAuthToken, // <-- NEW IMPORT
   updateRelayMemberSets,
   calculateMembers
 } from './hypertuna-relay-profile-manager-bare.mjs'
@@ -317,6 +319,30 @@ if (workerPipe) {
                 }
               }
               break
+
+            case 'update-auth-data':
+              console.log('[Worker] Update auth data requested:', message.data);
+              if (relayServer) {
+                try {
+                  const { relayKey, publicIdentifier, pubkey, token, subnetHash } = message.data;
+                  const identifier = relayKey || publicIdentifier;
+                  if (!identifier) {
+                    throw new Error('No identifier provided for auth data update');
+                  }
+                  await updateRelayAuthToken(identifier, pubkey, token, subnetHash);
+                  sendMessage({
+                    type: 'auth-data-updated',
+                    identifier: identifier,
+                    pubkey: pubkey
+                  });
+                } catch (err) {
+                  sendMessage({
+                    type: 'error',
+                    message: `Failed to update auth data: ${err.message}`
+                  });
+                }
+              }
+              break;
               
             case 'get-relays':
               console.log('[Worker] Get relays requested')
@@ -336,6 +362,35 @@ if (workerPipe) {
                 }
               }
               break
+
+            case 'remove-auth-data':
+              console.log('[Worker] Remove auth data requested:', message.data);
+              if (relayServer) {
+                try {
+                  const { relayKey, publicIdentifier, pubkey } = message.data;
+                  const identifier = relayKey || publicIdentifier;
+                  if (!identifier) {
+                    throw new Error('No identifier provided for auth data removal');
+                  }
+                  // Call the new function to remove auth
+                  await removeRelayAuth(identifier, pubkey);
+                  // Also remove from in-memory auth store if it's there
+                  const authStore = getRelayAuthStore();
+                  authStore.removeAuth(identifier, pubkey);
+
+                  sendMessage({
+                    type: 'auth-data-removed',
+                    identifier: identifier,
+                    pubkey: pubkey
+                  });
+                } catch (err) {
+                  sendMessage({
+                    type: 'error',
+                    message: `Failed to remove auth data: ${err.message}`
+                  });
+                }
+              }
+              break;
               
             case 'get-health':
               console.log('[Worker] Get health requested')

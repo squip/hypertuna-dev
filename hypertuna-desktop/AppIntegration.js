@@ -1612,7 +1612,10 @@ App.syncHypertunaConfigToFile = async function() {
         document.getElementById('btn-cancel-auth').classList.add('hidden');
         
         // Generate QR code for mobile authorization
-        const mobileAuthUrl = `${window.location.origin}/authorize?token=${authResult.authToken}`;
+        // Use gateway URL from config instead of window.location.origin
+        const gatewayUrl = this.currentUser.hypertunaConfig?.gatewayUrl || HypertunaUtils.DEFAULT_GATEWAY_URL;
+        const mobileAuthUrl = `${gatewayUrl}/authorize?token=${authResult.authToken}`;
+
         document.getElementById('auth-url').value = mobileAuthUrl;
         
         // Generate QR code

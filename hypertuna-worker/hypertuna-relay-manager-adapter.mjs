@@ -11,7 +11,8 @@ import { RelayManager } from './hypertuna-relay-manager-bare.mjs';
 import { 
     initRelayProfilesStorage, 
     getAllRelayProfiles, 
-    getRelayProfileByKey, 
+    getRelayProfileByKey,
+    calculateAuthorizedUsers, // NEW IMPORT
     saveRelayProfile, 
     removeRelayProfile,
 importLegacyRelayProfiles,
@@ -472,8 +473,13 @@ export async function autoConnectStoredRelays(config) {
                 if (profile.auth_config && profile.auth_config.requiresAuth) {
                     console.log(`[RelayAdapter] Loading auth configuration for relay ${profile.relay_key}`);
                     
+                    // NEW: Calculate authorizedUsers from auth_adds and auth_removes
+                    const authorizedUsers = calculateAuthorizedUsers(
+                        profile.auth_config.auth_adds || [],
+                        profile.auth_config.auth_removes || []
+                    );
                     const authData = {};
-                    profile.auth_config.authorizedUsers.forEach(user => {
+                    authorizedUsers.forEach(user => { // Use the calculated list
                         authData[user.pubkey] = {
                             token: user.token,
                             allowedSubnets: user.subnets || [],

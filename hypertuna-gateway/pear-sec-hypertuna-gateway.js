@@ -501,7 +501,7 @@ async function startEventChecking(connectionKey) {
       return;
     }
 
-    const { ws, relayKey: identifier } = connectionData;
+    const { ws, relayKey: identifier, authToken, subnetHash } = connectionData;
     
     if (ws.readyState !== WebSocket.OPEN) {
       console.log(`[${new Date().toISOString()}] WebSocket for ${connectionKey} not open (state: ${ws.readyState}), stopping event checking`);
@@ -556,7 +556,9 @@ async function startEventChecking(connectionKey) {
         healthyPeer.publicKey,
         identifier,
         connectionKey,
-        connectionPool
+        connectionPool,
+        authToken, // Pass auth token to the client function
+        subnetHash // Pass subnet hash to the client function
       );
       
       if (events && events.length > 0) {
@@ -802,6 +804,104 @@ app.post('/register', async (req, res) => {
     timestamp: new Date().toISOString()
   });
 });
+
+// ============================
+// Authorization Endpoints
+// ============================
+
+/**
+ * Shared function to process authorization requests from both GET and POST
+ * @param {Object} req - Express request object
+ * @param {Object} res - Express response object
+ * @param {string|null} initialToken - Token from GET query
+ * @param {string|null} initialRelayKey - Relay key from POST body
+ */
+async function processAuthorizeRequest(req, res, initialToken = null, initialRelayKey = null) {
+  console.log(`[${new Date().toISOString()}] ========================================`);
+  console.log(`[${new Date().toISOString()}] AUTHORIZE REQUEST`);
+
+  let token = initialToken;
+  let relayKey = initialRelayKey;
+  const subnetHash = req.hashedSubnet; // Already computed by middleware
+
+  // If it's a POST request, try to get token/relayKey from body
+  if (req.method === 'POST' && req.body) {
+    try {
+      const body = req.body;
+      token = body.token || token;
+      relayKey = body.relayKey || relayKey;
+    } catch (e) {
+      console.warn(`[${new Date().toISOString()}] Could not parse request body for /authorize POST:`, e.message);
+    }
+  }
+
+  if (!token) {
+    console.error(`[${new Date().toISOString()}] Missing token for authorization`);
+    return res.status(400).send('<h1>Authorization Failed</h1><p>Missing token.</p>');
+  }
+
+  console.log(`[${new Date().toISOString()}] Token: ${token.substring(0, 16)}...`);
+  console.log(`[${new Date().toISOString()}] Relay: ${relayKey || 'not specified'}`);
+  console.log(`[${new Date().toISOString()}] Subnet: ${subnetHash?.substring(0, 8)}...`);
+
+  try {
+    let healthyPeer = null;
+
+    if (relayKey) {
+      healthyPeer = await findHealthyPeerForRelay(relayKey);
+    } else {
+      // For QR code flow, no specific relay is known. Find any healthy peer.
+      const hyperswarmPeers = activePeers.filter(p => p && p.mode === 'hyperswarm');
+      console.log(`[${new Date().toISOString()}] Searching for any healthy peer among ${hyperswarmPeers.length} candidates...`);
+      for (const peer of hyperswarmPeers) {
+        if (peerHealthManager.isPeerHealthy(peer.publicKey)) {
+          healthyPeer = peer;
+          console.log(`[${new Date().toISOString()}] Found already healthy peer ${peer.publicKey.substring(0, 8)}`);
+          break;
+        }
+      }
+    }
+
+    if (!healthyPeer) {
+      console.error(`[${new Date().toISOString()}] No healthy peers available to process /authorize request`);
+      return res.status(503).send('<h1>Service Unavailable</h1><p>No healthy peers available to process the authorization.</p>');
+    }
+    
+    console.log(`[${new Date().toISOString()}] Selected peer for /authorize: ${healthyPeer.publicKey.substring(0, 8)}...`);
+
+    // Forward the request to the peer's /authorize endpoint
+    const result = await forwardCallbackToPeer(
+      healthyPeer,
+      '/authorize',
+      { token, relayKey, subnetHash }, // Pass data in body for worker
+      connectionPool
+    );
+
+    // Respond to the client (mobile browser) with user-friendly HTML
+    if (result.success) {
+      res.status(200).send('<h1>Mobile Device Authorized</h1><p>You can now close this window.</p>');
+    } else {
+      res.status(result.statusCode || 500).send(`<h1>Authorization Failed</h1><p>${result.error || 'An unknown error occurred.'}</p>`);
+    }
+  } catch (error) {
+    console.error(`[${new Date().toISOString()}] Error processing /authorize request:`, error.message);
+    res.status(500).send(`<h1>Internal Server Error</h1><p>${error.message}</p>`);
+  }
+}
+
+// Handle GET requests for /authorize (from QR code scan)
+app.get('/authorize', async (req, res) => {
+  console.log(`[${new Date().toISOString()}] AUTHORIZE GET REQUEST (Mobile subnet via QR)`);
+  const token = req.query.token || null; // Token is in query for GET
+  await processAuthorizeRequest(req, res, token, null); // relayKey is null for QR code
+});
+
+// Handle POST requests for /authorize (if a client sends POST directly)
+app.post('/authorize', async (req, res) => {
+  console.log(`[${new Date().toISOString()}] AUTHORIZE POST REQUEST (Mobile subnet)`);
+  await processAuthorizeRequest(req, res, null, null); // Token and relayKey will be in req.body
+});
+
 
 // ============================
 // Join Relay Endpoint
