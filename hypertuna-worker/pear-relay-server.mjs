@@ -7,6 +7,8 @@ import crypto from 'hypercore-crypto';
 import { setTimeout, setInterval, clearInterval } from 'bare-timers';
 import https from 'bare-https';
 import { URL } from 'bare-url';
+import { initializeChallengeManager, getChallengeManager } from './challenge-manager.mjs';
+import { getRelayAuthStore } from './relay-auth-store.mjs';
 
 // Import relay management functions
 import {
@@ -28,6 +30,15 @@ import {
   getRelayKeyFromPublicIdentifier,
   isRelayActiveByPublicIdentifier 
 } from './relay-lookup-utils.mjs';
+
+import { 
+  updateRelayMemberSets,
+  getRelayProfileByKey,
+  getRelayProfileByPublicIdentifier
+} from './hypertuna-relay-profile-manager-bare.mjs';
+import { NostrUtils } from './nostr-utils.js';
+import NostrEvents from '../hypertuna-desktop/NostrEvents.js'; // We'll need to adapt this for Bare
+
 
 // Global state
 let config = null;
@@ -97,6 +108,14 @@ export async function initializeRelayServer(customConfig = {}) {
   
   // Start Hyperswarm server
   await startHyperswarmServer();
+
+  // Initialize challenge manager with relay private key
+  console.log('[RelayServer] Initializing challenge manager...');
+  initializeChallengeManager(config.proxy_privateKey);
+  
+  // Initialize auth store
+  const authStore = getRelayAuthStore();
+  console.log('[RelayServer] Auth store initialized');
   
   // Auto-connect to stored relays
   try {
@@ -655,7 +674,334 @@ function setupProtocolHandlers(protocol) {
       };
     }
   });
+
+  // Handle join requests
+  protocol.handle('/post/join/:identifier', async (request) => {
+    const identifier = request.params.identifier;
+    console.log(`[RelayServer] Join request for relay: ${identifier}`);
+    
+    try {
+      const body = JSON.parse(request.body.toString());
+      const { event, requesterSubnetHash, callbackUrls } = body;
+      
+      if (!event || !requesterSubnetHash) {
+        updateMetrics(false);
+        return {
+          statusCode: 400,
+          headers: { 'content-type': 'application/json' },
+          body: Buffer.from(JSON.stringify({ error: 'Missing required fields' }))
+        };
+      }
+      
+      // Verify this is a kind 9021 event
+      if (event.kind !== 9021) {
+        updateMetrics(false);
+        return {
+          statusCode: 400,
+          headers: { 'content-type': 'application/json' },
+          body: Buffer.from(JSON.stringify({ error: 'Invalid event kind' }))
+        };
+      }
+      
+      // TODO: Publish the event to the relay (implement in next phase)
+      console.log(`[RelayServer] Would publish kind 9021 event from ${event.pubkey.substring(0, 8)}...`);
+      
+      // Generate challenge
+      const challengeManager = getChallengeManager();
+      const { challenge, relayPubkey } = challengeManager.createChallenge(event.pubkey, identifier);
+      
+      console.log(`[RelayServer] Generated challenge for ${event.pubkey.substring(0, 8)}...`);
+      
+      // Prepare response with callback URLs
+      const response = {
+        challenge,
+        relayPubkey,
+        verifyUrl: callbackUrls?.verifyUrl || `/verify-ownership`,
+        finalUrl: callbackUrls?.finalUrl || `/finalize-auth`
+      };
+      
+      updateMetrics(true);
+      return {
+        statusCode: 200,
+        headers: { 'content-type': 'application/json' },
+        body: Buffer.from(JSON.stringify(response))
+      };
+      
+    } catch (error) {
+      console.error(`[RelayServer] Error processing join request:`, error);
+      updateMetrics(false);
+      return {
+        statusCode: 500,
+        headers: { 'content-type': 'application/json' },
+        body: Buffer.from(JSON.stringify({ error: error.message }))
+      };
+    }
+  });
+
+  // Handle verify ownership
+  protocol.handle('/verify-ownership', async (request) => {
+    console.log(`[RelayServer] ========================================`);
+    console.log(`[RelayServer] VERIFY OWNERSHIP REQUEST`);
+    
+    try {
+      const body = JSON.parse(request.body.toString());
+      const { pubkey, ciphertext, iv } = body;
+      
+      if (!pubkey || !ciphertext || !iv) {
+        console.error(`[RelayServer] Missing required fields`);
+        updateMetrics(false);
+        return {
+          statusCode: 400,
+          headers: { 'content-type': 'application/json' },
+          body: Buffer.from(JSON.stringify({ error: 'Missing required fields' }))
+        };
+      }
+      
+      console.log(`[RelayServer] Verifying for pubkey: ${pubkey.substring(0, 8)}...`);
+      console.log(`[RelayServer] Ciphertext length: ${ciphertext.length}`);
+      console.log(`[RelayServer] IV length: ${iv.length}`);
+      
+      // Verify the challenge
+      const challengeManager = getChallengeManager();
+      const result = await challengeManager.verifyChallenge(pubkey, ciphertext, iv);
+      
+      if (!result.success) {
+        console.error(`[RelayServer] Verification failed: ${result.error}`);
+        updateMetrics(false);
+        return {
+          statusCode: 400,
+          headers: { 'content-type': 'application/json' },
+          body: Buffer.from(JSON.stringify({ error: result.error }))
+        };
+      }
+      
+      console.log(`[RelayServer] Verification SUCCESSFUL`);
+      console.log(`[RelayServer] Token: ${result.token.substring(0, 16)}...`);
+      console.log(`[RelayServer] Identifier: ${result.identifier}`);
+      console.log(`[RelayServer] ========================================`);
+      
+      updateMetrics(true);
+      return {
+        statusCode: 200,
+        headers: { 'content-type': 'application/json' },
+        body: Buffer.from(JSON.stringify({
+          success: true,
+          token: result.token,
+          identifier: result.identifier
+        }))
+      };
+      
+    } catch (error) {
+      console.error(`[RelayServer] ========================================`);
+      console.error(`[RelayServer] VERIFY OWNERSHIP ERROR`);
+      console.error(`[RelayServer] Error:`, error.message);
+      console.error(`[RelayServer] Stack:`, error.stack);
+      console.error(`[RelayServer] ========================================`);
+      
+      updateMetrics(false);
+      return {
+        statusCode: 500,
+        headers: { 'content-type': 'application/json' },
+        body: Buffer.from(JSON.stringify({ error: error.message }))
+      };
+    }
+  });
+
+  protocol.handle('/finalize-auth', async (request) => {
+    console.log(`[RelayServer] ========================================`);
+    console.log(`[RelayServer] FINALIZE AUTH REQUEST`);
+    
+    try {
+      const body = JSON.parse(request.body.toString());
+      const { pubkey, token, identifier, subnetHash } = body;
+      
+      if (!pubkey || !token || !identifier || !subnetHash) {
+        console.error(`[RelayServer] Missing required fields`);
+        updateMetrics(false);
+        return {
+          statusCode: 400,
+          headers: { 'content-type': 'application/json' },
+          body: Buffer.from(JSON.stringify({ error: 'Missing required fields' }))
+        };
+      }
+      
+      console.log(`[RelayServer] Finalizing for pubkey: ${pubkey.substring(0, 8)}...`);
+      console.log(`[RelayServer] Identifier: ${identifier}`);
+      console.log(`[RelayServer] Subnet hash: ${subnetHash.substring(0, 8)}...`);
+      
+      // Get auth store
+      const authStore = getRelayAuthStore();
+      
+      // Store the authentication
+      authStore.addAuth(identifier, pubkey, token, subnetHash);
+      
+      // Get relay profile to update members
+      let profile = await getRelayProfileByKey(identifier);
+      if (!profile) {
+        profile = await getRelayProfileByPublicIdentifier(identifier);
+      }
+      
+      if (profile) {
+        // Update member lists
+        const currentAdds = profile.member_adds || [];
+        const currentRemoves = profile.member_removes || [];
+        
+        // Add new member
+        const memberAdd = {
+          pubkey: pubkey,
+          ts: Date.now()
+        };
+        
+        // Check if already in adds
+        const existingIndex = currentAdds.findIndex(m => m.pubkey === pubkey);
+        if (existingIndex >= 0) {
+          currentAdds[existingIndex] = memberAdd;
+        } else {
+          currentAdds.push(memberAdd);
+        }
+        
+        // Update profile
+        await updateRelayMemberSets(identifier, currentAdds, currentRemoves);
+        
+        // Publish kind 9000 event
+        await publishMemberAddEvent(identifier, pubkey, token, subnetHash);
+      }
+      
+      // Generate relay connection URL
+      const relayUrl = `wss://${config.proxy_server_address}/${identifier}?token=${token}`;
+      
+      console.log(`[RelayServer] Auth finalized successfully`);
+      console.log(`[RelayServer] Relay URL: ${relayUrl}`);
+      console.log(`[RelayServer] ========================================`);
+      
+      updateMetrics(true);
+      return {
+        statusCode: 200,
+        headers: { 'content-type': 'application/json' },
+        body: Buffer.from(JSON.stringify({
+          success: true,
+          relayKey: identifier,
+          authToken: token,
+          relayUrl: relayUrl
+        }))
+      };
+      
+    } catch (error) {
+      console.error(`[RelayServer] ========================================`);
+      console.error(`[RelayServer] FINALIZE AUTH ERROR`);
+      console.error(`[RelayServer] Error:`, error.message);
+      console.error(`[RelayServer] Stack:`, error.stack);
+      console.error(`[RelayServer] ========================================`);
+      
+      updateMetrics(false);
+      return {
+        statusCode: 500,
+        headers: { 'content-type': 'application/json' },
+        body: Buffer.from(JSON.stringify({ error: error.message }))
+      };
+    }
+  });
+
   
+  // Add authorize endpoint for mobile subnet addition
+protocol.handle('/authorize', async (request) => {
+  console.log(`[RelayServer] ========================================`);
+  console.log(`[RelayServer] AUTHORIZE REQUEST (Mobile subnet)`);
+  
+  try {
+    const body = JSON.parse(request.body.toString());
+    const { token, relayKey, subnetHash } = body;
+    
+    if (!token) {
+      console.error(`[RelayServer] Missing token`);
+      updateMetrics(false);
+      return {
+        statusCode: 400,
+        headers: { 'content-type': 'application/json' },
+        body: Buffer.from(JSON.stringify({ error: 'Missing token' }))
+      };
+    }
+    
+    console.log(`[RelayServer] Token: ${token.substring(0, 16)}...`);
+    console.log(`[RelayServer] Relay: ${relayKey || 'not specified'}`);
+    console.log(`[RelayServer] Subnet: ${subnetHash?.substring(0, 8)}...`);
+    
+    const authStore = getRelayAuthStore();
+    
+    // Find the auth entry by token
+    let foundAuth = null;
+    let foundRelay = null;
+    
+    if (relayKey) {
+      // Check specific relay
+      const auth = authStore.verifyAuth(relayKey, token, subnetHash);
+      if (auth) {
+        foundAuth = auth;
+        foundRelay = relayKey;
+      }
+    } else {
+      // Search all relays (less efficient but supports QR code without relay info)
+      const activeRelays = await getActiveRelays();
+      for (const relay of activeRelays) {
+        const auth = authStore.getAuthByToken(relay.relayKey, token);
+        if (auth) {
+          foundAuth = auth;
+          foundRelay = relay.relayKey;
+          break;
+        }
+      }
+    }
+    
+    if (!foundAuth) {
+      console.error(`[RelayServer] Invalid token`);
+      updateMetrics(false);
+      return {
+        statusCode: 403,
+        headers: { 'content-type': 'application/json' },
+        body: Buffer.from(JSON.stringify({ error: 'Invalid token' }))
+      };
+    }
+    
+    // Add the new subnet
+    const added = authStore.addSubnet(foundRelay, foundAuth.pubkey, subnetHash);
+    
+    if (added) {
+      console.log(`[RelayServer] Added subnet for ${foundAuth.pubkey.substring(0, 8)}...`);
+      console.log(`[RelayServer] ========================================`);
+      
+      updateMetrics(true);
+      return {
+        statusCode: 200,
+        headers: { 'content-type': 'application/json' },
+        body: Buffer.from(JSON.stringify({
+          success: true,
+          message: 'Mobile device authorized'
+        }))
+      };
+    } else {
+      updateMetrics(false);
+      return {
+        statusCode: 400,
+        headers: { 'content-type': 'application/json' },
+        body: Buffer.from(JSON.stringify({ error: 'Failed to add subnet' }))
+      };
+    }
+    
+  } catch (error) {
+    console.error(`[RelayServer] ========================================`);
+    console.error(`[RelayServer] AUTHORIZE ERROR`);
+    console.error(`[RelayServer] Error:`, error.message);
+    console.error(`[RelayServer] ========================================`);
+    
+    updateMetrics(false);
+    return {
+      statusCode: 500,
+      headers: { 'content-type': 'application/json' },
+      body: Buffer.from(JSON.stringify({ error: error.message }))
+    };
+  }
+});
+
   // Disconnect from relay
   protocol.handle('/relay/:identifier/disconnect', async (request) => {
     const identifier = request.params.identifier;
@@ -733,87 +1079,119 @@ function setupProtocolHandlers(protocol) {
     console.log(`[RelayServer] Relay message for identifier: ${identifier}, connectionKey: ${connectionKey}`);
     
     try {
-        // Check if identifier is a public identifier or relay key
-        let relayKey = identifier;
-        if (identifier.includes(':')) {
-            // This is a public identifier, look up the relay key
-            relayKey = await getRelayKeyFromPublicIdentifier(identifier);
-            if (!relayKey) {
-                console.error(`[RelayServer] No relay found for public identifier: ${identifier}`);
-                updateMetrics(false);
-                return {
-                    statusCode: 404,
-                    headers: { 'content-type': 'application/json' },
-                    body: Buffer.from(JSON.stringify({ error: 'Relay not found' }))
-                };
-            }
-            console.log(`[RelayServer] Resolved public identifier ${identifier} to relay key ${relayKey.substring(0, 8)}...`);
+      // Extract auth token and subnet hash from request headers
+      const authToken = request.headers['x-auth-token'];
+      const subnetHash = request.headers['x-subnet-hash'];
+      
+      // Check if identifier is a public identifier or relay key
+      let relayKey = identifier;
+      if (identifier.includes(':')) {
+        relayKey = await getRelayKeyFromPublicIdentifier(identifier);
+        if (!relayKey) {
+          console.error(`[RelayServer] No relay found for public identifier: ${identifier}`);
+          updateMetrics(false);
+          return {
+            statusCode: 404,
+            headers: { 'content-type': 'application/json' },
+            body: Buffer.from(JSON.stringify({ error: 'Relay not found' }))
+          };
         }
+      }
+      
+      // Parse the message
+      let nostrMessage;
+      if (message && message.type === 'Buffer' && Array.isArray(message.data)) {
+        const messageStr = Buffer.from(message.data).toString('utf8');
+        try {
+          nostrMessage = JSON.parse(messageStr);
+        } catch (parseError) {
+          throw new Error(`Failed to parse NOSTR message: ${parseError.message}`);
+        }
+      } else {
+        nostrMessage = message;
+      }
+  
+      if (!Array.isArray(nostrMessage)) {
+        throw new Error('Invalid NOSTR message format - expected array');
+      }
+  
+      // Check authentication for write operations
+      let event = null;
+      if (nostrMessage[0] === 'EVENT') {
+        event = nostrMessage.length === 2 ? nostrMessage[1] : nostrMessage[2];
         
-        // Continue with existing message handling logic
-        let nostrMessage;
-        if (message && message.type === 'Buffer' && Array.isArray(message.data)) {
-            const messageStr = Buffer.from(message.data).toString('utf8');
-            try {
-                nostrMessage = JSON.parse(messageStr);
-            } catch (parseError) {
-                throw new Error(`Failed to parse NOSTR message: ${parseError.message}`);
-            }
-        } else {
-            nostrMessage = message;
-        }
-
-        if (!Array.isArray(nostrMessage)) {
-            throw new Error('Invalid NOSTR message format - expected array');
-        }
-
-        if (nostrMessage.length < 2) {
-            throw new Error('Invalid NOSTR message format - insufficient elements');
-        }
+        // Check if auth is required
+        const authStore = getRelayAuthStore();
+        const authorizedPubkeys = authStore.getAuthorizedPubkeys(relayKey);
         
-        const responses = [];
-        const sendResponse = (response) => {
-            console.log(`[RelayServer] Queueing response for relay ${relayKey}`);
-            responses.push(response);
-        };
-
-        // Membership enforcement
-        const members = await getRelayMembers(relayKey);
-        let event = null;
-        if (nostrMessage[0] === 'EVENT') {
-            event = nostrMessage.length === 2 ? nostrMessage[1] : nostrMessage[2];
-        }
-
-        if (event && Array.isArray(members) && members.length > 0 && !members.includes(event.pubkey)) {
-            console.warn(`[RelayServer] Rejected event from pubkey ${event.pubkey} for relay ${identifier}`);
+        if (authorizedPubkeys.length > 0) {
+          // This is a token-protected relay
+          console.log(`[RelayServer] Checking auth for protected relay ${identifier}`);
+          
+          if (!authToken || !subnetHash) {
+            console.warn(`[RelayServer] Missing auth token or subnet hash`);
             updateMetrics(false);
             return {
-                statusCode: 403,
-                headers: { 'content-type': 'application/json' },
-                body: Buffer.from(JSON.stringify({ error: 'Pubkey not authorized for relay' }))
+              statusCode: 403,
+              headers: { 'content-type': 'application/json' },
+              body: Buffer.from(JSON.stringify({ error: 'Authentication required' }))
             };
+          }
+          
+          // Verify the auth
+          const auth = authStore.verifyAuth(relayKey, authToken, subnetHash);
+          if (!auth) {
+            console.warn(`[RelayServer] Invalid auth token or subnet`);
+            updateMetrics(false);
+            return {
+              statusCode: 403,
+              headers: { 'content-type': 'application/json' },
+              body: Buffer.from(JSON.stringify({ error: 'Invalid authentication' }))
+            };
+          }
+          
+          // Check if the event pubkey matches the authenticated user
+          if (event && event.pubkey !== auth.pubkey) {
+            console.warn(`[RelayServer] Event pubkey ${event.pubkey} doesn't match auth pubkey ${auth.pubkey}`);
+            updateMetrics(false);
+            return {
+              statusCode: 403,
+              headers: { 'content-type': 'application/json' },
+              body: Buffer.from(JSON.stringify({ error: 'Pubkey mismatch' }))
+            };
+          }
+          
+          console.log(`[RelayServer] Auth verified for ${auth.pubkey.substring(0, 8)}...`);
         }
-        
-        await handleRelayMessage(relayKey, nostrMessage, sendResponse, connectionKey);
-        
-        console.log(`[RelayServer] Handled message, ${responses.length} responses queued`);
-        updateMetrics(true);
-        return {
-            statusCode: 200,
-            headers: { 'content-type': 'text/plain' },
-            body: Buffer.from(responses.map(r => JSON.stringify(r)).join('\n'))
-        };
-        
+      }
+      
+      // Continue with normal message handling
+      const responses = [];
+      const sendResponse = (response) => {
+        console.log(`[RelayServer] Queueing response for relay ${relayKey}`);
+        responses.push(response);
+      };
+      
+      await handleRelayMessage(relayKey, nostrMessage, sendResponse, connectionKey);
+      
+      console.log(`[RelayServer] Handled message, ${responses.length} responses queued`);
+      updateMetrics(true);
+      return {
+        statusCode: 200,
+        headers: { 'content-type': 'text/plain' },
+        body: Buffer.from(responses.map(r => JSON.stringify(r)).join('\n'))
+      };
+      
     } catch (error) {
-        console.error(`[RelayServer] Error processing message:`, error);
-        updateMetrics(false);
-        return {
-            statusCode: 500,
-            headers: { 'content-type': 'application/json' },
-            body: Buffer.from(JSON.stringify([['NOTICE', `Error: ${error.message}`]]))
-        };
+      console.error(`[RelayServer] Error processing message:`, error);
+      updateMetrics(false);
+      return {
+        statusCode: 500,
+        headers: { 'content-type': 'application/json' },
+        body: Buffer.from(JSON.stringify([['NOTICE', `Error: ${error.message}`]]))
+      };
     }
-});
+  });
   
   // Handle relay subscriptions (from gateway)
   protocol.handle('/get/relay/:identifier/:connectionKey', async (request) => {
@@ -902,6 +1280,76 @@ function setupProtocolHandlers(protocol) {
   });
   
   console.log('[RelayServer] Protocol handlers setup complete');
+}
+
+// Helper function to publish member add event (kind 9000)
+async function publishMemberAddEvent(identifier, pubkey, token, subnetHash) {
+  try {
+    console.log(`[RelayServer] Publishing kind 9000 event for ${pubkey.substring(0, 8)}...`);
+    
+    // Create the event
+    const event = {
+      kind: 9000,
+      content: `Adding user ${pubkey} with auth token`,
+      created_at: Math.floor(Date.now() / 1000),
+      tags: [
+        ['h', identifier],
+        ['p', pubkey, 'member', token, subnetHash]
+      ],
+      pubkey: config.nostr_pubkey_hex
+    };
+    
+    // Sign the event
+    const eventId = await getEventHash(event);
+    event.id = eventId;
+    
+    const signature = await signEvent(event, config.nostr_nsec_hex);
+    event.sig = signature;
+    
+    // Publish to the relay
+    await publishEventToRelay(identifier, event);
+    
+    console.log(`[RelayServer] Published kind 9000 event: ${event.id.substring(0, 8)}...`);
+    
+  } catch (error) {
+    console.error(`[RelayServer] Error publishing member add event:`, error);
+  }
+}
+
+// Helper function to get event hash
+async function getEventHash(event) {
+  const serialized = JSON.stringify([
+    0,
+    event.pubkey,
+    event.created_at,
+    event.kind,
+    event.tags,
+    event.content
+  ]);
+  
+  const hash = crypto.createHash('sha256').update(serialized).digest();
+  return Buffer.from(hash).toString('hex');
+}
+
+// Helper function to sign event
+async function signEvent(event, privateKey) {
+  const { nobleSecp256k1 } = await import('./pure-secp256k1-bare.js');
+  
+  const signature = await nobleSecp256k1.schnorr.sign(event.id, privateKey);
+  return Buffer.from(signature).toString('hex');
+}
+
+// Helper function to publish event to relay
+async function publishEventToRelay(identifier, event) {
+  // This would integrate with your relay manager
+  // For now, we'll store it for later processing
+  console.log(`[RelayServer] Would publish event to relay ${identifier}:`, event);
+  
+  // TODO: Integrate with relay manager in next phase
+  // const relayManager = activeRelays.get(identifier);
+  // if (relayManager) {
+  //   await relayManager.publishEvent(event);
+  // }
 }
 
 // Update health state
