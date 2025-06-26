@@ -435,24 +435,29 @@ function handleWebSocket(ws, identifier, authToken = null) {
       }
 
       try {
-        // Get connection data including auth token
-        const connData = wsConnections.get(connectionKey);
-        
         const responses = await forwardMessageToPeer(
           healthyPeer.publicKey, 
           identifier, 
           msg, 
           connectionKey,
-          connData.authToken // Pass the auth token
+          connData.authToken
         );
+        
         for (const response of responses) {
           if (response && response.length > 0) {
+            // Check for auth errors in OK responses
+            if (response[0] === 'OK' && response[2] === false) {
+              const errorMsg = response[3] || '';
+              if (errorMsg.includes('Authentication required') || 
+                  errorMsg.includes('Invalid authentication')) {
+                // Close with 4403 for auth failure
+                ws.close(4403, 'Authentication failed');
+                return;
+              }
+            }
+            
             if (ws.readyState === WebSocket.OPEN) {
               ws.send(JSON.stringify(response));
-            } else {
-              console.error(`[${new Date().toISOString()}] WebSocket not in OPEN state when trying to send response`);
-              cleanup(connectionKey);
-              return;
             }
           }
         }

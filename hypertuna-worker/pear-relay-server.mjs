@@ -703,9 +703,14 @@ function setupProtocolHandlers(protocol) {
         };
       }
       
-      // TODO: Publish the event to the relay (implement in next phase)
-      console.log(`[RelayServer] Would publish kind 9021 event from ${event.pubkey.substring(0, 8)}...`);
-      
+      try {
+        await publishEventToRelay(identifier, event);
+        console.log(`[RelayServer] Published kind 9021 join request event`);
+      } catch (publishError) {
+        console.error(`[RelayServer] Failed to publish join request:`, publishError);
+        // Continue anyway - the auth process can still work
+      }
+
       // Generate challenge
       const challengeManager = getChallengeManager();
       const { challenge, relayPubkey } = challengeManager.createChallenge(event.pubkey, identifier);
@@ -1086,6 +1091,8 @@ protocol.handle('/authorize', async (request) => {
       const authToken = request.headers['x-auth-token'];
       const subnetHash = request.headers['x-subnet-hash'];
       
+      console.log(`[RelayServer] Auth token present: ${!!authToken}, Subnet hash present: ${!!subnetHash}`);
+      
       // Check if identifier is a public identifier or relay key
       let relayKey = identifier;
       if (identifier.includes(':')) {
@@ -1099,6 +1106,7 @@ protocol.handle('/authorize', async (request) => {
             body: Buffer.from(JSON.stringify({ error: 'Relay not found' }))
           };
         }
+        console.log(`[RelayServer] Resolved public identifier ${identifier} to relay key ${relayKey.substring(0, 8)}...`);
       }
       
       // Parse the message
@@ -1118,26 +1126,76 @@ protocol.handle('/authorize', async (request) => {
         throw new Error('Invalid NOSTR message format - expected array');
       }
   
-      // Check authentication for write operations
-      let event = null;
-      if (nostrMessage[0] === 'EVENT') {
-        event = nostrMessage.length === 2 ? nostrMessage[1] : nostrMessage[2];
+      console.log(`[RelayServer] Processing ${nostrMessage[0]} message`);
+  
+      // Get auth store and check if relay is protected
+      const authStore = getRelayAuthStore();
+      const authorizedPubkeys = authStore.getAuthorizedPubkeys(relayKey);
+      
+      // Get relay profile to check auth configuration
+      let profile = await getRelayProfileByKey(relayKey);
+      if (!profile && identifier !== relayKey) {
+        profile = await getRelayProfileByPublicIdentifier(identifier);
+      }
+      
+      const requiresAuth = authorizedPubkeys.length > 0 || 
+                          profile?.auth_config?.requiresAuth || 
+                          false;
+      
+      console.log(`[RelayServer] Relay ${identifier} requires auth: ${requiresAuth}`);
+      console.log(`[RelayServer] Authorized pubkeys count: ${authorizedPubkeys.length}`);
+  
+      // Handle authentication for protected relays
+      if (requiresAuth) {
+        // For REQ (subscription) messages, check if read access requires auth
+        if (nostrMessage[0] === 'REQ') {
+          // Some relays might allow public read access
+          // You can customize this based on your requirements
+          if (profile?.auth_config?.publicRead !== true) {
+            if (!authToken || !subnetHash) {
+              console.warn(`[RelayServer] Missing auth for REQ on protected relay`);
+              updateMetrics(false);
+              return {
+                statusCode: 403,
+                headers: { 'content-type': 'application/json' },
+                body: Buffer.from(JSON.stringify([
+                  ['NOTICE', 'Authentication required for read access']
+                ]))
+              };
+            }
+            
+            // Verify auth for REQ
+            const auth = authStore.verifyAuth(relayKey, authToken, subnetHash);
+            if (!auth) {
+              console.warn(`[RelayServer] Invalid auth for REQ`);
+              updateMetrics(false);
+              return {
+                statusCode: 403,
+                headers: { 'content-type': 'application/json' },
+                body: Buffer.from(JSON.stringify([
+                  ['NOTICE', 'Invalid authentication']
+                ]))
+              };
+            }
+            
+            console.log(`[RelayServer] REQ authenticated for ${auth.pubkey.substring(0, 8)}...`);
+          }
+        }
         
-        // Check if auth is required
-        const authStore = getRelayAuthStore();
-        const authorizedPubkeys = authStore.getAuthorizedPubkeys(relayKey);
-        
-        if (authorizedPubkeys.length > 0) {
-          // This is a token-protected relay
-          console.log(`[RelayServer] Checking auth for protected relay ${identifier}`);
+        // For EVENT messages, always require auth
+        if (nostrMessage[0] === 'EVENT') {
+          const event = nostrMessage.length === 2 ? nostrMessage[1] : nostrMessage[2];
           
           if (!authToken || !subnetHash) {
-            console.warn(`[RelayServer] Missing auth token or subnet hash`);
+            console.warn(`[RelayServer] Missing auth token or subnet hash for EVENT`);
             updateMetrics(false);
+            
+            // Return proper NOSTR OK response with auth error
+            const okResponse = ['OK', event?.id || '', false, 'error: authentication required'];
             return {
-              statusCode: 403,
+              statusCode: 200, // Still 200 because it's a valid NOSTR response
               headers: { 'content-type': 'application/json' },
-              body: Buffer.from(JSON.stringify({ error: 'Authentication required' }))
+              body: Buffer.from(JSON.stringify(okResponse))
             };
           }
           
@@ -1146,10 +1204,12 @@ protocol.handle('/authorize', async (request) => {
           if (!auth) {
             console.warn(`[RelayServer] Invalid auth token or subnet`);
             updateMetrics(false);
+            
+            const okResponse = ['OK', event?.id || '', false, 'error: invalid authentication'];
             return {
-              statusCode: 403,
+              statusCode: 200,
               headers: { 'content-type': 'application/json' },
-              body: Buffer.from(JSON.stringify({ error: 'Invalid authentication' }))
+              body: Buffer.from(JSON.stringify(okResponse))
             };
           }
           
@@ -1157,41 +1217,91 @@ protocol.handle('/authorize', async (request) => {
           if (event && event.pubkey !== auth.pubkey) {
             console.warn(`[RelayServer] Event pubkey ${event.pubkey} doesn't match auth pubkey ${auth.pubkey}`);
             updateMetrics(false);
+            
+            const okResponse = ['OK', event.id, false, 'error: pubkey mismatch - event must be signed by authenticated user'];
             return {
-              statusCode: 403,
+              statusCode: 200,
               headers: { 'content-type': 'application/json' },
-              body: Buffer.from(JSON.stringify({ error: 'Pubkey mismatch' }))
+              body: Buffer.from(JSON.stringify(okResponse))
             };
           }
           
-          console.log(`[RelayServer] Auth verified for ${auth.pubkey.substring(0, 8)}...`);
+          // Get current member list to verify membership
+          const members = await getRelayMembers(relayKey);
+          if (!members.includes(auth.pubkey)) {
+            console.warn(`[RelayServer] Authenticated pubkey ${auth.pubkey} is not a member`);
+            updateMetrics(false);
+            
+            const okResponse = ['OK', event.id, false, 'error: not a member of this relay'];
+            return {
+              statusCode: 200,
+              headers: { 'content-type': 'application/json' },
+              body: Buffer.from(JSON.stringify(okResponse))
+            };
+          }
+          
+          console.log(`[RelayServer] EVENT authenticated and authorized for ${auth.pubkey.substring(0, 8)}...`);
+          
+          // Update last used timestamp
+          auth.lastUsed = Date.now();
+        }
+      } else {
+        // For non-protected relays, still check member list for EVENT messages
+        if (nostrMessage[0] === 'EVENT') {
+          const event = nostrMessage.length === 2 ? nostrMessage[1] : nostrMessage[2];
+          const members = await getRelayMembers(relayKey);
+          
+          // If relay has members defined, check membership
+          if (members.length > 0 && event && !members.includes(event.pubkey)) {
+            console.warn(`[RelayServer] Non-member ${event.pubkey} attempting to publish to relay with member list`);
+            updateMetrics(false);
+            
+            const okResponse = ['OK', event.id, false, 'error: not a member of this relay'];
+            return {
+              statusCode: 200,
+              headers: { 'content-type': 'application/json' },
+              body: Buffer.from(JSON.stringify(okResponse))
+            };
+          }
         }
       }
       
-      // Continue with normal message handling
+      // Process the message through relay manager
       const responses = [];
       const sendResponse = (response) => {
-        console.log(`[RelayServer] Queueing response for relay ${relayKey}`);
+        console.log(`[RelayServer] Queueing response for relay ${relayKey}:`, 
+          Array.isArray(response) ? `${response[0]} message` : 'unknown response');
         responses.push(response);
       };
       
       await handleRelayMessage(relayKey, nostrMessage, sendResponse, connectionKey);
       
       console.log(`[RelayServer] Handled message, ${responses.length} responses queued`);
+      
+      // Format responses for return
+      const responseBody = responses.length > 0 
+        ? responses.map(r => JSON.stringify(r)).join('\n')
+        : '';
+      
       updateMetrics(true);
       return {
         statusCode: 200,
-        headers: { 'content-type': 'text/plain' },
-        body: Buffer.from(responses.map(r => JSON.stringify(r)).join('\n'))
+        headers: { 'content-type': 'application/json' },
+        body: Buffer.from(responseBody)
       };
       
     } catch (error) {
       console.error(`[RelayServer] Error processing message:`, error);
+      console.error(`[RelayServer] Stack trace:`, error.stack);
       updateMetrics(false);
+      
+      // Return NOTICE with error
       return {
-        statusCode: 500,
+        statusCode: 200, // Still 200 for valid NOSTR error response
         headers: { 'content-type': 'application/json' },
-        body: Buffer.from(JSON.stringify([['NOTICE', `Error: ${error.message}`]]))
+        body: Buffer.from(JSON.stringify([
+          ['NOTICE', `Error: ${error.message}`]
+        ]))
       };
     }
   });
@@ -1319,6 +1429,34 @@ async function publishMemberAddEvent(identifier, pubkey, token, subnetHash) {
   }
 }
 
+async function isRelayAuthProtected(identifier) {
+  try {
+    // Check auth store first
+    const authStore = getRelayAuthStore();
+    let relayKey = identifier;
+    
+    if (identifier.includes(':')) {
+      relayKey = await getRelayKeyFromPublicIdentifier(identifier);
+    }
+    
+    const authorizedPubkeys = authStore.getAuthorizedPubkeys(relayKey);
+    if (authorizedPubkeys.length > 0) {
+      return true;
+    }
+    
+    // Check profile configuration
+    let profile = await getRelayProfileByKey(relayKey);
+    if (!profile) {
+      profile = await getRelayProfileByPublicIdentifier(identifier);
+    }
+    
+    return profile?.auth_config?.requiresAuth || false;
+  } catch (error) {
+    console.error(`[RelayServer] Error checking auth status:`, error);
+    return false;
+  }
+}
+
 // Helper function to get event hash
 async function getEventHash(event) {
   const serialized = JSON.stringify([
@@ -1344,15 +1482,35 @@ async function signEvent(event, privateKey) {
 
 // Helper function to publish event to relay
 async function publishEventToRelay(identifier, event) {
-  // This would integrate with your relay manager
-  // For now, we'll store it for later processing
-  console.log(`[RelayServer] Would publish event to relay ${identifier}:`, event);
-  
-  // TODO: Integrate with relay manager in next phase
-  // const relayManager = activeRelays.get(identifier);
-  // if (relayManager) {
-  //   await relayManager.publishEvent(event);
-  // }
+  try {
+    console.log(`[RelayServer] Publishing event to relay ${identifier}:`, event);
+    
+    // Resolve public identifier to relay key if needed
+    let relayKey = identifier;
+    if (identifier.includes(':')) {
+      relayKey = await getRelayKeyFromPublicIdentifier(identifier);
+      if (!relayKey) {
+        throw new Error(`No relay found for identifier: ${identifier}`);
+      }
+    }
+    
+    // Get the relay manager from activeRelays (imported from adapter)
+    const { activeRelays } = await import('./hypertuna-relay-manager-adapter.mjs');
+    const relayManager = activeRelays.get(relayKey);
+    
+    if (!relayManager) {
+      throw new Error(`Relay manager not found for key: ${relayKey}`);
+    }
+    
+    // Publish the event
+    const result = await relayManager.publishEvent(event);
+    console.log(`[RelayServer] Event published successfully:`, result);
+    
+    return result;
+  } catch (error) {
+    console.error(`[RelayServer] Error publishing event to relay:`, error);
+    throw error;
+  }
 }
 
 // Update health state
