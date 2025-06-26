@@ -842,6 +842,9 @@ function setupProtocolHandlers(protocol) {
       }
       
       if (profile) {
+        // Update profile with auth token
+        const { updateRelayAuthToken } = await import('./hypertuna-relay-profile-manager-bare.mjs');
+        await updateRelayAuthToken(identifier, pubkey, token, subnetHash);
         // Update member lists
         const currentAdds = profile.member_adds || [];
         const currentRemoves = profile.member_removes || [];

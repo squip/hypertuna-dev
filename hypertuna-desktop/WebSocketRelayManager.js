@@ -201,41 +201,76 @@ class WebSocketRelayManager {
         });
     }
 
+    parseRelayUrl(relayUrl) {
+        try {
+            const url = new URL(relayUrl);
+            const token = url.searchParams.get('token');
+            
+            // Remove token from URL for connection but store it
+            if (token) {
+                url.searchParams.delete('token');
+                return {
+                    cleanUrl: url.toString(),
+                    token: token
+                };
+            }
+            
+            return {
+                cleanUrl: relayUrl,
+                token: null
+            };
+        } catch (e) {
+            console.error('Error parsing relay URL:', e);
+            return {
+                cleanUrl: relayUrl,
+                token: null
+            };
+        }
+    }
+
     /**
      * Add a relay to the connection pool
      * @param {string} url - The relay URL (e.g., wss://relay.damus.io)
      * @returns {Promise} - Resolves when connected
      */
-    addRelay(url) {
+    async addRelay(url) {
+        // Parse the URL to extract token
+        const { cleanUrl, token } = this.parseRelayUrl(url);
+        
         // Normalize URL
-        if (!url.startsWith('wss://') && !url.startsWith('ws://')) {
-            url = 'wss://' + url;
+        let normalizedUrl = cleanUrl;
+        if (!normalizedUrl.startsWith('wss://') && !normalizedUrl.startsWith('ws://')) {
+            normalizedUrl = 'wss://' + normalizedUrl;
         }
     
         // Check if already connected
-        if (this.relays.has(url)) {
-            const existing = this.relays.get(url);
+        if (this.relays.has(normalizedUrl)) {
+            const existing = this.relays.get(normalizedUrl);
             if (existing.status === 'open' || existing.status === 'connecting') {
-                console.log(`Relay ${url} already connected or connecting`);
+                console.log(`Relay ${normalizedUrl} already connected or connecting`);
                 return Promise.resolve();
             }
         }
     
         return new Promise((resolve, reject) => {
             try {
-                const ws = new WebSocket(url);
+                // If token exists, append it back for the actual connection
+                const connectionUrl = token ? `${normalizedUrl}?token=${token}` : normalizedUrl;
+                const ws = new WebSocket(connectionUrl);
+                
                 const relayData = {
                     conn: ws,
                     status: 'connecting',
                     subscriptions: new Map(),
                     pendingMessages: [],
-                    type: 'discovery' // Default type
+                    type: 'discovery',
+                    authToken: token // Store the token
                 };
                 
-                this.relays.set(url, relayData);
+                this.relays.set(normalizedUrl, relayData);
     
                 ws.onopen = () => {
-                    console.log(`Connected to relay: ${url}`);
+                    console.log(`Connected to relay: ${normalizedUrl} ${token ? '(authenticated)' : ''}`);
                     relayData.status = 'open';
                     
                     // Send any pending messages
@@ -259,9 +294,15 @@ class WebSocketRelayManager {
                     resolve();
                 };
 
-                ws.onclose = () => {
-                    console.log(`Disconnected from relay: ${url}`);
+                ws.onclose = (event) => {
+                    console.log(`Disconnected from relay: ${normalizedUrl}, code: ${event.code}`);
                     relayData.status = 'closed';
+                    
+                    // Handle authentication failure (4403 close code)
+                    if (event.code === 4403) {
+                        console.error(`Authentication failed for relay: ${normalizedUrl}`);
+                        this.emit('auth:failed', { relayUrl: normalizedUrl });
+                    }
                     
                     // Notify disconnect listeners
                     this.disconnectCallbacks.forEach(callback => callback(url));
@@ -295,7 +336,7 @@ class WebSocketRelayManager {
                     }
                 };
             } catch (e) {
-                console.error(`Error connecting to ${url}:`, e);
+                console.error(`Error connecting to ${normalizedUrl}:`, e);
                 reject(e);
             }
         });

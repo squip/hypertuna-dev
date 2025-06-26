@@ -386,6 +386,14 @@ class NostrGroupClient {
                     }
                 }
             }
+
+            // Listen for auth failures
+            this.relayManager.on('auth:failed', ({ relayUrl: failedUrl }) => {
+                if (failedUrl === relayUrl) {
+                    console.error(`[NostrGroupClient] Authentication failed for relay ${publicIdentifier}`);
+                    this.emit('relay:auth:failed', { groupId: publicIdentifier, relayUrl });
+                }
+            });
             
             this.groupRelayUrls.set(publicIdentifier, relayUrl);
             
@@ -2392,7 +2400,9 @@ async fetchMultipleProfiles(pubkeys) {
         const isPublic = group?.isPublic || false;
         
         // Create relay tag with auth token in the URL
-        const authenticatedUrl = `${gatewayUrl}/${identifier}?token=${authToken}`;
+        const authenticatedUrl = authToken ? 
+        `${gatewayUrl}/${identifier}?token=${authToken}` : 
+        `${gatewayUrl}/${identifier}`;
         
         // Update user relay list
         if (!this.userRelayListEvent) {

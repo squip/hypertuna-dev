@@ -407,6 +407,10 @@ export async function autoConnectStoredRelays(config) {
         
         console.log(`[RelayAdapter] Found ${relayProfiles.length} stored relay profiles`);
         
+        // Import auth store for loading auth configurations
+        const { getRelayAuthStore } = await import('./relay-auth-store.mjs');
+        const authStore = getRelayAuthStore();
+        
         const connectedRelays = [];
         const failedRelays = [];
         
@@ -418,14 +422,40 @@ export async function autoConnectStoredRelays(config) {
                     console.log(`[RelayAdapter] Relay ${profile.relay_key} already active, skipping`);
                     connectedRelays.push(profile.relay_key);
                     
+                    // Load auth config for already active relay if it exists
+                    if (profile.auth_config && profile.auth_config.requiresAuth) {
+                        const authData = {};
+                        profile.auth_config.authorizedUsers.forEach(user => {
+                            authData[user.pubkey] = {
+                                token: user.token,
+                                allowedSubnets: user.subnets || [],
+                                createdAt: Date.now(),
+                                lastUsed: Date.now()
+                            };
+                        });
+                        
+                        authStore.importRelayAuth(profile.relay_key, authData);
+                        
+                        // Also import for public identifier if it exists
+                        if (profile.public_identifier) {
+                            authStore.importRelayAuth(profile.public_identifier, authData);
+                        }
+                        
+                        console.log(`[RelayAdapter] Loaded auth config for active relay ${profile.relay_key}`);
+                    }
+                    
                     // Send initialized message for already active relay
                     if (global.sendMessage) {
                         global.sendMessage({
                             type: 'relay-initialized',
                             relayKey: profile.relay_key,
-                            gatewayUrl: `wss://${config.proxy_server_address}/${profile.relay_key}`,
+                            publicIdentifier: profile.public_identifier,
+                            gatewayUrl: profile.public_identifier ? 
+                                `wss://${config.proxy_server_address}/${profile.public_identifier.replace(':', '/')}` :
+                                `wss://${config.proxy_server_address}/${profile.relay_key}`,
                             name: profile.name,
-                            alreadyActive: true
+                            alreadyActive: true,
+                            requiresAuth: profile.auth_config?.requiresAuth || false
                         });
                     }
                     continue;
@@ -437,6 +467,47 @@ export async function autoConnectStoredRelays(config) {
                 }
                 
                 console.log(`[RelayAdapter] Attempting to connect to relay ${profile.relay_key}...`);
+                
+                // Load auth configuration before connecting
+                if (profile.auth_config && profile.auth_config.requiresAuth) {
+                    console.log(`[RelayAdapter] Loading auth configuration for relay ${profile.relay_key}`);
+                    
+                    const authData = {};
+                    profile.auth_config.authorizedUsers.forEach(user => {
+                        authData[user.pubkey] = {
+                            token: user.token,
+                            allowedSubnets: user.subnets || [],
+                            createdAt: Date.now(),
+                            lastUsed: Date.now()
+                        };
+                    });
+                    
+                    authStore.importRelayAuth(profile.relay_key, authData);
+                    
+                    // Also import for public identifier if it exists
+                    if (profile.public_identifier) {
+                        authStore.importRelayAuth(profile.public_identifier, authData);
+                    }
+                    
+                    console.log(`[RelayAdapter] Imported ${Object.keys(authData).length} auth entries for relay ${profile.relay_key}`);
+                }
+                
+                // Load members into in-memory map before connecting
+                setRelayMembers(
+                    profile.relay_key, 
+                    profile.members || [], 
+                    profile.member_adds || [], 
+                    profile.member_removes || []
+                );
+                
+                if (profile.public_identifier) {
+                    setRelayMembers(
+                        profile.public_identifier, 
+                        profile.members || [], 
+                        profile.member_adds || [], 
+                        profile.member_removes || []
+                    );
+                }
                 
                 const result = await joinRelay({
                     relayKey: profile.relay_key,
@@ -454,14 +525,28 @@ export async function autoConnectStoredRelays(config) {
                     
                     console.log(`[RelayAdapter] Successfully connected to relay ${profile.relay_key}`);
                     
-                    // Send relay initialized message
+                    // Determine if current user has auth token
+                    let userAuthToken = null;
+                    if (profile.auth_config?.requiresAuth && config.nostr_pubkey_hex) {
+                        const userAuth = profile.auth_config.authorizedUsers.find(
+                            u => u.pubkey === config.nostr_pubkey_hex
+                        );
+                        userAuthToken = userAuth?.token || null;
+                    }
+                    
+                    // Send relay initialized message with auth info
                     if (global.sendMessage) {
                         global.sendMessage({
                             type: 'relay-initialized',
                             relayKey: profile.relay_key,
-                            gatewayUrl: `wss://${config.proxy_server_address}/${profile.relay_key}`,
+                            publicIdentifier: profile.public_identifier,
+                            gatewayUrl: profile.public_identifier ? 
+                                `wss://${config.proxy_server_address}/${profile.public_identifier.replace(':', '/')}` :
+                                `wss://${config.proxy_server_address}/${profile.relay_key}`,
                             name: profile.name || `Relay ${profile.relay_key.substring(0, 8)}`,
                             connectionUrl: result.connectionUrl,
+                            requiresAuth: profile.auth_config?.requiresAuth || false,
+                            userAuthToken: userAuthToken,
                             timestamp: new Date().toISOString()
                         });
                     }
@@ -505,6 +590,10 @@ export async function autoConnectStoredRelays(config) {
         console.log(`[RelayAdapter] - Connected: ${connectedRelays.length} relays`);
         console.log(`[RelayAdapter] - Failed: ${failedRelays.length} relays`);
         
+        // Log auth status summary
+        const authProtectedCount = relayProfiles.filter(p => p.auth_config?.requiresAuth).length;
+        console.log(`[RelayAdapter] - Auth-protected: ${authProtectedCount} relays`);
+        
         // Send all-relays-initialized message
         if (global.sendMessage) {
             global.sendMessage({
@@ -513,6 +602,7 @@ export async function autoConnectStoredRelays(config) {
                 connected: connectedRelays,
                 failed: failedRelays,
                 total: relayProfiles.length,
+                authProtectedCount: authProtectedCount,
                 timestamp: new Date().toISOString()
             });
         }

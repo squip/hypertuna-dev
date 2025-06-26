@@ -44,7 +44,64 @@ function ensureProfileSchema(profile) {
     if (!Array.isArray(profile.member_removes)) {
         profile.member_removes = [];
     }
+    // Add auth-related fields
+    if (!profile.auth_tokens) {
+        profile.auth_tokens = {}; // Map of pubkey -> token
+    }
+    
+    if (!profile.auth_config) {
+        profile.auth_config = {
+            requiresAuth: false,
+            tokenProtected: false,
+            authorizedUsers: [] // Array of { pubkey, token, subnets }
+        };
+    }
+    
     return profile;
+}
+
+// Add a function to update auth token for a user
+export async function updateRelayAuthToken(identifier, pubkey, token, subnetHash) {
+    try {
+        let profile = await getRelayProfileByKey(identifier);
+        if (!profile) {
+            profile = await getRelayProfileByPublicIdentifier(identifier);
+        }
+        if (!profile) return null;
+        
+        // Ensure schema
+        profile = ensureProfileSchema(profile);
+        
+        // Update auth tokens
+        profile.auth_tokens[pubkey] = token;
+        
+        // Update auth config
+        profile.auth_config.requiresAuth = true;
+        profile.auth_config.tokenProtected = true;
+        
+        // Update authorized users
+        const existingUser = profile.auth_config.authorizedUsers.find(u => u.pubkey === pubkey);
+        if (existingUser) {
+            existingUser.token = token;
+            if (!existingUser.subnets.includes(subnetHash)) {
+                existingUser.subnets.push(subnetHash);
+            }
+        } else {
+            profile.auth_config.authorizedUsers.push({
+                pubkey,
+                token,
+                subnets: [subnetHash]
+            });
+        }
+        
+        profile.updated_at = new Date().toISOString();
+        const saved = await saveRelayProfile(profile);
+        
+        return saved ? profile : null;
+    } catch (error) {
+        console.error(`[ProfileManager] Error updating auth token for ${identifier}:`, error);
+        return null;
+    }
 }
 
 /**
