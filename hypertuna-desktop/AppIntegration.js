@@ -1474,8 +1474,7 @@ App.syncHypertunaConfigToFile = async function() {
     };
     
     /**
-     * Replace join group method
-     * Joins a group via the nostr client
+     * Enhanced join group method with authentication flow
      */
     App.joinGroup = async function() {
         if (!this.currentUser || !this.currentGroupId) return;
@@ -1485,10 +1484,10 @@ App.syncHypertunaConfigToFile = async function() {
             if (!group) return;
             
             if (group.isOpen) {
-                // For open groups, create join request
-                await this.sendJoinRequest();
+                // For open groups, show authentication modal
+                await this.showJoinAuthModal();
             } else {
-                // For closed groups, show invite code modal
+                // For closed groups, show invite code modal first
                 this.showJoinModal();
             }
         } catch (e) {
@@ -1496,6 +1495,236 @@ App.syncHypertunaConfigToFile = async function() {
             alert('Error joining group: ' + e.message);
         }
     };
+
+    /**
+     * Show join authentication modal
+     */
+    App.showJoinAuthModal = async function() {
+        const modal = document.getElementById('join-auth-modal');
+        modal.classList.add('show');
+        
+        // Reset modal state
+        this.resetAuthModal();
+        
+        try {
+            // Send join request
+            const result = await this.nostr.client.joinGroup(this.currentGroupId);
+            
+            if (result.requiresAuth) {
+                // Move to verification step
+                this.updateAuthProgress('verify');
+                
+                // Complete authentication
+                const authResult = await this.nostr.client.completeJoinAuth(
+                    this.currentGroupId,
+                    result.challenge,
+                    result.relayPubkey,
+                    result.verifyUrl,
+                    result.finalUrl
+                );
+                
+                if (authResult.success) {
+                    // Authentication successful
+                    this.showAuthSuccess(authResult);
+                } else {
+                    throw new Error('Authentication failed');
+                }
+            }
+            
+        } catch (error) {
+            console.error('Join authentication error:', error);
+            this.showAuthError(error.message);
+        }
+    };
+
+    /**
+     * Reset authentication modal to initial state
+     */
+    App.resetAuthModal = function() {
+        // Reset progress steps
+        document.querySelectorAll('.progress-step').forEach(step => {
+            step.classList.remove('active', 'completed');
+        });
+        document.getElementById('step-request').classList.add('active');
+        
+        // Show status section
+        document.getElementById('auth-status').classList.remove('hidden');
+        document.getElementById('auth-success').classList.add('hidden');
+        document.getElementById('auth-error').classList.add('hidden');
+        
+        // Reset status text
+        document.getElementById('auth-status-title').textContent = 'Approval Pending';
+        document.getElementById('auth-status-message').textContent = 'Registering your pubkey with the relay...';
+        
+        // Hide continue button
+        document.getElementById('btn-close-auth-modal').classList.add('hidden');
+        document.getElementById('btn-cancel-auth').classList.remove('hidden');
+    };
+
+    /**
+     * Update authentication progress
+     */
+    App.updateAuthProgress = function(step) {
+        const steps = ['request', 'verify', 'complete'];
+        const currentIndex = steps.indexOf(step);
+        
+        steps.forEach((s, index) => {
+            const stepElement = document.getElementById(`step-${s}`);
+            stepElement.classList.remove('active', 'completed');
+            
+            if (index < currentIndex) {
+                stepElement.classList.add('completed');
+            } else if (index === currentIndex) {
+                stepElement.classList.add('active');
+            }
+        });
+        
+        // Update status message based on step
+        const statusTitle = document.getElementById('auth-status-title');
+        const statusMessage = document.getElementById('auth-status-message');
+        
+        switch (step) {
+            case 'verify':
+                statusTitle.textContent = 'Verifying Identity';
+                statusMessage.textContent = 'Completing cryptographic handshake...';
+                break;
+            case 'complete':
+                statusTitle.textContent = 'Finalizing';
+                statusMessage.textContent = 'Setting up your access credentials...';
+                break;
+        }
+    };
+
+    /**
+     * Show authentication success
+     */
+    App.showAuthSuccess = async function(authResult) {
+        // Update progress to complete
+        this.updateAuthProgress('complete');
+        
+        // Wait a moment to show completion
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        
+        // Hide status and show success
+        document.getElementById('auth-status').classList.add('hidden');
+        document.getElementById('auth-success').classList.remove('hidden');
+        document.getElementById('btn-close-auth-modal').classList.remove('hidden');
+        document.getElementById('btn-cancel-auth').classList.add('hidden');
+        
+        // Generate QR code for mobile authorization
+        const mobileAuthUrl = `${window.location.origin}/authorize?token=${authResult.authToken}`;
+        document.getElementById('auth-url').value = mobileAuthUrl;
+        
+        // Generate QR code
+        if (window.QRCode) {
+            const qrContainer = document.getElementById('auth-qr-code');
+            qrContainer.innerHTML = ''; // Clear existing QR code
+            
+            new QRCode(qrContainer, {
+                text: mobileAuthUrl,
+                width: 200,
+                height: 200,
+                colorDark: '#000000',
+                colorLight: '#ffffff',
+                correctLevel: QRCode.CorrectLevel.H
+            });
+        }
+        
+        // Store auth token for future connections
+        if (!this.currentUser.relayTokens) {
+            this.currentUser.relayTokens = {};
+        }
+        this.currentUser.relayTokens[this.currentGroupId] = authResult.authToken;
+        this.saveUserToLocalStorage();
+        
+        // Reload group details and list
+        setTimeout(() => {
+            this.loadGroupDetails();
+            this.loadGroups();
+        }, 500);
+    };
+
+    /**
+     * Show authentication error
+     */
+    App.showAuthError = function(errorMessage) {
+        document.getElementById('auth-status').classList.add('hidden');
+        document.getElementById('auth-error').classList.remove('hidden');
+        document.getElementById('auth-error-message').textContent = errorMessage || 'An error occurred during authentication.';
+        document.getElementById('btn-cancel-auth').classList.remove('hidden');
+    };
+
+    /**
+     * Close authentication modal
+     */
+    App.closeJoinAuthModal = function() {
+        document.getElementById('join-auth-modal').classList.remove('show');
+        
+        // If authentication was successful, navigate to group
+        const successSection = document.getElementById('auth-success');
+        if (!successSection.classList.contains('hidden')) {
+            this.loadGroupDetails();
+        }
+    };
+
+    /**
+     * Setup authentication modal event listeners
+     */
+    App.setupAuthModalListeners = function() {
+        // Close button
+        document.getElementById('close-join-auth-modal').addEventListener('click', () => {
+            this.closeJoinAuthModal();
+        });
+        
+        // Cancel button
+        document.getElementById('btn-cancel-auth').addEventListener('click', () => {
+            this.closeJoinAuthModal();
+        });
+        
+        // Continue button (after success)
+        document.getElementById('btn-close-auth-modal').addEventListener('click', () => {
+            this.closeJoinAuthModal();
+        });
+        
+        // Retry button
+        document.getElementById('btn-retry-auth').addEventListener('click', () => {
+            this.showJoinAuthModal();
+        });
+        
+        // Copy button for auth URL
+        document.querySelector('[data-copy="auth-url"]').addEventListener('click', function() {
+            const input = document.getElementById('auth-url');
+            input.select();
+            document.execCommand('copy');
+            
+            const originalText = this.textContent;
+            this.textContent = 'Copied!';
+            setTimeout(() => {
+                this.textContent = originalText;
+            }, 2000);
+        });
+        
+        // Click outside modal to close
+        window.addEventListener('click', (e) => {
+            if (e.target.id === 'join-auth-modal') {
+                // Only allow closing if not in progress
+                const statusSection = document.getElementById('auth-status');
+                if (statusSection.classList.contains('hidden')) {
+                    this.closeJoinAuthModal();
+                }
+            }
+        });
+    };
+
+    // Add QR code library dynamically if not already loaded
+    if (!window.QRCode) {
+        const script = document.createElement('script');
+        script.src = 'https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js';
+        script.onload = () => {
+            console.log('QRCode library loaded');
+        };
+        document.head.appendChild(script);
+    }
     
     /**
      * Replace send join request method

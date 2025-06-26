@@ -530,6 +530,85 @@
         </div>
     </div>
 
+    <!-- Join Authentication Modal -->
+    <div id="join-auth-modal" class="modal">
+        <div class="modal-content modal-auth">
+            <div class="modal-header">
+                <h3>Join Relay Authentication</h3>
+                <button class="modal-close" id="close-join-auth-modal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <!-- Status Section -->
+                <div id="auth-status" class="auth-status">
+                    <div class="status-icon">
+                        <div class="spinner"></div>
+                    </div>
+                    <div class="status-message">
+                        <h4 id="auth-status-title">Approval Pending</h4>
+                        <p id="auth-status-message">Registering your pubkey with the relay...</p>
+                    </div>
+                </div>
+                
+                <!-- Progress Steps -->
+                <div class="auth-progress">
+                    <div class="progress-step active" id="step-request">
+                        <div class="step-number">1</div>
+                        <div class="step-label">Join Request</div>
+                    </div>
+                    <div class="progress-step" id="step-verify">
+                        <div class="step-number">2</div>
+                        <div class="step-label">Verify Identity</div>
+                    </div>
+                    <div class="progress-step" id="step-complete">
+                        <div class="step-number">3</div>
+                        <div class="step-label">Access Granted</div>
+                    </div>
+                </div>
+                
+                <!-- Success Section (hidden initially) -->
+                <div id="auth-success" class="auth-success hidden">
+                    <div class="success-icon">
+                        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+                            <polyline points="22 4 12 14.01 9 11.01"></polyline>
+                        </svg>
+                    </div>
+                    <h4>Authentication Successful!</h4>
+                    <p>You now have write access to this relay.</p>
+                    
+                    <!-- QR Code Section -->
+                    <div class="qr-section">
+                        <h5>Authorize Mobile Device</h5>
+                        <p>Scan this QR code with your mobile device to grant it access:</p>
+                        <div id="auth-qr-code" class="qr-container"></div>
+                        <div class="auth-url-display">
+                            <input type="text" id="auth-url" readonly class="form-input">
+                            <button class="copy-btn" data-copy="auth-url">Copy</button>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Error Section (hidden initially) -->
+                <div id="auth-error" class="auth-error hidden">
+                    <div class="error-icon">
+                        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="10"></circle>
+                            <line x1="12" y1="8" x2="12" y2="12"></line>
+                            <line x1="12" y1="16" x2="12.01" y2="16"></line>
+                        </svg>
+                    </div>
+                    <h4>Authentication Failed</h4>
+                    <p id="auth-error-message">An error occurred during authentication.</p>
+                    <button id="btn-retry-auth" class="btn btn-primary">Retry</button>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button id="btn-close-auth-modal" class="btn btn-primary hidden">Continue</button>
+                <button id="btn-cancel-auth" class="btn btn-secondary">Cancel</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Include the same script section from the original HTML -->
     <script type="module">
       console.log('Index: Script module starting at:', new Date().toISOString());
@@ -556,6 +635,7 @@
           async init() {
             console.log('[Index] App.init() called');
             this.setupEventListeners();
+            this.setupAuthModalListeners();
             await this.loadUserFromLocalStorage();
             
             // If user is already logged in, navigate to groups page
