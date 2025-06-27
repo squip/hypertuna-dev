@@ -1441,8 +1441,8 @@ App.syncHypertunaConfigToFile = async function() {
 
             if (window.createRelayInstance) {
                 try {
-                    // The worker will now handle its own subnet hash retrieval
-                    relayKey = await window.createRelayInstance(name, about);
+                    // Pass all necessary metadata to the worker for profile creation
+                    relayKey = await window.createRelayInstance(name, about, isPublic, isOpen);
                 } catch (err) {
                     console.error('Failed to create relay instance:', err);
                 }
