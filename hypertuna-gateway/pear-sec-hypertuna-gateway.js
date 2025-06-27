@@ -805,6 +805,12 @@ app.post('/register', async (req, res) => {
   });
 });
 
+// NEW: Add endpoint for clients to get their own hashed subnet
+app.get('/get-subnet-hash', (req, res) => {
+  console.log(`[${new Date().toISOString()}] Subnet hash requested. Returning: ${req.hashedSubnet.substring(0, 8)}...`);
+  res.json({ subnetHash: req.hashedSubnet });
+});
+
 // ============================
 // Authorization Endpoints
 // ============================

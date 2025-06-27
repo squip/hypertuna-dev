@@ -2188,7 +2188,7 @@ async fetchMultipleProfiles(pubkeys) {
                 [
                     ['d', groupId],
                     ['hypertuna', groupId],
-                    ['p', this.user.pubkey, 'member']
+                    ['p', this.user.pubkey, 'admin']
                 ],
                 this.user.privateKey
             );
