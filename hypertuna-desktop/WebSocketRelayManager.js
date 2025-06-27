@@ -9,6 +9,7 @@ class WebSocketRelayManager {
         this.globalSubscriptions = new Map();
         this.eventCallbacks = [];
         this.connectCallbacks = [];
+        this.eventListeners = new Map(); // NEW: For generic event listeners
         this.disconnectCallbacks = [];
         
         // Add rate limiting
@@ -205,19 +206,14 @@ class WebSocketRelayManager {
         try {
             const url = new URL(relayUrl);
             const token = url.searchParams.get('token');
-            
-            // Remove token from URL for connection but store it
-            if (token) {
-                url.searchParams.delete('token');
-                return {
-                    cleanUrl: url.toString(),
-                    token: token
-                };
-            }
-            
+
+            // Create a clean URL without any search params to use as a map key.
+            // This prevents issues with URLs containing '?' but no token.
+            const cleanUrl = `${url.protocol}//${url.hostname}${url.port ? ':' + url.port : ''}${url.pathname}`;
+
             return {
-                cleanUrl: relayUrl,
-                token: null
+                cleanUrl: cleanUrl,
+                token: token
             };
         } catch (e) {
             console.error('Error parsing relay URL:', e);
@@ -226,6 +222,41 @@ class WebSocketRelayManager {
                 token: null
             };
         }
+    }
+
+    /**
+     * Register an event listener for custom events.
+     * @param {string} eventName - The name of the event to listen for.
+     * @param {Function} callback - The callback function to execute when the event is emitted.
+     */
+    on(eventName, callback) {
+        if (typeof callback !== 'function') {
+            console.warn(`[WebSocketRelayManager] Callback for event '${eventName}' is not a function.`);
+            return;
+        }
+        if (!this.eventListeners.has(eventName)) {
+            this.eventListeners.set(eventName, []);
+        }
+        this.eventListeners.get(eventName).push(callback);
+    }
+
+    /**
+     * Emit a custom event.
+     * @param {string} eventName - The name of the event to emit.
+     * @param {any} data - The data to pass to the event listeners.
+     */
+    emit(eventName, data) {
+        if (!this.eventListeners.has(eventName)) {
+            return;
+        }
+        const listeners = this.eventListeners.get(eventName);
+        listeners.forEach(callback => {
+            try {
+                callback(data);
+            } catch (e) {
+                console.error(`[WebSocketRelayManager] Error in event listener for '${eventName}':`, e);
+            }
+        });
     }
 
     /**
@@ -301,7 +332,7 @@ class WebSocketRelayManager {
                     // Handle authentication failure (4403 close code)
                     if (event.code === 4403) {
                         console.error(`Authentication failed for relay: ${normalizedUrl}`);
-                        this.emit('auth:failed', { relayUrl: normalizedUrl });
+                        this.emit('auth:failed', { relayUrl: normalizedUrl }); // Use the new emit method
                     }
                     
                     // Notify disconnect listeners
@@ -919,4 +950,3 @@ async testPublish() {
 
 // Export the class
 export default WebSocketRelayManager;
-

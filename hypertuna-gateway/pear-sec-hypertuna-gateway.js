@@ -731,7 +731,8 @@ app.post('/register', async (req, res) => {
       driveKey,
       status: 'active',
       mode: 'hyperswarm',
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
+      subnetHash: req.hashedSubnet
     });
     
     return;
@@ -801,7 +802,8 @@ app.post('/register', async (req, res) => {
     message: 'Registered successfully', 
     driveKey,
     status: 'active',
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
+    subnetHash: req.hashedSubnet
   });
 });
 

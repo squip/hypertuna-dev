@@ -289,6 +289,30 @@ if (workerPipe) {
               }
               break
 
+            case 'start-join-flow':
+              console.log('[Worker] Start join flow requested:', message.data);
+              if (relayServer) {
+                try {
+                  // The startJoinAuthentication function will handle sending progress messages back
+                  await relayServer.startJoinAuthentication(message.data);
+                } catch (err) {
+                  // Send an error message back to the desktop app
+                  sendMessage({
+                    type: 'join-auth-error',
+                    data: {
+                      publicIdentifier: message.data.publicIdentifier,
+                      error: `Failed to start join flow: ${err.message}`
+                    }
+                  });
+                }
+              } else {
+                sendMessage({
+                  type: 'join-auth-error',
+                  data: { publicIdentifier: message.data.publicIdentifier, error: 'Relay server not initialized' }
+                });
+              }
+              break;
+
             case 'update-members':
               if (relayServer) {
                 try {

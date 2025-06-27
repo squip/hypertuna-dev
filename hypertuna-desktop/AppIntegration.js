@@ -1431,28 +1431,18 @@ App.syncHypertunaConfigToFile = async function() {
             console.log("Creating group with parameters:", { name, about, isPublic, isOpen, npub });
 
             let relayKey = null;
-            let subnetHash = null;
 
             // Show a modal similar to the join flow
             const modal = document.getElementById('join-auth-modal');
             modal.classList.add('show');
             this.resetAuthModal();
-            this.updateAuthProgress('request');
             document.getElementById('auth-status-title').textContent = 'Creating Relay...';
-            document.getElementById('auth-status-message').textContent = 'Setting up your new relay instance...';
+            document.getElementById('auth-status-message').textContent = 'Initializing relay instance in worker...';
 
             if (window.createRelayInstance) {
                 try {
-                    // Fetch subnet hash from gateway
-                    const gatewayUrl = this.currentUser.hypertunaConfig?.gatewayUrl || HypertunaUtils.DEFAULT_GATEWAY_URL;
-                    const response = await fetch(`${gatewayUrl}/get-subnet-hash`);
-                    const { subnetHash: fetchedSubnetHash } = await response.json();
-                    subnetHash = fetchedSubnetHash;
-
-                    this.updateAuthProgress('verify');
-                    document.getElementById('auth-status-message').textContent = 'Authorizing your device...';
-
-                    relayKey = await window.createRelayInstance(name, about, subnetHash);
+                    // The worker will now handle its own subnet hash retrieval
+                    relayKey = await window.createRelayInstance(name, about);
                 } catch (err) {
                     console.error('Failed to create relay instance:', err);
                 }
@@ -1528,38 +1518,24 @@ App.syncHypertunaConfigToFile = async function() {
     App.showJoinAuthModal = async function() {
         const modal = document.getElementById('join-auth-modal');
         modal.classList.add('show');
-        
+
         // Reset modal state
         this.resetAuthModal();
-        
+
         try {
-            // Send join request
-            const result = await this.nostr.client.joinGroup(this.currentGroupId);
-            
-            if (result.requiresAuth) {
-                // Move to verification step
-                this.updateAuthProgress('verify');
-                
-                // Complete authentication
-                const authResult = await this.nostr.client.completeJoinAuth(
-                    this.currentGroupId,
-                    result.challenge,
-                    result.relayPubkey,
-                    result.verifyUrl,
-                    result.finalUrl
-                );
-                
-                if (authResult.success) {
-                    // Authentication successful
-                    this.showAuthSuccess(authResult);
-                } else {
-                    throw new Error('Authentication failed');
-                }
-            }
-            
+            // The new global function will handle communication with the worker
+            // and return a promise that resolves with the auth result.
+            // The UI will be updated by messages from the worker.
+            const authResult = await window.joinRelayInstance(this.currentGroupId);
+
+            // The 'join-auth-success' message from the worker will have already
+            // called App.showAuthSuccess. We can just log the successful outcome.
+            console.log('Worker-driven join flow completed successfully.', authResult);
+
         } catch (error) {
-            console.error('Join authentication error:', error);
-            this.showAuthError(error.message);
+            console.error('Worker-driven join flow failed:', error);
+            // The 'join-auth-error' message from the worker will have already
+            // called App.showAuthError. We can just log it here.
         }
     };
 
@@ -1659,12 +1635,17 @@ App.syncHypertunaConfigToFile = async function() {
             });
         }
         
-        // Store auth token for future connections
-        if (!this.currentUser.relayTokens) {
-            this.currentUser.relayTokens = {};
+        // Update the user's relay list (kind 10009) with the authenticated URL.
+        // This correctly persists the authenticated relay for future sessions.
+        if (this.nostr && this.nostr.client) {
+            await this.nostr.client.updateUserRelayListWithAuth(
+                authResult.publicIdentifier, // The group ID from the worker
+                authResult.relayUrl,
+                authResult.authToken
+            );
+        } else {
+            console.error("Nostr client not available to update relay list.");
         }
-        this.currentUser.relayTokens[this.currentGroupId] = authResult.authToken;
-        this.saveUserToLocalStorage();
         
         // Reload group details and list
         setTimeout(() => {

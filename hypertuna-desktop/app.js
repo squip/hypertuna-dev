@@ -19,6 +19,7 @@ let pollingInterval = null
 let healthState = null
 let gatewayRegistered = false
 let relayCreateResolvers = []
+const relayJoinResolvers = new Map() // To manage join flow promises
 let relayReadyResolvers = new Map() // Add this to track relay readiness promises
 let initializedRelays = new Set() // Track which relays are ready
 
@@ -562,6 +563,37 @@ function handleWorkerMessage(message) {
       }
       break
 
+    case 'join-auth-progress':
+      if (window.App && typeof window.App.updateAuthProgress === 'function') {
+        addLog(`Join auth progress: ${message.data.status}`, 'status');
+        window.App.updateAuthProgress(message.data.status);
+      }
+      break;
+
+    case 'join-auth-success':
+      addLog(`Join auth success for ${message.data.publicIdentifier}`, 'status');
+      if (relayJoinResolvers.has(message.data.publicIdentifier)) {
+        const { resolve } = relayJoinResolvers.get(message.data.publicIdentifier);
+        resolve(message.data);
+        relayJoinResolvers.delete(message.data.publicIdentifier);
+      }
+      if (window.App && typeof window.App.showAuthSuccess === 'function') {
+        window.App.showAuthSuccess(message.data);
+      }
+      break;
+
+    case 'join-auth-error':
+      addLog(`Join auth error for ${message.data.publicIdentifier}: ${message.data.error}`, 'error');
+      if (relayJoinResolvers.has(message.data.publicIdentifier)) {
+        const { reject } = relayJoinResolvers.get(message.data.publicIdentifier);
+        reject(new Error(message.data.error));
+        relayJoinResolvers.delete(message.data.publicIdentifier);
+      }
+      if (window.App && typeof window.App.showAuthError === 'function') {
+        window.App.showAuthError(message.data.error);
+      }
+      break;
+
     case 'health-update':
       updateHealthStatus(message.healthState)
       break
@@ -823,7 +855,7 @@ async function createRelay() {
 }
 
 // Create a relay instance with provided parameters and return relay key
-async function createRelayInstance(name, description, subnetHash) {
+async function createRelayInstance(name, description) {
   return new Promise((resolve, reject) => {
     if (!workerPipe) {
       addLog('Worker not running', 'error')
@@ -839,9 +871,35 @@ async function createRelayInstance(name, description, subnetHash) {
 
     workerPipe.write(JSON.stringify({
       type: 'create-relay',
-      data: { name, description, subnetHash }
+      data: { name, description }
     }) + '\n')
   })
+}
+
+// Join a relay instance via the worker-driven authentication flow
+async function joinRelayInstance(publicIdentifier) {
+  return new Promise((resolve, reject) => {
+    if (!workerPipe) {
+      addLog('Worker not running', 'error');
+      return reject(new Error('Worker not running'));
+    }
+
+    if (relayJoinResolvers.has(publicIdentifier)) {
+      addLog(`Join flow already in progress for ${publicIdentifier}`, 'warn');
+      return reject(new Error('Join flow already in progress'));
+    }
+
+    // Store the resolver for this specific join attempt
+    relayJoinResolvers.set(publicIdentifier, { resolve, reject });
+
+    addLog(`Starting join flow for relay: ${publicIdentifier}`, 'status');
+    
+    // Send message to worker to start the process
+    workerPipe.write(JSON.stringify({
+      type: 'start-join-flow',
+      data: { publicIdentifier }
+    }) + '\n');
+  });
 }
 
 // Join an existing relay
@@ -1117,6 +1175,7 @@ console.log('[App] Exposing window functions');
 window.startWorker = startWorker;
 window.stopWorker = stopWorker;
 window.createRelayInstance = createRelayInstance;
+window.joinRelayInstance = joinRelayInstance;
 window.disconnectRelayInstance = disconnectRelay;
 window.debugButtonState = debugButtonState;
 

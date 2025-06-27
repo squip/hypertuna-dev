@@ -2237,218 +2237,38 @@ async fetchMultipleProfiles(pubkeys) {
      * @param {string} inviteCode - Optional invite code for closed groups
      * @returns {Promise<Object>} - Join request event
      */
-    async joinGroup(groupId, inviteCode = null) {
+    async joinGroup(publicIdentifier, inviteCode = null) {
         if (!this.user || !this.user.privateKey) {
             throw new Error('User not logged in');
         }
         
-        // Create join request event (kind 9021)
+        // This method is now only used for closed groups with an invite code.
+        // The worker-driven flow handles open, authenticated joins.
+        // We simply create and publish the join request event.
         const event = await NostrEvents.createGroupJoinRequest(
-            groupId,
+            publicIdentifier,
             inviteCode,
             this.user.privateKey
         );
-        
-        // Get gateway URL from config or default
-        const gatewayUrl = this.user.hypertunaConfig?.gatewayUrl || 'https://hypertuna.com';
-        
-        try {
-            console.log(`[NostrGroupClient] Sending join request to gateway for group ${groupId}`);
-            
-            // Send POST request to gateway join endpoint
-            const response = await fetch(`${gatewayUrl}/post/join/${groupId}`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ event })
-            });
-            
-            if (!response.ok) {
-                const error = await response.json();
-                throw new Error(error.message || 'Join request failed');
-            }
-            
-            const joinResponse = await response.json();
-            console.log('[NostrGroupClient] Received challenge from relay:', {
-                hasChallenge: !!joinResponse.challenge,
-                hasRelayPubkey: !!joinResponse.relayPubkey
-            });
-            
-            // Return the response for UI to handle
-            return {
-                success: true,
-                requiresAuth: true,
-                challenge: joinResponse.challenge,
-                relayPubkey: joinResponse.relayPubkey,
-                verifyUrl: joinResponse.verifyUrl,
-                finalUrl: joinResponse.finalUrl,
-                event: event
-            };
-            
-        } catch (error) {
-            console.error('[NostrGroupClient] Error joining group:', error);
-            throw error;
-        }
-    }
 
-    /**
-     * Complete authentication challenge
-     * @param {string} groupId - Group ID
-     * @param {string} challenge - Challenge from relay
-     * @param {string} relayPubkey - Relay's public key
-     * @param {string} verifyUrl - Verification callback URL
-     * @param {string} finalUrl - Finalization callback URL
-     * @returns {Promise<Object>} - Authentication result
-     */
-    async completeJoinAuth(groupId, challenge, relayPubkey, verifyUrl, finalUrl) {
-        if (!this.user || !this.user.privateKey) {
-            throw new Error('User not logged in');
-        }
-        
-        try {
-            console.log('[NostrGroupClient] Computing shared secret for ECDH...');
-            
-            // Import noble-secp256k1 for ECDH
-            const { getSharedSecret } = await import('./crypto-libraries.js').then(m => m.nobleSecp256k1);
-            
-            // Compute shared secret
-            const sharedSecret = await getSharedSecret(
-                this.user.privateKey,
-                '02' + relayPubkey, // Add compression prefix
-                true
-            );
-            
-            // Use same key derivation as demo - slice from index 1 to 33
-            const keyBuffer = sharedSecret.slice(1, 33);
-            console.log('[NostrGroupClient] Shared key computed');
-            
-            // Encrypt the challenge
-            const encrypted = await this.encryptChallenge(keyBuffer, challenge);
-            
-            // Send encrypted challenge to verify endpoint
-            console.log('[NostrGroupClient] Sending encrypted challenge to:', verifyUrl);
-            const verifyResponse = await fetch(verifyUrl, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    pubkey: this.user.pubkey,
-                    ciphertext: encrypted.ciphertext,
-                    iv: encrypted.iv
-                })
-            });
-            
-            if (!verifyResponse.ok) {
-                const error = await verifyResponse.json();
-                throw new Error(error.error || 'Verification failed');
-            }
-            
-            const verifyResult = await verifyResponse.json();
-            console.log('[NostrGroupClient] Verification successful');
-            
-            // Finalize authentication
-            console.log('[NostrGroupClient] Finalizing authentication...');
-            const finalResponse = await fetch(finalUrl, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    pubkey: this.user.pubkey
-                })
-            });
-            
-            if (!finalResponse.ok) {
-                const error = await finalResponse.json();
-                throw new Error(error.error || 'Finalization failed');
-            }
-            
-            const finalResult = await finalResponse.json();
-            console.log('[NostrGroupClient] Authentication complete:', {
-                relayKey: finalResult.relayKey,
-                hasAuthToken: !!finalResult.authToken
-            });
-            
-            // Store the auth token with the relay URL
-            const authToken = finalResult.authToken;
-            const relayUrl = finalResult.relayUrl;
-            
-            // Update user relay list with auth token
-            await this.updateUserRelayListWithAuth(groupId, relayUrl, authToken);
-            
-            // Subscribe to group
-            this.subscribeToGroup(groupId);
-            
-            return {
-                success: true,
-                authToken,
-                relayUrl,
-                relayKey: finalResult.relayKey
-            };
-            
-        } catch (error) {
-            console.error('[NostrGroupClient] Authentication error:', error);
-            throw error;
-        }
-    }
+        // Publish the event directly to the relays
+        await this.relayManager.publish(event);
 
-    /**
-     * Encrypt challenge using AES-256-CBC
-     * @private
-     */
-    async encryptChallenge(keyBuffer, challenge) {
-        // Generate random IV
-        const iv = crypto.getRandomValues(new Uint8Array(16));
-        
-        // Import key for WebCrypto
-        const cryptoKey = await crypto.subtle.importKey(
-            'raw',
-            keyBuffer,
-            { name: 'AES-CBC' },
-            false,
-            ['encrypt']
-        );
-        
-        // Encrypt the challenge
-        const encoder = new TextEncoder();
-        const encrypted = await crypto.subtle.encrypt(
-            {
-                name: 'AES-CBC',
-                iv: iv
-            },
-            cryptoKey,
-            encoder.encode(challenge)
-        );
-        
-        // Convert to base64
-        const ciphertext = btoa(String.fromCharCode(...new Uint8Array(encrypted)));
-        const ivBase64 = btoa(String.fromCharCode(...iv));
-        
-        return { ciphertext, iv: ivBase64 };
+        return event;
     }
 
     /**
      * Update user relay list with authentication token
      * @private
      */
-    async updateUserRelayListWithAuth(groupId, relayUrl, authToken) {
-        // Parse the relay URL to extract components
-        const url = new URL(relayUrl);
-        const gatewayUrl = `${url.protocol}//${url.host}`;
-        const pathParts = url.pathname.split('/').filter(Boolean);
-        const identifier = pathParts.join(':');
-        
+    async updateUserRelayListWithAuth(publicIdentifier, authenticatedUrl, authToken) {
         // Get group metadata
-        const group = this.groups.get(groupId);
+        const group = this.groups.get(publicIdentifier);
         const groupName = group?.name || '';
         const isPublic = group?.isPublic || false;
         
-        // Create relay tag with auth token in the URL
-        const authenticatedUrl = authToken ? 
-        `${gatewayUrl}/${identifier}?token=${authToken}` : 
-        `${gatewayUrl}/${identifier}`;
+        // The authenticatedUrl is passed in directly from the worker's response,
+        // which already includes the token.
         
         // Update user relay list
         if (!this.userRelayListEvent) {
@@ -2468,7 +2288,7 @@ async fetchMultipleProfiles(pubkeys) {
         }
         
         // Create authenticated relay tags
-        const groupTag = ['group', identifier, authenticatedUrl, groupName, 'hypertuna:relay'];
+        const groupTag = ['group', publicIdentifier, authenticatedUrl, groupName, 'hypertuna:relay'];
         const rTag = ['r', authenticatedUrl, 'hypertuna:relay'];
         
         // Add to appropriate list
@@ -2477,7 +2297,7 @@ async fetchMultipleProfiles(pubkeys) {
         } else {
             contentArr.push(groupTag, rTag);
         }
-        
+
         // Create updated relay list event
         const newEvent = await NostrEvents.createUserRelayListEvent(tags, contentArr, this.user.privateKey);
         this.userRelayListEvent = newEvent;
@@ -2489,7 +2309,7 @@ async fetchMultipleProfiles(pubkeys) {
         console.log('[NostrGroupClient] Updated relay list with authenticated URL');
         
         // Connect to the authenticated relay
-        await this.connectToGroupRelay(groupId, authenticatedUrl);
+        await this.connectToGroupRelay(publicIdentifier, authenticatedUrl);
     }
     
     /**

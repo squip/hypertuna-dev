@@ -1232,22 +1232,12 @@
       // Initialize the app with debugging
       document.addEventListener('DOMContentLoaded', async () => {
         console.log('[Index] DOMContentLoaded event fired at:', new Date().toISOString());
-        
+
+        // Integrate with real nostr relays FIRST, so App.init() uses the real methods
+        integrateNostrRelays(App);
+
         // Initialize the original app logic
         await App.init();
-        
-        // Integrate with real nostr relays
-        integrateNostrRelays(App);
-        
-        // Setup default relay URLs
-        const defaultRelays = [
-            'wss://relay.damus.io',
-            'wss://relay.nostr.band',
-            'wss://nos.lol'
-        ];
-
-        // Integrate with real nostr relays
-        integrateNostrRelays(App);
         
         // Setup the list toggle after integration
         if (App.setupListToggle) {
@@ -1256,6 +1246,13 @@
         
         // Check for explicit logout flag
         const explicitLogout = localStorage.getItem('explicit_logout') === 'true';
+
+        // Setup default relay URLs
+        const defaultRelays = [
+            'wss://relay.damus.io',
+            'wss://relay.nostr.band',
+            'wss://nos.lol'
+        ];
 
         if (App.currentUser && !explicitLogout) {
             document.getElementById('relay-list').value = defaultRelays.join('\n');

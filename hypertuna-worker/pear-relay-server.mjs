@@ -9,7 +9,9 @@ import https from 'bare-https';
 import { URL } from 'bare-url';
 import { initializeChallengeManager, getChallengeManager } from './challenge-manager.mjs';
 import { getRelayAuthStore } from './relay-auth-store.mjs';
+import { nobleSecp256k1 } from './pure-secp256k1-bare.js';
 import { NostrUtils } from './nostr-utils.js';
+import { updateRelayAuthToken } from './hypertuna-relay-profile-manager-bare.mjs';
 import {
   createRelay as createRelayManager,
   joinRelay as joinRelayManager,
@@ -1468,18 +1470,18 @@ protocol.handle('/authorize', async (request) => {
 }
 
 // Helper function to publish member add event (kind 9000)
-async function publishMemberAddEvent(identifier, pubkey, token, subnetHash) {
+async function publishMemberAddEvent(identifier, pubkey, token, subnetHashes = []) {
   try {
     console.log(`[RelayServer] Publishing kind 9000 event for ${pubkey.substring(0, 8)}...`);
     
     // Create the event
-    const event = {
+    let event = {
       kind: 9000,
       content: `Adding user ${pubkey} with auth token`,
       created_at: Math.floor(Date.now() / 1000),
       tags: [
         ['h', identifier],
-        ['p', pubkey, 'member', token, subnetHash]
+        ['p', pubkey, 'member', token, ...subnetHashes] // Spread all subnet hashes
       ],
       pubkey: config.nostr_pubkey_hex
     };
@@ -1744,8 +1746,9 @@ async function registerWithGateway(relayProfileInfo = null) {
 
 // Export relay management functions for worker access
 export async function createRelay(options) {
-  const { name, description, subnetHash } = options;
-  console.log('[RelayServer] Creating relay via adapter:', { name, description, subnetHash });
+  // The subnetHash is no longer passed in, it's retrieved from the config
+  const { name, description } = options;
+  console.log('[RelayServer] Creating relay via adapter:', { name, description });
 
   const result = await createRelayManager({
     name,
@@ -1757,17 +1760,16 @@ export async function createRelay(options) {
     await updateHealthState();
     
     // Auto-authorize the creator
-    if (subnetHash) {
+    if (config.subnetHash) {
       try {
         const adminPubkey = config.nostr_pubkey_hex;
         const challengeManager = getChallengeManager();
         const authToken = challengeManager.generateAuthToken(adminPubkey);
         const authStore = getRelayAuthStore();
         const { updateRelayAuthToken } = await import('./hypertuna-relay-profile-manager-bare.mjs');
-
-        authStore.addAuth(result.relayKey, adminPubkey, authToken, subnetHash);
-        await updateRelayAuthToken(result.relayKey, adminPubkey, authToken, [subnetHash]);
-        await publishMemberAddEvent(result.publicIdentifier, adminPubkey, authToken, [subnetHash]);
+        authStore.addAuth(result.relayKey, adminPubkey, authToken, config.subnetHash);
+        await updateRelayAuthToken(result.relayKey, adminPubkey, authToken, [config.subnetHash]);
+        await publishMemberAddEvent(result.publicIdentifier, adminPubkey, authToken, [config.subnetHash]);
 
         result.authToken = authToken;
         result.relayUrl = `wss://${config.proxy_server_address}/${result.publicIdentifier}?token=${authToken}`;
@@ -1820,6 +1822,320 @@ export async function joinRelay(options) {
   }
   
   return result;
+}
+
+/**
+ * Helper function to create a kind 9021 join request event.
+ * This replicates the logic from the desktop's NostrEvents class.
+ * @param {string} publicIdentifier - The public identifier of the relay to join.
+ * @param {string} privateKey - The user's hex-encoded private key for signing.
+ * @returns {Promise<Object>} - A signed Nostr event.
+ */
+async function createGroupJoinRequest(publicIdentifier, privateKey) {
+  const pubkey = NostrUtils.getPublicKey(privateKey);
+  const event = {
+    kind: 9021, // KIND_GROUP_JOIN_REQUEST
+    content: 'Request to join the group',
+    tags: [['h', publicIdentifier]],
+    created_at: Math.floor(Date.now() / 1000),
+    pubkey
+  };
+  return NostrUtils.signEvent(event, privateKey);
+}
+
+export async function startJoinAuthentication(options) {
+  const { publicIdentifier } = options;
+  const userPubkey = config.nostr_pubkey_hex;
+  const userNsec = config.nostr_nsec_hex;
+
+  console.log(`[RelayServer] Starting join authentication for: ${publicIdentifier}`);
+  console.log(`[RelayServer] Using user pubkey: ${userPubkey.substring(0, 8)}...`);
+
+  if (!publicIdentifier || !userPubkey || !userNsec) {
+    const errorMsg = 'Missing publicIdentifier or user credentials for join flow.';
+    console.error(`[RelayServer] ${errorMsg}`);
+    if (global.sendMessage) {
+      global.sendMessage({
+        type: 'join-auth-error',
+        data: {
+          publicIdentifier,
+          error: errorMsg
+        }
+      });
+    }
+    return;
+  }
+
+  try {
+    // Send initial progress message to the desktop UI
+    if (global.sendMessage) {
+      global.sendMessage({
+        type: 'join-auth-progress',
+        data: {
+          publicIdentifier,
+          status: 'request'
+        }
+      });
+    }
+    
+    // 1. Construct the kind 9021 event
+    console.log('[RelayServer] Creating kind 9021 join request event...');
+    const joinEvent = await createGroupJoinRequest(publicIdentifier, userNsec);
+    console.log(`[RelayServer] Created join event ID: ${joinEvent.id.substring(0, 8)}...`);
+    
+    // 2. Retrieve subnetHash (should have been stored during gateway registration)
+    const requesterSubnetHash = config.subnetHash;
+    if (!requesterSubnetHash) {
+      throw new Error('Subnet hash not available. Ensure worker is registered with gateway.');
+    }
+    console.log(`[RelayServer] Using subnet hash: ${requesterSubnetHash.substring(0, 8)}...`);
+    
+    // 3. Make an https.request to the gateway's /post/join/:identifier endpoint
+    const gatewayUrl = new URL(config.gatewayUrl);
+    const postData = JSON.stringify({
+      event: joinEvent,
+      requesterSubnetHash: requesterSubnetHash
+    });
+    
+    const requestOptions = {
+      hostname: gatewayUrl.hostname,
+      port: gatewayUrl.port || 443,
+      path: `/post/join/${publicIdentifier}`,
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(postData)
+      },
+      rejectUnauthorized: false // For self-signed certs in dev
+    };
+    
+    console.log(`[RelayServer] Sending join request to gateway: ${requestOptions.hostname}${requestOptions.path}`);
+    
+    const joinResponse = await new Promise((resolve, reject) => {
+      const req = https.request(requestOptions, (res) => {
+        let data = '';
+        res.on('data', (chunk) => data += chunk);
+        res.on('end', () => {
+          if (res.statusCode >= 200 && res.statusCode < 300) {
+            try {
+              resolve(JSON.parse(data));
+            } catch (e) {
+              reject(new Error(`Failed to parse JSON response: ${data}`));
+            }
+          } else {
+            reject(new Error(`Gateway returned status ${res.statusCode}: ${data}`));
+          }
+        });
+      });
+      
+      req.on('error', (e) => {
+        console.error(`[RelayServer] Join request error:`, e);
+        reject(e);
+      });
+      
+      req.write(postData);
+      req.end();
+    });
+
+    console.log('[RelayServer] Received response from gateway:', joinResponse);
+
+    // Step 2.3: Handle challenge and verification callback
+    const { challenge, relayPubkey, verifyUrl, finalUrl } = joinResponse;
+
+    if (!challenge || !relayPubkey || !verifyUrl || !finalUrl) {
+      throw new Error('Invalid challenge response from gateway. Missing required fields.');
+    }
+
+    // Send 'verify' progress update to the desktop UI
+    if (global.sendMessage) {
+      global.sendMessage({
+        type: 'join-auth-progress',
+        data: { publicIdentifier, status: 'verify' }
+      });
+    }
+
+    // Compute the shared secret using ECDH
+    console.log('[RelayServer] Computing shared secret for ECDH...');
+    const sharedSecret = await nobleSecp256k1.getSharedSecret(
+      userNsec,
+      '02' + relayPubkey, // Add compression prefix for noble-secp256k1
+      true
+    );
+    const keyBuffer = Buffer.from(sharedSecret.slice(1, 33)); // Derive 32-byte key
+    console.log(`[RelayServer] Shared key computed: ${keyBuffer.toString('hex').substring(0, 8)}...`);
+
+    // Encrypt the challenge using AES-256-CBC
+    const iv = crypto.randomBytes(16);
+    const encrypted = nobleSecp256k1.aes.encrypt(challenge, keyBuffer, iv);
+    const ciphertext = Buffer.from(encrypted).toString('base64');
+    const ivBase64 = Buffer.from(iv).toString('base64');
+    console.log('[RelayServer] Challenge encrypted.');
+
+    // Send the encrypted challenge to the verification URL
+    const verifyGatewayUrl = new URL(verifyUrl);
+    const verifyPostData = JSON.stringify({
+      pubkey: userPubkey,
+      ciphertext: ciphertext,
+      iv: ivBase64
+    });
+
+    const verifyOptions = {
+      hostname: verifyGatewayUrl.hostname,
+      port: verifyGatewayUrl.port || 443,
+      path: verifyGatewayUrl.pathname,
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(verifyPostData)
+      },
+      rejectUnauthorized: false // For self-signed certs in dev
+    };
+
+    console.log(`[RelayServer] Sending verification request to gateway: ${verifyOptions.hostname}${verifyOptions.path}`);
+
+    const verifyResponse = await new Promise((resolve, reject) => {
+      const req = https.request(verifyOptions, (res) => {
+        let data = '';
+        res.on('data', (chunk) => data += chunk);
+        res.on('end', () => {
+          if (res.statusCode >= 200 && res.statusCode < 300) {
+            try {
+              resolve(JSON.parse(data));
+            } catch (e) {
+              reject(new Error(`Failed to parse JSON response from verifyUrl: ${data}`));
+            }
+          } else {
+            reject(new Error(`Gateway verification failed with status ${res.statusCode}: ${data}`));
+          }
+        });
+      });
+
+      req.on('error', (e) => {
+        console.error(`[RelayServer] Verification request error:`, e);
+        reject(e);
+      });
+
+      req.write(verifyPostData);
+      req.end();
+    });
+
+    console.log('[RelayServer] Received verification response from gateway:', verifyResponse);
+
+    // Step 2.4: Finalization callback, token persistence, and success notification
+    if (global.sendMessage) {
+      global.sendMessage({
+        type: 'join-auth-progress',
+        data: { publicIdentifier, status: 'complete' }
+      });
+    }
+
+    const finalGatewayUrl = new URL(finalUrl);
+    const finalPostData = JSON.stringify({
+      pubkey: userPubkey
+    });
+
+    const finalOptions = {
+      hostname: finalGatewayUrl.hostname,
+      port: finalGatewayUrl.port || 443,
+      path: finalGatewayUrl.pathname,
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(finalPostData)
+      },
+      rejectUnauthorized: false // For self-signed certs in dev
+    };
+
+    console.log(`[RelayServer] Sending finalization request to gateway: ${finalOptions.hostname}${finalOptions.path}`);
+
+    const finalResponse = await new Promise((resolve, reject) => {
+      const req = https.request(finalOptions, (res) => {
+        let data = '';
+        res.on('data', (chunk) => data += chunk);
+        res.on('end', () => {
+          if (res.statusCode >= 200 && res.statusCode < 300) {
+            try {
+              resolve(JSON.parse(data));
+            } catch (e) {
+              reject(new Error(`Failed to parse JSON response from finalUrl: ${data}`));
+            }
+          } else {
+            reject(new Error(`Gateway finalization failed with status ${res.statusCode}: ${data}`));
+          }
+        });
+      });
+      req.on('error', (e) => reject(e));
+      req.write(finalPostData);
+      req.end();
+    });
+
+    console.log('[RelayServer] Received final response from gateway:', finalResponse);
+
+    const { authToken, relayUrl } = finalResponse;
+    if (!authToken || !relayUrl) {
+      throw new Error('Final response from gateway missing authToken or relayUrl');
+    }
+
+    // Persist the auth token and subnet hash to the local relay profile
+    console.log(`[RelayServer] Persisting auth token for ${userPubkey.substring(0, 8)}...`);
+    await updateRelayAuthToken(publicIdentifier, userPubkey, authToken, [requesterSubnetHash]);
+
+    // Publish kind 9000 event to announce the new member
+    console.log('[RelayServer] Publishing kind 9000 member add event...');
+    await publishMemberAddEvent(publicIdentifier, userPubkey, authToken, [requesterSubnetHash]);
+
+    // Notify the desktop UI of success
+    if (global.sendMessage) {
+      global.sendMessage({
+        type: 'join-auth-success',
+        data: { publicIdentifier, authToken, relayUrl }
+      });
+    }
+
+    console.log(`[RelayServer] Join flow for ${publicIdentifier} completed successfully.`);
+
+  } catch (error) {
+    console.error(`[RelayServer] Error during join authentication for ${publicIdentifier}:`, error);
+    if (global.sendMessage) {
+      global.sendMessage({
+        type: 'join-auth-error',
+        data: {
+          publicIdentifier,
+          error: error.message
+        }
+      });
+    }
+  }
+}
+
+/**
+ * Creates and publishes a kind 9000 event to add a member to a relay.
+ * @param {string} identifier - The public identifier of the relay.
+ * @param {string} pubkey - The public key of the user being added.
+ * @param {string} token - The authentication token for the user.
+ * @param {Array<string>} subnetHashes - An array of allowed subnet hashes for the user.
+ */
+async function publishMemberAddEvent(identifier, pubkey, token, subnetHashes = []) {
+  try {
+    console.log(`[RelayServer] Publishing kind 9000 event for ${pubkey.substring(0, 8)}...`);
+
+    let event = {
+      kind: 9000,
+      content: `Adding user ${pubkey} with auth token`,
+      created_at: Math.floor(Date.now() / 1000),
+      tags: [
+        ['h', identifier],
+        ['p', pubkey, 'member', token, ...subnetHashes]
+      ],
+      pubkey: config.nostr_pubkey_hex
+    };
+
+    event = await NostrUtils.signEvent(event, config.nostr_nsec_hex);
+    await publishEventToRelay(identifier, event);
+    console.log(`[RelayServer] Published kind 9000 event: ${event.id.substring(0, 8)}...`);
+  } catch (error) {
+    console.error(`[RelayServer] Error publishing member add event:`, error);
+  }
 }
 
 export async function disconnectRelay(relayKey) {
