@@ -338,7 +338,7 @@ const mirror = debounce(mirrorDrive);
 // Message Handling with Hyperswarm
 // ============================
 
-async function forwardMessageToPeer(peerPublicKey, identifier, message, connectionKey) {
+async function forwardMessageToPeer(peerPublicKey, identifier, message, connectionKey, authToken = null) {
   let peer = activePeers.find(p => p.publicKey === peerPublicKey);
   
   try {
@@ -361,7 +361,8 @@ async function forwardMessageToPeer(peerPublicKey, identifier, message, connecti
       message,
       connectionKey,
       connectionPool,
-      subnetHash // Add this parameter
+      subnetHash, // Add this parameter
+      authToken
     );
   } catch (error) {
     await peerHealthManager.recordFailure(peer.publicKey);
@@ -386,7 +387,7 @@ wss.on('connection', (ws, req) => {
   console.log(`[${new Date().toISOString()}] Has auth token: ${!!authToken}`);
 
   if (activeRelays.has(identifier)) {
-    handleWebSocket(ws, identifier, authToken);
+    handleWebSocket(ws, req, identifier, authToken);
   } else {
     console.log(`[${new Date().toISOString()}] Invalid relay identifier: ${identifier}. Closing connection.`);
     ws.close(1008, 'Invalid relay key');
@@ -394,9 +395,9 @@ wss.on('connection', (ws, req) => {
 });
 
 // Update handleWebSocket to accept and store the auth token
-function handleWebSocket(ws, identifier, authToken = null) {
+function handleWebSocket(ws, req, identifier, authToken = null) {
   const connectionKey = generateConnectionKey();
-  const subnetHash = getHashedClientSubnet({ socket: ws._socket });
+  const subnetHash = getHashedClientSubnet(req);
   
   console.log(`[${new Date().toISOString()}] New WebSocket connection established:`, {
     identifier,
@@ -426,6 +427,13 @@ function handleWebSocket(ws, identifier, authToken = null) {
   ws.on('message', async (message) => {
     const processMessage = async (msg) => {
       console.log(`[${new Date().toISOString()}] Processing WebSocket message for relay ${identifier}`);
+
+      const connData = wsConnections.get(connectionKey);
+      if (!connData) {
+        console.error(`[${new Date().toISOString()}] No connection data found for key ${connectionKey}. Aborting message processing.`);
+        ws.send(JSON.stringify(['NOTICE', 'Internal server error: connection data missing']));
+        return;
+      }
       
       const healthyPeer = await findHealthyPeerForRelay(identifier);
       if (!healthyPeer) {

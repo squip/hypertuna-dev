@@ -2108,36 +2108,6 @@ export async function startJoinAuthentication(options) {
   }
 }
 
-/**
- * Creates and publishes a kind 9000 event to add a member to a relay.
- * @param {string} identifier - The public identifier of the relay.
- * @param {string} pubkey - The public key of the user being added.
- * @param {string} token - The authentication token for the user.
- * @param {Array<string>} subnetHashes - An array of allowed subnet hashes for the user.
- */
-async function publishMemberAddEvent(identifier, pubkey, token, subnetHashes = []) {
-  try {
-    console.log(`[RelayServer] Publishing kind 9000 event for ${pubkey.substring(0, 8)}...`);
-
-    let event = {
-      kind: 9000,
-      content: `Adding user ${pubkey} with auth token`,
-      created_at: Math.floor(Date.now() / 1000),
-      tags: [
-        ['h', identifier],
-        ['p', pubkey, 'member', token, ...subnetHashes]
-      ],
-      pubkey: config.nostr_pubkey_hex
-    };
-
-    event = await NostrUtils.signEvent(event, config.nostr_nsec_hex);
-    await publishEventToRelay(identifier, event);
-    console.log(`[RelayServer] Published kind 9000 event: ${event.id.substring(0, 8)}...`);
-  } catch (error) {
-    console.error(`[RelayServer] Error publishing member add event:`, error);
-  }
-}
-
 export async function disconnectRelay(relayKey) {
   console.log('[RelayServer] Disconnecting relay via adapter:', relayKey);
   const result = await disconnectRelayManager(relayKey);
