@@ -1426,14 +1426,33 @@ App.syncHypertunaConfigToFile = async function() {
         
         try {
             // Get the user's npub
-            const npub = NostrUtils.hexToNpub(this.currentUser.pubkey);
+            const npub = NostrUtils.hexToNpub(this.currentUser.pubkey); 
             
             console.log("Creating group with parameters:", { name, about, isPublic, isOpen, npub });
 
             let relayKey = null;
+            let subnetHash = null;
+
+            // Show a modal similar to the join flow
+            const modal = document.getElementById('join-auth-modal');
+            modal.classList.add('show');
+            this.resetAuthModal();
+            this.updateAuthProgress('request');
+            document.getElementById('auth-status-title').textContent = 'Creating Relay...';
+            document.getElementById('auth-status-message').textContent = 'Setting up your new relay instance...';
+
             if (window.createRelayInstance) {
                 try {
-                    relayKey = await window.createRelayInstance(name, about);
+                    // Fetch subnet hash from gateway
+                    const gatewayUrl = this.currentUser.hypertunaConfig?.gatewayUrl || HypertunaUtils.DEFAULT_GATEWAY_URL;
+                    const response = await fetch(`${gatewayUrl}/get-subnet-hash`);
+                    const { subnetHash: fetchedSubnetHash } = await response.json();
+                    subnetHash = fetchedSubnetHash;
+
+                    this.updateAuthProgress('verify');
+                    document.getElementById('auth-status-message').textContent = 'Authorizing your device...';
+
+                    relayKey = await window.createRelayInstance(name, about, subnetHash);
                 } catch (err) {
                     console.error('Failed to create relay instance:', err);
                 }
@@ -1445,6 +1464,13 @@ App.syncHypertunaConfigToFile = async function() {
                 name, about, isPublic, isOpen, relayKey, proxyServer, npub
             );
             
+            // The worker now returns the auth token in the relayKey object
+            if (relayKey && relayKey.authToken) {
+                this.showAuthSuccess(relayKey);
+            } else {
+                this.closeJoinAuthModal();
+            }
+
             console.log(`Group created successfully with public ID: ${eventsCollection.groupId}`);
             console.log(`Internal relay key: ${eventsCollection.internalRelayKey}`);
             
@@ -1466,7 +1492,7 @@ App.syncHypertunaConfigToFile = async function() {
             this.loadGroups();
             
             alert('Group created successfully!');
-            this.navigateTo('groups');
+            // this.navigateTo('groups'); // Don't navigate away immediately, let user see modal
         } catch (e) {
             console.error('Error creating group:', e);
             alert('Error creating group: ' + e.message);

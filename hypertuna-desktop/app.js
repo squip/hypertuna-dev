@@ -823,21 +823,23 @@ async function createRelay() {
 }
 
 // Create a relay instance with provided parameters and return relay key
-async function createRelayInstance(name, description) {
+async function createRelayInstance(name, description, subnetHash) {
   return new Promise((resolve, reject) => {
     if (!workerPipe) {
       addLog('Worker not running', 'error')
       return reject(new Error('Worker not running'))
     }
 
+    // The resolver will now receive the full message data from the worker
     relayCreateResolvers.push((msg) => {
-      if (msg.data.success) resolve(msg.data.relayKey)
+      // Resolve with the full data object, which now includes the auth token
+      if (msg.data.success) resolve(msg.data)
       else reject(new Error(msg.data.error))
     })
 
     workerPipe.write(JSON.stringify({
       type: 'create-relay',
-      data: { name, description }
+      data: { name, description, subnetHash }
     }) + '\n')
   })
 }

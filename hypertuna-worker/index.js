@@ -200,7 +200,7 @@ if (workerPipe) {
               if (relayServer) {
                 try {
                   // Call the relay server's create relay function
-                  const result = await relayServer.createRelay(message.data)
+                  const result = await relayServer.createRelay(message.data);
                   relayMembers.set(result.relayKey, result.profile?.members || [])
 
                   sendMessage({

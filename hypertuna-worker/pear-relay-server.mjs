@@ -859,8 +859,9 @@ function setupProtocolHandlers(protocol) {
       
       if (profile) {
         // Update profile with auth token
-        const { updateRelayAuthToken } = await import('./hypertuna-relay-profile-manager-bare.mjs');
-        await updateRelayAuthToken(identifier, pubkey, token, subnetHash);
+        const { updateRelayAuthToken } = await import('./hypertuna-relay-profile-manager-bare.mjs'); 
+        // Pass subnetHash as an array to match the function signature
+        await updateRelayAuthToken(identifier, pubkey, token, [subnetHash]);
         // Update member lists
         const currentAdds = profile.member_adds || [];
         const currentRemoves = profile.member_removes || [];
@@ -883,7 +884,8 @@ function setupProtocolHandlers(protocol) {
         await updateRelayMemberSets(identifier, currentAdds, currentRemoves);
         
         // Publish kind 9000 event
-        await publishMemberAddEvent(identifier, pubkey, token, subnetHash);
+        // Pass subnetHash as an array
+        await publishMemberAddEvent(identifier, pubkey, token, [subnetHash]);
       }
       
       // Generate relay connection URL
@@ -1742,15 +1744,40 @@ async function registerWithGateway(relayProfileInfo = null) {
 
 // Export relay management functions for worker access
 export async function createRelay(options) {
-  console.log('[RelayServer] Creating relay via adapter:', options);
+  const { name, description, subnetHash } = options;
+  console.log('[RelayServer] Creating relay via adapter:', { name, description, subnetHash });
+
   const result = await createRelayManager({
-    ...options,
+    name,
+    description,
     config
   });
   
   if (result.success) {
     await updateHealthState();
     
+    // Auto-authorize the creator
+    if (subnetHash) {
+      try {
+        const adminPubkey = config.nostr_pubkey_hex;
+        const challengeManager = getChallengeManager();
+        const authToken = challengeManager.generateAuthToken(adminPubkey);
+        const authStore = getRelayAuthStore();
+        const { updateRelayAuthToken } = await import('./hypertuna-relay-profile-manager-bare.mjs');
+
+        authStore.addAuth(result.relayKey, adminPubkey, authToken, subnetHash);
+        await updateRelayAuthToken(result.relayKey, adminPubkey, authToken, [subnetHash]);
+        await publishMemberAddEvent(result.publicIdentifier, adminPubkey, authToken, [subnetHash]);
+
+        result.authToken = authToken;
+        result.relayUrl = `wss://${config.proxy_server_address}/${result.publicIdentifier}?token=${authToken}`;
+        console.log(`[RelayServer] Auto-authorized creator ${adminPubkey.substring(0, 8)}...`);
+      } catch (authError) {
+        console.error('[RelayServer] Failed to auto-authorize creator:', authError);
+        result.registrationError = (result.registrationError || '') + ` | Auth Error: ${authError.message}`;
+      }
+    }
+
     // ALWAYS register with gateway via HTTP if enabled
     let registrationStatus = 'disabled';
     if (config.registerWithGateway) {
