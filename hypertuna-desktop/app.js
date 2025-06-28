@@ -855,7 +855,7 @@ async function createRelay() {
 }
 
 // Create a relay instance with provided parameters and return relay key
-async function createRelayInstance(name, description) {
+async function createRelayInstance(name, description, isPublic, isOpen) {
   return new Promise((resolve, reject) => {
     if (!workerPipe) {
       addLog('Worker not running', 'error')
@@ -871,7 +871,7 @@ async function createRelayInstance(name, description) {
 
     workerPipe.write(JSON.stringify({
       type: 'create-relay',
-      data: { name, description }
+      data: { name, description, isPublic, isOpen }
     }) + '\n')
   })
 }

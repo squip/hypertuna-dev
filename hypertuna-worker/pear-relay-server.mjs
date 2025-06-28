@@ -1783,8 +1783,6 @@ export async function createRelay(options) {
         result.profile.isPublic = isPublic;
         result.profile.isOpen = isOpen;
         if (!result.profile.auth_config) result.profile.auth_config = {};
-        result.profile.auth_config.isPublic = isPublic;
-        result.profile.auth_config.isOpen = isOpen;
         await saveRelayProfile(result.profile);
         console.log(`[RelayServer] Auto-authorized creator ${adminPubkey.substring(0, 8)}...`);
       } catch (authError) {

@@ -20,6 +20,9 @@ updateRelayMemberSets,
 calculateMembers
 } from './hypertuna-relay-profile-manager-bare.mjs';
 
+import { ChallengeManager } from './challenge-manager.mjs';
+
+
 // Store active relay managers
 const activeRelays = new Map();
 
@@ -112,8 +115,6 @@ export async function createRelay(options = {}) {
             auth_config: {
                 requiresAuth: true,
                 tokenProtected: true,
-                isPublic,
-                isOpen,
                 authorizedUsers: [],
                 auth_adds: [],
                 auth_removes: []
