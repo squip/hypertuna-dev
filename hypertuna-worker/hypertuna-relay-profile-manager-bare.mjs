@@ -63,7 +63,15 @@ function ensureProfileSchema(profile) {
     if (!Array.isArray(profile.auth_removes)) {
         profile.auth_removes = [];
     }
-    
+
+    // NEW: ensure visibility and join flags exist
+    if (profile.isPublic === undefined) {
+        profile.isPublic = false;
+    }
+    if (profile.isOpen === undefined) {
+        profile.isOpen = false;
+    }
+
     return profile;
 }
 
