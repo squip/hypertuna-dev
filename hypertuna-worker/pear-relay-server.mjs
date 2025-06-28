@@ -1722,15 +1722,22 @@ async function registerWithGateway(relayProfileInfo = null) {
                   }
               });
           });
-          
+
           req.on('error', reject);
           req.write(postData);
           req.end();
       });
-      
+
       console.log('[RelayServer] Gateway HTTP registration response:', response);
       console.log('[RelayServer] Registration SUCCESSFUL');
-      
+
+      // Store subnet hash from gateway response if provided
+      if (response && response.subnetHash) {
+          config.subnetHash = response.subnetHash;
+          await saveConfig(config);
+          console.log(`[RelayServer] Stored subnet hash: ${config.subnetHash.substring(0, 8)}...`);
+      }
+
       // Notify parent process
       if (global.sendMessage) {
           console.log('[RelayServer] Notifying worker of successful registration');
