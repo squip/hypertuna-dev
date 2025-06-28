@@ -1473,7 +1473,8 @@ protocol.handle('/authorize', async (request) => {
 }
 
 // Helper function to publish member add event (kind 9000)
-async function publishMemberAddEvent(identifier, pubkey, token, subnetHashes = []) {
+// role can be 'admin' when the creator is automatically authorized during relay creation
+async function publishMemberAddEvent(identifier, pubkey, token, subnetHashes = [], role = 'member') {
   try {
     console.log(`[RelayServer] Publishing kind 9000 event for ${pubkey.substring(0, 8)}...`);
     
@@ -1484,7 +1485,7 @@ async function publishMemberAddEvent(identifier, pubkey, token, subnetHashes = [
       created_at: Math.floor(Date.now() / 1000),
       tags: [
         ['h', identifier],
-        ['p', pubkey, 'member', token, ...subnetHashes] // Spread all subnet hashes
+        ['p', pubkey, role, token, ...subnetHashes] // Spread all subnet hashes
       ],
       pubkey: config.nostr_pubkey_hex
     };
@@ -1722,15 +1723,22 @@ async function registerWithGateway(relayProfileInfo = null) {
                   }
               });
           });
-          
+
           req.on('error', reject);
           req.write(postData);
           req.end();
       });
-      
+
       console.log('[RelayServer] Gateway HTTP registration response:', response);
       console.log('[RelayServer] Registration SUCCESSFUL');
-      
+
+      // Store subnet hash from gateway response if provided
+      if (response && response.subnetHash) {
+          config.subnetHash = response.subnetHash;
+          await saveConfig(config);
+          console.log(`[RelayServer] Stored subnet hash: ${config.subnetHash.substring(0, 8)}...`);
+      }
+
       // Notify parent process
       if (global.sendMessage) {
           console.log('[RelayServer] Notifying worker of successful registration');
@@ -1774,7 +1782,6 @@ export async function createRelay(options) {
         const { updateRelayAuthToken } = await import('./hypertuna-relay-profile-manager-bare.mjs');
         authStore.addAuth(result.relayKey, adminPubkey, authToken, config.subnetHash);
         await updateRelayAuthToken(result.relayKey, adminPubkey, authToken, [config.subnetHash]);
-        await publishMemberAddEvent(result.publicIdentifier, adminPubkey, authToken, [config.subnetHash]);
 
         result.authToken = authToken;
         result.relayUrl = `wss://${config.proxy_server_address}/${result.publicIdentifier}?token=${authToken}`;
@@ -1784,6 +1791,7 @@ export async function createRelay(options) {
         result.profile.isOpen = isOpen;
         if (!result.profile.auth_config) result.profile.auth_config = {};
         await saveRelayProfile(result.profile);
+        await publishMemberAddEvent(result.publicIdentifier, adminPubkey, authToken, [config.subnetHash], 'admin');
         console.log(`[RelayServer] Auto-authorized creator ${adminPubkey.substring(0, 8)}...`);
       } catch (authError) {
         console.error('[RelayServer] Failed to auto-authorize creator:', authError);
