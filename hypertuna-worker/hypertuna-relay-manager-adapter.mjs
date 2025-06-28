@@ -58,7 +58,7 @@ async function ensureProfilesInitialized(userKey = null) {
  * @returns {Promise<Object>} - Result object with relay information
  */
 export async function createRelay(options = {}) {
-    const { name, description, storageDir, config } = options;
+    const { name, description, isPublic = false, isOpen = false, storageDir, config } = options;
     
     // Store config and user key globally if provided
     if (config) {
@@ -106,7 +106,18 @@ export async function createRelay(options = {}) {
             relay_storage: defaultStorageDir,
             created_at: new Date().toISOString(),
             auto_connect: true,
-            is_active: true
+            is_active: true,
+            isPublic,
+            isOpen,
+            auth_config: {
+                requiresAuth: true,
+                tokenProtected: true,
+                isPublic,
+                isOpen,
+                authorizedUsers: [],
+                auth_adds: [],
+                auth_removes: []
+            }
         };
         
         // Save relay profile

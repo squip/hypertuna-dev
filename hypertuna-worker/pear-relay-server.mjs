@@ -32,10 +32,11 @@ import {
   isRelayActiveByPublicIdentifier 
 } from './relay-lookup-utils.mjs';
 
-import { 
+import {
   updateRelayMemberSets,
   getRelayProfileByKey,
-  getRelayProfileByPublicIdentifier
+  getRelayProfileByPublicIdentifier,
+  saveRelayProfile
 } from './hypertuna-relay-profile-manager-bare.mjs';
 
 
@@ -514,7 +515,7 @@ function setupProtocolHandlers(protocol) {
   protocol.handle('/relay/create', async (request) => {
     console.log('[RelayServer] Create relay requested');
     const body = JSON.parse(request.body.toString());
-    const { name, description } = body;
+    const { name, description, isPublic = false, isOpen = false } = body;
     
     console.log('[RelayServer] Creating relay:', { name, description });
     
@@ -531,6 +532,8 @@ function setupProtocolHandlers(protocol) {
       const result = await createRelayManager({
         name,
         description,
+        isPublic,
+        isOpen,
         config
       });
       
@@ -1747,12 +1750,14 @@ async function registerWithGateway(relayProfileInfo = null) {
 // Export relay management functions for worker access
 export async function createRelay(options) {
   // The subnetHash is no longer passed in, it's retrieved from the config
-  const { name, description } = options;
-  console.log('[RelayServer] Creating relay via adapter:', { name, description });
+  const { name, description, isPublic = false, isOpen = false } = options;
+  console.log('[RelayServer] Creating relay via adapter:', { name, description, isPublic, isOpen });
 
   const result = await createRelayManager({
     name,
     description,
+    isPublic,
+    isOpen,
     config
   });
   
@@ -1773,6 +1778,14 @@ export async function createRelay(options) {
 
         result.authToken = authToken;
         result.relayUrl = `wss://${config.proxy_server_address}/${result.publicIdentifier}?token=${authToken}`;
+
+        // Persist visibility settings
+        result.profile.isPublic = isPublic;
+        result.profile.isOpen = isOpen;
+        if (!result.profile.auth_config) result.profile.auth_config = {};
+        result.profile.auth_config.isPublic = isPublic;
+        result.profile.auth_config.isOpen = isOpen;
+        await saveRelayProfile(result.profile);
         console.log(`[RelayServer] Auto-authorized creator ${adminPubkey.substring(0, 8)}...`);
       } catch (authError) {
         console.error('[RelayServer] Failed to auto-authorize creator:', authError);
