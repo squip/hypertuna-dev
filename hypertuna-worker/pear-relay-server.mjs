@@ -993,6 +993,14 @@ protocol.handle('/authorize', async (request) => {
     
     if (added) {
       console.log(`[RelayServer] Added subnet for ${foundAuth.pubkey.substring(0, 8)}...`);
+      // Persist subnet update to profile
+      try {
+        await updateRelayAuthToken(foundRelay, foundAuth.pubkey, token, [subnetHash]);
+        await publishMemberAddEvent(foundRelay, foundAuth.pubkey, token, [subnetHash]);
+      } catch (persistErr) {
+        console.error('[RelayServer] Failed to persist mobile subnet:', persistErr.message);
+      }
+      
       console.log(`[RelayServer] ========================================`);
       
       updateMetrics(true);
