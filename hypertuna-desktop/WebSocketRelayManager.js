@@ -82,13 +82,15 @@ class WebSocketRelayManager {
      * @param {string} groupId - Optional group ID for group relays
      */
     async addTypedRelay(url, type = 'discovery', groupId = null) {
-        // Store the type before connecting
-        this.relayTypes.set(url, type);
-        
+        const { cleanUrl } = this.parseRelayUrl(url);
+
+        // Store the type using the normalized URL (without query params)
+        this.relayTypes.set(cleanUrl, type);
+
         if (type === 'discovery') {
-            this.discoveryRelays.add(url);
+            this.discoveryRelays.add(cleanUrl);
         } else if (type === 'group' && groupId) {
-            this.groupRelays.set(groupId, url);
+            this.groupRelays.set(groupId, cleanUrl);
         }
         
         console.log(`Adding ${type} relay: ${url}${groupId ? ' for group ' + groupId : ''}`);
@@ -97,9 +99,9 @@ class WebSocketRelayManager {
             await this.addRelay(url);
         } catch (error) {
             // Clean up on failure
-            this.relayTypes.delete(url);
+            this.relayTypes.delete(cleanUrl);
             if (type === 'discovery') {
-                this.discoveryRelays.delete(url);
+                this.discoveryRelays.delete(cleanUrl);
             } else if (type === 'group' && groupId) {
                 this.groupRelays.delete(groupId);
             }
@@ -116,20 +118,24 @@ class WebSocketRelayManager {
      */
     subscribeWithRouting(subscriptionId, filters, callback, options = {}) {
         const { targetRelays = null, suppressGlobalEvents = false } = options;
+
+        const normalizedTargets = targetRelays && targetRelays.length > 0
+            ? targetRelays.map(r => this.parseRelayUrl(r).cleanUrl)
+            : null;
         
         // Generate unique short ID for this subscription
         const shortSubId = this._generateUniqueShortId(subscriptionId);
         
-        if (targetRelays && targetRelays.length > 0) {
+        if (normalizedTargets && normalizedTargets.length > 0) {
             this.globalSubscriptions.set(subscriptionId, {
                 shortId: shortSubId,
                 filters,
                 callbacks: callback ? [callback] : [],
                 suppressGlobalEvents,
-                targetRelays
+                targetRelays: normalizedTargets
             });
-            
-            targetRelays.forEach(relayUrl => {
+
+            normalizedTargets.forEach(relayUrl => {
                 if (this.relays.has(relayUrl) && this.relays.get(relayUrl).status === 'open') {
                     this._subscribeOnRelay(relayUrl, subscriptionId, filters);
                 }
@@ -149,7 +155,8 @@ class WebSocketRelayManager {
     async publishToRelays(event, targetRelays = null) {
         if (targetRelays && targetRelays.length > 0) {
             // Only publish to specified relays
-            const publishPromises = targetRelays.map(url => {
+            const normalizedTargets = targetRelays.map(u => this.parseRelayUrl(u).cleanUrl);
+            const publishPromises = normalizedTargets.map(url => {
                 if (this.relays.has(url) && this.relays.get(url).status === 'open') {
                     return this._publishToSingleRelay(event, url);
                 }
@@ -167,16 +174,17 @@ class WebSocketRelayManager {
      * Helper to publish to a single relay
      */
     async _publishToSingleRelay(event, relayUrl) {
-        const relay = this.relays.get(relayUrl);
+        const { cleanUrl } = this.parseRelayUrl(relayUrl);
+        const relay = this.relays.get(cleanUrl);
         if (!relay || relay.status !== 'open') {
-            return { url: relayUrl, success: false, error: 'Relay not connected' };
+            return { url: cleanUrl, success: false, error: 'Relay not connected' };
         }
         
         const eventMsg = JSON.stringify(['EVENT', event]);
         
         return new Promise((resolve) => {
             const timeout = setTimeout(() => {
-                resolve({ url: relayUrl, success: false, error: 'Timeout' });
+                resolve({ url: cleanUrl, success: false, error: 'Timeout' });
             }, 10000);
             
             const okHandler = (msgEvent) => {
@@ -185,7 +193,7 @@ class WebSocketRelayManager {
                     if (Array.isArray(data) && data[0] === 'OK' && data[1] === event.id) {
                         clearTimeout(timeout);
                         relay.conn.removeEventListener('message', okHandler);
-                        resolve({ url: relayUrl, success: data[2] === true });
+                        resolve({ url: cleanUrl, success: data[2] === true });
                     }
                 } catch (e) {
                     // Ignore parse errors
@@ -317,7 +325,7 @@ class WebSocketRelayManager {
                     }
                     
                     // Only apply subscriptions that are meant for this relay
-                    this._applyRelevantSubscriptions(url);
+                    this._applyRelevantSubscriptions(normalizedUrl);
                     
                     // Notify connect listeners
                     this.connectCallbacks.forEach(callback => callback(url));
@@ -346,7 +354,7 @@ class WebSocketRelayManager {
                         }, 5000);
                     } else {
                         // Clean up the relay from our map
-                        this.relays.delete(url);
+                        this.relays.delete(normalizedUrl);
                     }
                 };
 
@@ -378,12 +386,13 @@ class WebSocketRelayManager {
      * @private
      */
     _applyRelevantSubscriptions(relayUrl) {
-        const relayType = this.relayTypes.get(relayUrl) || 'discovery';
+        const { cleanUrl } = this.parseRelayUrl(relayUrl);
+        const relayType = this.relayTypes.get(cleanUrl) || 'discovery';
         
         this.globalSubscriptions.forEach((subData, subId) => {
             // Check if this subscription should be applied to this relay
-            if (this._shouldApplySubscription(subData, relayUrl, relayType)) {
-                this._subscribeOnRelay(relayUrl, subId, subData.filters);
+            if (this._shouldApplySubscription(subData, cleanUrl, relayType)) {
+                this._subscribeOnRelay(cleanUrl, subId, subData.filters);
             }
         });
     }
@@ -509,16 +518,17 @@ _validateEvent(event) {
      * @param {string} url - The relay URL
      */
     removeRelay(url) {
-        if (!this.relays.has(url)) {
+        const { cleanUrl } = this.parseRelayUrl(url);
+        if (!this.relays.has(cleanUrl)) {
             return;
         }
 
-        const relay = this.relays.get(url);
+        const relay = this.relays.get(cleanUrl);
         if (relay.conn && relay.conn.readyState !== WebSocket.CLOSED) {
             relay.conn.close();
         }
-        
-        this.relays.delete(url);
+
+        this.relays.delete(cleanUrl);
     }
 
     /**
@@ -535,10 +545,11 @@ _validateEvent(event) {
      * @returns {string|null} - Status or null if relay not found
      */
     getRelayStatus(url) {
-        if (!this.relays.has(url)) {
+        const { cleanUrl } = this.parseRelayUrl(url);
+        if (!this.relays.has(cleanUrl)) {
             return null;
         }
-        return this.relays.get(url).status;
+        return this.relays.get(cleanUrl).status;
     }
 
     /**
@@ -606,9 +617,10 @@ _validateEvent(event) {
      * @private
      */
     _subscribeOnRelay(relayUrl, subscriptionId, filters) {
-        const relay = this.relays.get(relayUrl);
+        const { cleanUrl } = this.parseRelayUrl(relayUrl);
+        const relay = this.relays.get(cleanUrl);
         if (!relay || relay.status !== 'open') {
-            console.log(`Cannot subscribe to ${relayUrl}, relay not connected`);
+            console.log(`Cannot subscribe to ${cleanUrl}, relay not connected`);
             return;
         }
     
@@ -625,19 +637,19 @@ _validateEvent(event) {
         if (relay.subscriptions.has(subscriptionId)) {
             const existing = relay.subscriptions.get(subscriptionId);
             if (JSON.stringify(existing.filters) === JSON.stringify(filters)) {
-                console.log(`Relay ${relayUrl} already has subscription ${subscriptionId}`);
+                console.log(`Relay ${cleanUrl} already has subscription ${subscriptionId}`);
                 return;
             }
         }
 
         // Create a REQ message with the unique short ID
         const reqMsg = JSON.stringify(['REQ', shortSubId, ...filters]);
-        console.log(`REQ message to ${relayUrl}:`, reqMsg);
+        console.log(`REQ message to ${cleanUrl}:`, reqMsg);
         
         this._queueRequest(() => {
             if (relay.status === 'open') {
                 relay.conn.send(reqMsg);
-                console.log(`Subscription ${subscriptionId} (${shortSubId}) sent to ${relayUrl}`);
+                console.log(`Subscription ${subscriptionId} (${shortSubId}) sent to ${cleanUrl}`);
                 
                 // Track subscription on this relay
                 relay.subscriptions.set(subscriptionId, {
@@ -645,7 +657,7 @@ _validateEvent(event) {
                     filters: filters
                 });
             } else {
-                console.log(`Relay ${relayUrl} not open, queueing subscription`);
+                console.log(`Relay ${cleanUrl} not open, queueing subscription`);
                 relay.pendingMessages.push(reqMsg);
             }
         });
