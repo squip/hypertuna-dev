@@ -29,6 +29,7 @@
     "bech32": "^2.0.0",
     "browserify-cipher": "^1.0.1",
     "hypercore-crypto": "^3.6.0",
-    "noble-secp256k1": "^1.2.14"
+    "noble-secp256k1": "^1.2.14",
+    "qrcodejs": "^1.0.0"
   }
 }
