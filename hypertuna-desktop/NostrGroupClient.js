@@ -2085,6 +2085,7 @@ async fetchMultipleProfiles(pubkeys) {
      * @param {string} groupData.about - Group description
      * @param {boolean} groupData.isPublic - Whether the group is public
      * @param {boolean} groupData.isOpen - Whether the group is open to join
+     * @param {string} [groupData.authenticatedRelayUrl] - Tokenized relay URL returned by the worker
      * @returns {Promise<Object>} - Collection of created events
      */
     async createGroup(groupData) {
@@ -2105,7 +2106,8 @@ async fetchMultipleProfiles(pubkeys) {
             isPublic: Boolean(groupData.isPublic),
             isOpen: Boolean(groupData.isOpen),
             identifier: groupData.identifier || null,
-            proxyServer: groupData.proxyServer || ''
+            proxyServer: groupData.proxyServer || '',
+            authenticatedRelayUrl: groupData.authenticatedRelayUrl || null
         };
         
         console.log('Creating group with normalized data:', normalizedData);
@@ -2132,6 +2134,7 @@ async fetchMultipleProfiles(pubkeys) {
         
         // Extract relay URL from hypertuna event
         const relayUrl = NostrEvents._getTagValue(hypertunaEvent, 'd');
+        const finalRelayUrl = normalizedData.authenticatedRelayUrl || relayUrl;
         
         if (normalizedData.isPublic) {
             // PUBLIC RELAY: Publish to discovery relays first
@@ -2147,19 +2150,19 @@ async fetchMultipleProfiles(pubkeys) {
         }
         
         // Update user relay list (always goes to discovery relays)
-        if (relayUrl) {
+        if (relayUrl && !normalizedData.authenticatedRelayUrl) {
             await this.updateUserRelayList(hypertunaId, relayUrl, normalizedData.isPublic, true);
         }
-        
+
         // Connect to the new group relay
-        if (relayUrl) {
-            await this.connectToGroupRelay(groupId, relayUrl);
-            
+        if (finalRelayUrl) {
+            await this.connectToGroupRelay(groupId, finalRelayUrl);
+
             // Publish events to the group relay itself
             await Promise.all([
-                this.relayManager.publishToRelays(groupCreateEvent, [relayUrl]),
-                this.relayManager.publishToRelays(metadataEvent, [relayUrl]),
-                this.relayManager.publishToRelays(hypertunaEvent, [relayUrl])
+                this.relayManager.publishToRelays(groupCreateEvent, [finalRelayUrl]),
+                this.relayManager.publishToRelays(metadataEvent, [finalRelayUrl]),
+                this.relayManager.publishToRelays(hypertunaEvent, [finalRelayUrl])
             ]);
             
             console.log('Published relay events to group relay itself');
@@ -2208,8 +2211,8 @@ async fetchMultipleProfiles(pubkeys) {
         // Subscribe to this group
         this.subscribeToGroup(groupId);
 
-        if (relayUrl) {
-            await this.updateUserRelayList(hypertunaId, relayUrl, normalizedData.isPublic, true);
+        if (finalRelayUrl && !normalizedData.authenticatedRelayUrl) {
+            await this.updateUserRelayList(hypertunaId, finalRelayUrl, normalizedData.isPublic, true);
         }
 
         return eventsCollection;
