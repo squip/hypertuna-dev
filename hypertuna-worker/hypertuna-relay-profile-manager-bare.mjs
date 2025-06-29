@@ -53,15 +53,27 @@ function ensureProfileSchema(profile) {
         profile.auth_config = {
             requiresAuth: false,
             tokenProtected: false,
-            authorizedUsers: [] // Array of { pubkey, token, subnets }
+            authorizedUsers: [], // Array of { pubkey, token, subnets }
+            auth_adds: [],
+            auth_removes: []
         };
+    } else {
+        if (!Array.isArray(profile.auth_config.auth_adds)) {
+            profile.auth_config.auth_adds = [];
+        }
+        if (!Array.isArray(profile.auth_config.auth_removes)) {
+            profile.auth_config.auth_removes = [];
+        }
     }
-    // NEW: Add auth_adds and auth_removes for granular control
-    if (!Array.isArray(profile.auth_adds)) {
-        profile.auth_adds = [];
+
+    // Migrate legacy root-level auth_adds/auth_removes
+    if (Array.isArray(profile.auth_adds)) {
+        profile.auth_config.auth_adds.push(...profile.auth_adds);
+        delete profile.auth_adds;
     }
-    if (!Array.isArray(profile.auth_removes)) {
-        profile.auth_removes = [];
+    if (Array.isArray(profile.auth_removes)) {
+        profile.auth_config.auth_removes.push(...profile.auth_removes);
+        delete profile.auth_removes;
     }
 
     // NEW: ensure visibility and join flags exist
@@ -116,7 +128,7 @@ export async function updateRelayAuthToken(identifier, pubkey, token, newSubnetH
 
         if (existingAuthAddIndex !== -1) {
             // Update existing entry
-            const existingAuth = profile.auth_adds[existingAuthAddIndex];
+            const existingAuth = profile.auth_config.auth_adds[existingAuthAddIndex];
             existingAuth.token = token; // Always update token
             // Merge new subnets with existing ones
             newSubnetHashes.forEach(newHash => {
