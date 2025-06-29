@@ -1626,7 +1626,7 @@ App.syncHypertunaConfigToFile = async function() {
 
         document.getElementById('auth-url').value = mobileAuthUrl;
         
-        // Generate QR code
+        // ORIGINAL: Generate QR code
         if (window.QRCode) {
             const qrContainer = document.getElementById('auth-qr-code');
             qrContainer.innerHTML = ''; // Clear existing QR code
@@ -1640,7 +1640,7 @@ App.syncHypertunaConfigToFile = async function() {
                 correctLevel: QRCode.CorrectLevel.H
             });
         }
-        
+
         // Update the user's relay list (kind 10009) with the authenticated URL.
         // This correctly persists the authenticated relay for future sessions.
         if (this.nostr && this.nostr.client) {

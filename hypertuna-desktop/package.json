@@ -11,7 +11,8 @@
     },
     "links": {
       "relayWorker": "pear://wiujz4kupgj68gazw14d5k1y4bpmwo6q61ecee4hmcd1iosb974o",
-      "api": "http://localhost:1945"
+      "api": "http://localhost:1945",
+      "web": "https://*"
     }
   },
   "type": "module",

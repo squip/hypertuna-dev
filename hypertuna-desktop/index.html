@@ -1233,6 +1233,24 @@
       document.addEventListener('DOMContentLoaded', async () => {
         console.log('[Index] DOMContentLoaded event fired at:', new Date().toISOString());
 
+        // Pre-load QRCode library early
+        if (!window.QRCode) {
+            console.log('[Index] Pre-loading QRCode library...');
+            const script = document.createElement('script');
+            script.src = 'https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js';
+            script.async = true;
+            
+            script.onload = () => {
+                console.log('[Index] QRCode library pre-loaded successfully');
+            };
+            
+            script.onerror = () => {
+                console.error('[Index] Failed to pre-load QRCode library');
+            };
+            
+            document.head.appendChild(script);
+        }
+        
         // Integrate with real nostr relays FIRST, so App.init() uses the real methods
         integrateNostrRelays(App);
 
