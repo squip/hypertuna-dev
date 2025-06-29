@@ -1626,18 +1626,26 @@ App.syncHypertunaConfigToFile = async function() {
 
         document.getElementById('auth-url').value = mobileAuthUrl;
         
-        // Generate QR code
+        // Dynamically load QRCode library if not already loaded
+        if (!window.QRCode) {
+            try {
+                const module = await import('qrcodejs');
+                window.QRCode = module.default || module;
+            } catch (err) {
+                console.error('Failed to load QRCode module', err);
+            }
+        }
+
         if (window.QRCode) {
             const qrContainer = document.getElementById('auth-qr-code');
-            qrContainer.innerHTML = ''; // Clear existing QR code
-            
-            new QRCode(qrContainer, {
+            qrContainer.innerHTML = '';
+            new window.QRCode(qrContainer, {
                 text: mobileAuthUrl,
                 width: 200,
                 height: 200,
                 colorDark: '#000000',
                 colorLight: '#ffffff',
-                correctLevel: QRCode.CorrectLevel.H
+                correctLevel: window.QRCode.CorrectLevel.H
             });
         }
         
@@ -1732,15 +1740,6 @@ App.syncHypertunaConfigToFile = async function() {
         });
     };
 
-    // Add QR code library dynamically if not already loaded
-    if (!window.QRCode) {
-        const script = document.createElement('script');
-        script.src = 'https://cdn.jsdelivr.net/npm/qrcode@1.5.1/build/qrcode.min.js';
-        script.onload = () => {
-            console.log('QRCode library loaded');
-        };
-        document.head.appendChild(script);
-    }
     
     /**
      * Replace send join request method
