@@ -1735,7 +1735,7 @@ App.syncHypertunaConfigToFile = async function() {
     // Add QR code library dynamically if not already loaded
     if (!window.QRCode) {
         const script = document.createElement('script');
-        script.src = 'https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js';
+        script.src = 'assets/qrcode.min.js';
         script.onload = () => {
             console.log('QRCode library loaded');
         };
