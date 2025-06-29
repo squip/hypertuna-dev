@@ -1450,16 +1450,22 @@ App.syncHypertunaConfigToFile = async function() {
 
             const proxyServer = this.currentUser?.hypertunaConfig?.proxy_server_address || '';
 
-            const eventsCollection = await this.nostr.createGroup(
-                name, about, isPublic, isOpen, relayKey, proxyServer, npub
-            );
-            
-            // The worker now returns the auth token in the relayKey object
             if (relayKey && relayKey.authToken) {
-                this.showAuthSuccess(relayKey);
+                await this.showAuthSuccess(relayKey);
             } else {
                 this.closeJoinAuthModal();
             }
+
+            const eventsCollection = await this.nostr.createGroup(
+                name,
+                about,
+                isPublic,
+                isOpen,
+                relayKey,
+                proxyServer,
+                npub,
+                relayKey?.relayUrl || null
+            );
 
             console.log(`Group created successfully with public ID: ${eventsCollection.groupId}`);
             console.log(`Internal relay key: ${eventsCollection.internalRelayKey}`);
