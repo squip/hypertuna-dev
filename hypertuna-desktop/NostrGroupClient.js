@@ -259,7 +259,7 @@ class NostrGroupClient {
                 attempts: 0,
                 status: 'pending'
             });
-            console.log(`[NostrGroupClient] Queued connection for relay ${publicIdentifier}`);
+            console.log(`[NostrGroupClient] Queued connection for relay ${publicIdentifier} with URL ${relayUrl}`);
         }
     }
 
@@ -271,18 +271,19 @@ class NostrGroupClient {
             if (connection.status === 'connecting' || connection.status === 'connected') {
                 continue;
             }
-            
+
             connection.status = 'connecting';
-            
+
             try {
                 // Wait for relay to be ready in worker
-                console.log(`[NostrGroupClient] Waiting for relay ${identifier} to be ready...`);
-                
+                const internalKey = this.publicToInternalMap.get(identifier) || identifier;
+                console.log(`[NostrGroupClient] Waiting for relay ${identifier} (internal key: ${internalKey}) to be ready...`);
+
                 if (window.waitForRelayReady) {
                     try {
-                        await window.waitForRelayReady(identifier, 15000); // 15 second timeout
-                        console.log(`[NostrGroupClient] Relay ${identifier} is ready, connecting...`);
-                        
+                        await window.waitForRelayReady(internalKey, 15000); // 15 second timeout
+                        console.log(`[NostrGroupClient] Relay ${identifier} is ready, connecting using URL ${connection.relayUrl}`);
+
                         // Check if we have an updated URL from the worker
                         const updatedUrl = this.groupRelayUrls.get(identifier);
                         if (updatedUrl && updatedUrl !== connection.relayUrl) {
@@ -334,7 +335,7 @@ class NostrGroupClient {
      * Handle relay ready notification from worker
      */
     handleRelayReady(identifier, gatewayUrl) {
-        console.log(`[NostrGroupClient] Relay ${identifier} is now ready at ${gatewayUrl}`);
+        console.log(`[NostrGroupClient] Relay ready notification for ${identifier}. Gateway URL: ${gatewayUrl}`);
         
         // The gatewayUrl from the worker should already include the token
         // Store it in our groupRelayUrls map for future use
@@ -386,7 +387,7 @@ class NostrGroupClient {
      */
     async connectToGroupRelay(publicIdentifier, relayUrl) {
         try {
-            console.log(`[NostrGroupClient] Connecting to group relay: ${relayUrl}`);
+            console.log(`[NostrGroupClient] Connecting to group relay ${publicIdentifier} using URL ${relayUrl}`);
             
             // Add with retry logic
             let connected = false;
@@ -420,7 +421,7 @@ class NostrGroupClient {
             // Subscribe to group-specific events only on this relay
             this._subscribeToGroupOnRelay(publicIdentifier, relayUrl);
             
-            console.log(`[NostrGroupClient] Successfully connected to group relay: ${relayUrl}`);
+            console.log(`[NostrGroupClient] Successfully connected to group relay ${publicIdentifier} at ${relayUrl}`);
             
             // Emit event for UI update
             this.emit('relay:connected', { groupId: publicIdentifier, relayUrl });

@@ -457,6 +457,7 @@ function handleWorkerMessage(message) {
       // New message type when a relay is fully ready
       if (message.relayKey) {
         console.log(`[App] Relay initialized: ${message.relayKey}`)
+        console.log(`[App] Relay gateway URL: ${message.gatewayUrl}`)
         initializedRelays.add(message.relayKey)
 
         if (window.App && window.App.nostr && message.publicIdentifier) {
@@ -498,6 +499,7 @@ function handleWorkerMessage(message) {
       // New message type when a relay is fully ready
       if (message.relayKey) {
         console.log(`[App] Relay initialized: ${message.relayKey}`)
+        console.log(`[App] Relay gateway URL: ${message.gatewayUrl}`)
         initializedRelays.add(message.relayKey)
           
         // Resolve any waiting promises for this relay
@@ -614,18 +616,24 @@ function handleWorkerMessage(message) {
 window.waitForRelayReady = function(relayKey, timeout = 30000) {
   // If already initialized, resolve immediately
   if (initializedRelays.has(relayKey)) {
+    console.log(`[App] Relay ${relayKey} already initialized`)
     return Promise.resolve(true)
   }
-  
+
   // Otherwise, create a promise that resolves when the relay is ready
   return new Promise((resolve, reject) => {
     // Store the resolver
-    relayReadyResolvers.set(relayKey, resolve)
+    console.log(`[App] Waiting for relay ${relayKey} to be ready...`)
+    relayReadyResolvers.set(relayKey, () => {
+      console.log(`[App] Relay ${relayKey} is ready`)
+      resolve(true)
+    })
     
     // Set timeout
     setTimeout(() => {
       if (relayReadyResolvers.has(relayKey)) {
         relayReadyResolvers.delete(relayKey)
+        console.log(`[App] Timeout waiting for relay ${relayKey} to initialize`)
         reject(new Error(`Timeout waiting for relay ${relayKey} to initialize`))
       }
     }, timeout)

@@ -213,6 +213,7 @@ export async function createRelay(options = {}) {
         
         // Send relay initialized message for newly created relay
         if (global.sendMessage) {
+            console.log(`[RelayAdapter] Sending relay-initialized for ${relayKey} with URL ${authenticatedUrl}`);
             global.sendMessage({
                 type: 'relay-initialized',
                 relayKey: relayKey, // Internal key for worker
@@ -310,6 +311,7 @@ export async function joinRelay(options = {}) {
 
             // Still send initialized message since the UI might be waiting
             if (global.sendMessage) {
+                console.log(`[RelayAdapter] Sending relay-initialized for ${relayKey} with URL ${connectionUrl}`);
                 global.sendMessage({
                     type: 'relay-initialized',
                     relayKey: relayKey,
@@ -389,12 +391,14 @@ export async function joinRelay(options = {}) {
         
         // Send relay initialized message for joined relay
         if (global.sendMessage) {
+            const gw = `wss://${config.proxy_server_address}/${relayKey}`;
+            console.log(`[RelayAdapter] Sending relay-initialized for ${relayKey} with URL ${gw}`);
             global.sendMessage({
                 type: 'relay-initialized',
                 relayKey: relayKey,
-                gatewayUrl: `wss://${config.proxy_server_address}/${relayKey}`,
+                gatewayUrl: gw,
                 name: profileInfo.name,
-                connectionUrl: `wss://${config.proxy_server_address}/${relayKey}`,
+                connectionUrl: gw,
                 isJoined: true,
                 timestamp: new Date().toISOString()
             });
@@ -580,9 +584,11 @@ export async function autoConnectStoredRelays(config) {
                         profile.relay_key;
                     const baseUrl = `wss://${config.proxy_server_address}/${identifierPath}`;
                     const connectionUrl = userAuthToken ? `${baseUrl}?token=${userAuthToken}` : baseUrl;
+                    console.log(`[RelayAdapter] Built connection URL for ${profile.relay_key}: ${connectionUrl}`);
 
                     // Send initialized message for already active relay
                     if (global.sendMessage) {
+                        console.log(`[RelayAdapter] Sending relay-initialized for ${profile.relay_key} with URL ${connectionUrl}`);
                         global.sendMessage({
                             type: 'relay-initialized',
                             relayKey: profile.relay_key,
@@ -695,6 +701,7 @@ export async function autoConnectStoredRelays(config) {
 
                     // Send relay initialized message with auth info
                     if (global.sendMessage) {
+                        console.log(`[RelayAdapter] Sending relay-initialized for ${profile.relay_key} with URL ${connectionUrl}`);
                         global.sendMessage({
                             type: 'relay-initialized',
                             relayKey: profile.relay_key,
