@@ -158,7 +158,29 @@ export async function updateRelayAuthToken(identifier, pubkey, token, newSubnetH
         
         profile.updated_at = new Date().toISOString();
         const saved = await saveRelayProfile(profile);
-        
+
+        if (saved) {
+            try {
+                const { getRelayAuthStore } = await import('./relay-auth-store.mjs');
+                const store = getRelayAuthStore();
+                const firstSubnet = newSubnetHashes[0] || null;
+                if (firstSubnet) {
+                    store.addAuth(profile.relay_key, pubkey, token, firstSubnet);
+                    if (profile.public_identifier) {
+                        store.addAuth(profile.public_identifier, pubkey, token, firstSubnet);
+                    }
+                    for (const sub of newSubnetHashes.slice(1)) {
+                        store.addSubnet(profile.relay_key, pubkey, sub);
+                        if (profile.public_identifier) {
+                            store.addSubnet(profile.public_identifier, pubkey, sub);
+                        }
+                    }
+                }
+            } catch (err) {
+                console.error('[ProfileManager] Failed to update auth store:', err);
+            }
+        }
+
         return saved ? profile : null;
     } catch (error) {
         console.error(`[ProfileManager] Error updating auth token for ${identifier}:`, error);
@@ -194,6 +216,18 @@ export async function removeRelayAuth(identifier, pubkey) {
     profile.auth_config.authorizedUsers = calculateAuthorizedUsers(profile.auth_config.auth_adds, profile.auth_config.auth_removes);
 
     const saved = await saveRelayProfile(profile);
+    if (saved) {
+        try {
+            const { getRelayAuthStore } = await import('./relay-auth-store.mjs');
+            const store = getRelayAuthStore();
+            store.removeAuth(profile.relay_key, pubkey);
+            if (profile.public_identifier) {
+                store.removeAuth(profile.public_identifier, pubkey);
+            }
+        } catch (err) {
+            console.error('[ProfileManager] Failed to update auth store:', err);
+        }
+    }
     return saved ? profile : null;
 }
 
@@ -355,15 +389,18 @@ export async function saveRelayProfile(relayProfile) {
         
         // Update in-memory relay members map in adapter
         try {
-            const { setRelayMembers } = await import('./hypertuna-relay-manager-adapter.mjs');
+            const { setRelayMembers, setRelayMapping } = await import('./hypertuna-relay-manager-adapter.mjs');
             if (relayProfile.members) {
                 setRelayMembers(relayProfile.relay_key, relayProfile.members);
                 if (relayProfile.public_identifier) {
                     setRelayMembers(relayProfile.public_identifier, relayProfile.members);
                 }
             }
+            if (relayProfile.public_identifier) {
+                setRelayMapping(relayProfile.relay_key, relayProfile.public_identifier);
+            }
         } catch (err) {
-            console.error('[ProfileManager] Failed to update relayMembers map:', err);
+            console.error('[ProfileManager] Failed to update relay adapter maps:', err);
         }
 
         return true;
@@ -393,7 +430,14 @@ export async function removeRelayProfile(relayKey) {
         const tmpPath = profilesPath + '.tmp';
         await fs.writeFile(tmpPath, JSON.stringify({ relays: sanitized }, null, 2));
         await fs.rename(tmpPath, profilesPath);
-        
+
+        try {
+            const { removeRelayMapping } = await import('./hypertuna-relay-manager-adapter.mjs');
+            removeRelayMapping(relayKey);
+        } catch (err) {
+            console.error('[ProfileManager] Failed to update relay mapping:', err);
+        }
+
         return true;
     } catch (error) {
         console.error(`[ProfileManager] Error removing relay profile: ${error.message}`);

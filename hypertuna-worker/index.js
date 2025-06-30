@@ -19,6 +19,7 @@ import {
   updateRelayMemberSets,
   calculateMembers
 } from './hypertuna-relay-profile-manager-bare.mjs'
+import { loadRelayKeyMappings } from './hypertuna-relay-manager-adapter.mjs'
 
 // In Pear, use the config.dir for the application directory
 const __dirname = Pear.config.dir || '.'
@@ -548,6 +549,7 @@ async function main() {
         console.log('[Worker] Set global user config for profile operations');
 
         await loadRelayMembers();
+        await loadRelayKeyMappings();
       }
     }
     
