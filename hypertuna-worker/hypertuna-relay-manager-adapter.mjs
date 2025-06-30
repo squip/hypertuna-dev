@@ -31,6 +31,42 @@ const relayMembers = new Map();
 const relayMemberAdds = new Map();
 const relayMemberRemoves = new Map();
 
+// Mapping between public identifiers and internal relay keys
+const publicToKey = new Map();
+const keyToPublic = new Map();
+
+export function setRelayMapping(relayKey, publicIdentifier) {
+    if (!relayKey) return;
+    if (publicIdentifier) {
+        publicToKey.set(publicIdentifier, relayKey);
+        keyToPublic.set(relayKey, publicIdentifier);
+    } else {
+        const existing = keyToPublic.get(relayKey);
+        if (existing) publicToKey.delete(existing);
+        keyToPublic.delete(relayKey);
+    }
+}
+
+export function removeRelayMapping(relayKey, publicIdentifier) {
+    const pid = publicIdentifier || keyToPublic.get(relayKey);
+    if (pid) publicToKey.delete(pid);
+    if (relayKey) keyToPublic.delete(relayKey);
+}
+
+export async function loadRelayKeyMappings() {
+    await ensureProfilesInitialized(globalUserKey);
+    publicToKey.clear();
+    keyToPublic.clear();
+    const profiles = await getAllRelayProfiles(globalUserKey);
+    for (const p of profiles) {
+        if (p.relay_key && p.public_identifier) {
+            publicToKey.set(p.public_identifier, p.relay_key);
+            keyToPublic.set(p.relay_key, p.public_identifier);
+        }
+    }
+    return { publicToKey, keyToPublic };
+}
+
 export function setRelayMembers(relayKey, members = [], adds = null, removes = null) {
     relayMembers.set(relayKey, members);
     if (adds) relayMemberAdds.set(relayKey, adds);
@@ -767,4 +803,14 @@ function generateHexKey() {
 }
 
 // Export the active relays map for direct access if needed
-export { activeRelays, relayMembers, relayMemberAdds, relayMemberRemoves };
+export {
+    activeRelays,
+    relayMembers,
+    relayMemberAdds,
+    relayMemberRemoves,
+    publicToKey,
+    keyToPublic,
+    setRelayMapping,
+    removeRelayMapping,
+    loadRelayKeyMappings
+};
