@@ -254,14 +254,34 @@ export async function joinRelay(options = {}) {
         // Check if already connected
         if (activeRelays.has(relayKey)) {
             console.log(`[RelayAdapter] Already connected to relay ${relayKey}`);
-            
+
+            // Load profile to determine auth token
+            let userAuthToken = null;
+            let profileInfo = await getRelayProfileByKey(relayKey);
+            if (profileInfo?.auth_config?.requiresAuth && config.nostr_pubkey_hex) {
+                const userAuth = profileInfo.auth_config.authorizedUsers.find(
+                    u => u.pubkey === config.nostr_pubkey_hex
+                );
+                userAuthToken = userAuth?.token || null;
+            }
+
+            const identifierPath = profileInfo?.public_identifier ?
+                profileInfo.public_identifier.replace(':', '/') :
+                relayKey;
+            const baseUrl = `wss://${config.proxy_server_address}/${identifierPath}`;
+            const connectionUrl = userAuthToken ? `${baseUrl}?token=${userAuthToken}` : baseUrl;
+
             // Still send initialized message since the UI might be waiting
             if (global.sendMessage) {
                 global.sendMessage({
                     type: 'relay-initialized',
                     relayKey: relayKey,
-                    gatewayUrl: `wss://${config.proxy_server_address}/${relayKey}`,
+                    publicIdentifier: profileInfo?.public_identifier,
+                    gatewayUrl: connectionUrl,
+                    connectionUrl,
                     alreadyActive: true,
+                    requiresAuth: profileInfo?.auth_config?.requiresAuth || false,
+                    userAuthToken: userAuthToken,
                     timestamp: new Date().toISOString()
                 });
             }
@@ -493,18 +513,34 @@ export async function autoConnectStoredRelays(config) {
                         console.log(`[RelayAdapter] Loaded auth config for active relay ${profile.relay_key}`);
                     }
                     
+                    // Determine if current user has auth token
+                    let userAuthToken = null;
+                    if (profile.auth_config?.requiresAuth && config.nostr_pubkey_hex) {
+                        const userAuth = profile.auth_config.authorizedUsers.find(
+                            u => u.pubkey === config.nostr_pubkey_hex
+                        );
+                        userAuthToken = userAuth?.token || null;
+                    }
+
+                    // Build connection URL including token if available
+                    const identifierPath = profile.public_identifier ?
+                        profile.public_identifier.replace(':', '/') :
+                        profile.relay_key;
+                    const baseUrl = `wss://${config.proxy_server_address}/${identifierPath}`;
+                    const connectionUrl = userAuthToken ? `${baseUrl}?token=${userAuthToken}` : baseUrl;
+
                     // Send initialized message for already active relay
                     if (global.sendMessage) {
                         global.sendMessage({
                             type: 'relay-initialized',
                             relayKey: profile.relay_key,
                             publicIdentifier: profile.public_identifier,
-                            gatewayUrl: profile.public_identifier ? 
-                                `wss://${config.proxy_server_address}/${profile.public_identifier.replace(':', '/')}` :
-                                `wss://${config.proxy_server_address}/${profile.relay_key}`,
+                            gatewayUrl: connectionUrl,
                             name: profile.name,
+                            connectionUrl,
                             alreadyActive: true,
-                            requiresAuth: profile.auth_config?.requiresAuth || false
+                            requiresAuth: profile.auth_config?.requiresAuth || false,
+                            userAuthToken: userAuthToken
                         });
                     }
                     continue;
@@ -588,17 +624,22 @@ export async function autoConnectStoredRelays(config) {
                         userAuthToken = userAuth?.token || null;
                     }
                     
+                    // Build connection URL including token if available
+                    const identifierPath = profile.public_identifier ?
+                        profile.public_identifier.replace(':', '/') :
+                        profile.relay_key;
+                    const baseUrl = `wss://${config.proxy_server_address}/${identifierPath}`;
+                    const connectionUrl = userAuthToken ? `${baseUrl}?token=${userAuthToken}` : baseUrl;
+
                     // Send relay initialized message with auth info
                     if (global.sendMessage) {
                         global.sendMessage({
                             type: 'relay-initialized',
                             relayKey: profile.relay_key,
                             publicIdentifier: profile.public_identifier,
-                            gatewayUrl: profile.public_identifier ? 
-                                `wss://${config.proxy_server_address}/${profile.public_identifier.replace(':', '/')}` :
-                                `wss://${config.proxy_server_address}/${profile.relay_key}`,
+                            gatewayUrl: connectionUrl,
                             name: profile.name || `Relay ${profile.relay_key.substring(0, 8)}`,
-                            connectionUrl: result.connectionUrl,
+                            connectionUrl,
                             requiresAuth: profile.auth_config?.requiresAuth || false,
                             userAuthToken: userAuthToken,
                             timestamp: new Date().toISOString()
