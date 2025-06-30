@@ -233,13 +233,23 @@ class NostrGroupClient {
         }
         
         console.log(`[NostrGroupClient] Found ${relayUrls.size} relay URLs to connect`);
-        
+
+        // Prefer tokenized URLs when duplicates exist
+        const deduped = new Map(); // baseUrl -> { url, identifier }
+        for (const url of relayUrls) {
+            const base = url.split('?')[0];
+            const identifier = identifierMap.get(url);
+            const hasToken = url.includes('token=');
+            if (!deduped.has(base) || hasToken) {
+                deduped.set(base, { url, identifier });
+            }
+        }
+
         // Queue all relay connections
-        for (const relayUrl of relayUrls) {
-            const identifier = identifierMap.get(relayUrl);
+        for (const { url, identifier } of deduped.values()) {
             if (identifier) {
-                console.log(`[NostrGroupClient] Queuing connection for ${identifier} at ${relayUrl}`);
-                this.queueRelayConnection(identifier, relayUrl);
+                console.log(`[NostrGroupClient] Queuing connection for ${identifier} at ${url}`);
+                this.queueRelayConnection(identifier, url);
             }
         }
         
@@ -2290,10 +2300,25 @@ async fetchMultipleProfiles(pubkeys) {
             }
         }
         
+        const baseUrl = authenticatedUrl.split('?')[0];
+
+        const removeTag = (arr, predicate) => {
+            for (let i = arr.length - 1; i >= 0; i--) {
+                const t = arr[i];
+                if (predicate(t)) arr.splice(i, 1);
+            }
+        };
+
+        const matchGroup = t => Array.isArray(t) && t[0] === 'group' && t[1] === publicIdentifier;
+        const matchR = t => Array.isArray(t) && t[0] === 'r' && t[1].startsWith(baseUrl);
+
+        removeTag(tags, t => matchGroup(t) || matchR(t));
+        removeTag(contentArr, t => matchGroup(t) || matchR(t));
+
         // Create authenticated relay tags
         const groupTag = ['group', publicIdentifier, authenticatedUrl, groupName, 'hypertuna:relay'];
         const rTag = ['r', authenticatedUrl, 'hypertuna:relay'];
-        
+
         // Add to appropriate list
         if (isPublic) {
             tags.push(groupTag, rTag);
