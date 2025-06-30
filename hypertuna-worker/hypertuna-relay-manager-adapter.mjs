@@ -809,8 +809,5 @@ export {
     relayMemberAdds,
     relayMemberRemoves,
     publicToKey,
-    keyToPublic,
-    setRelayMapping,
-    removeRelayMapping,
-    loadRelayKeyMappings
+    keyToPublic
 };
