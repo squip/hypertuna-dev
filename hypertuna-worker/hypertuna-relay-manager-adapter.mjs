@@ -760,16 +760,21 @@ export async function getActiveRelays() {
         if (manager && manager.peers && manager.peers.size) {
             peerCount = manager.peers.size;
         }
-        
+
         // Find the profile for this relay
         const profile = profiles.find(p => p.relay_key === key);
-        
+
+        const identifierPath = profile?.public_identifier
+            ? profile.public_identifier.replace(':', '/')
+            : key;
+
         activeRelayList.push({
             relayKey: key,
+            publicIdentifier: profile?.public_identifier || null,
             peerCount,
             name: profile?.name || `Relay ${key.substring(0, 8)}`,
             description: profile?.description || '',
-            connectionUrl: `wss://${globalConfig?.proxy_server_address || 'localhost'}/${key}`,
+            connectionUrl: `wss://${globalConfig?.proxy_server_address || 'localhost'}/${identifierPath}`,
             createdAt: profile?.created_at || profile?.joined_at || null,
             isActive: true
         });
