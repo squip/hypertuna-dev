@@ -178,16 +178,16 @@ class NostrGroupClient {
         
         const relayUrls = new Set();
         const identifierMap = new Map(); // Map URL -> public identifier
-
-        // Parse public relays from tags
+    
+        // Parse public relays from tags - KEEP THE FULL URL WITH TOKEN
         this.userRelayListEvent.tags.forEach(tag => {
             if (tag[0] === 'group' && tag[4] === 'hypertuna:relay') {
                 const identifier = tag[1];
-                const url = tag[2];
+                const url = tag[2]; // This should include ?token=... if present
                 relayUrls.add(url);
                 identifierMap.set(url, identifier);
             } else if (tag[0] === 'r' && tag[1] && tag[2] === 'hypertuna:relay') {
-                const url = tag[1];
+                const url = tag[1]; // This should include ?token=... if present
                 relayUrls.add(url);
                 if (!identifierMap.has(url)) {
                     const parts = url.split('/').filter(Boolean);
@@ -208,15 +208,15 @@ class NostrGroupClient {
                     this.userRelayListEvent.content
                 );
                 const privateTags = JSON.parse(decrypted);
-
+    
                 privateTags.forEach(tag => {
                     if (Array.isArray(tag) && tag[0] === 'group' && tag[4] === 'hypertuna:relay') {
                         const identifier = tag[1];
-                        const url = tag[2];
+                        const url = tag[2]; // This should include ?token=... if present
                         relayUrls.add(url);
                         identifierMap.set(url, identifier);
                     } else if (Array.isArray(tag) && tag[0] === 'r' && tag[1] && tag[2] === 'hypertuna:relay') {
-                        const url = tag[1];
+                        const url = tag[1]; // This should include ?token=... if present
                         relayUrls.add(url);
                         if (!identifierMap.has(url)) {
                             const parts = url.split('/').filter(Boolean);
@@ -233,8 +233,9 @@ class NostrGroupClient {
         }
         
         console.log(`[NostrGroupClient] Found ${relayUrls.size} relay URLs to connect`);
+        console.log('[NostrGroupClient] Relay URLs with tokens:', Array.from(relayUrls));
         
-        // Queue all relay connections
+        // Queue all relay connections with their full authenticated URLs
         for (const relayUrl of relayUrls) {
             const identifier = identifierMap.get(relayUrl);
             if (identifier) {
@@ -281,6 +282,13 @@ class NostrGroupClient {
                     try {
                         await window.waitForRelayReady(identifier, 15000); // 15 second timeout
                         console.log(`[NostrGroupClient] Relay ${identifier} is ready, connecting...`);
+                        
+                        // Check if we have an updated URL from the worker
+                        const updatedUrl = this.groupRelayUrls.get(identifier);
+                        if (updatedUrl && updatedUrl !== connection.relayUrl) {
+                            console.log(`[NostrGroupClient] Using updated authenticated URL for ${identifier}`);
+                            connection.relayUrl = updatedUrl;
+                        }
                     } catch (e) {
                         console.log(`[NostrGroupClient] Relay ${identifier} not ready yet: ${e.message}`);
                         connection.status = 'pending';
@@ -299,7 +307,7 @@ class NostrGroupClient {
                     }
                 }
                 
-                // Now try to connect
+                // Now try to connect with the authenticated URL
                 await this.connectToGroupRelay(connection.identifier, connection.relayUrl);
                 connection.status = 'connected';
                 this.pendingRelayConnections.delete(identifier);
@@ -328,10 +336,22 @@ class NostrGroupClient {
     handleRelayReady(identifier, gatewayUrl) {
         console.log(`[NostrGroupClient] Relay ${identifier} is now ready at ${gatewayUrl}`);
         
+        // The gatewayUrl from the worker should already include the token
+        // Store it in our groupRelayUrls map for future use
+        this.groupRelayUrls.set(identifier, gatewayUrl);
+        
+        // If this is a public identifier, also get the groupId
+        const groupId = this.hypertunaGroups.get(identifier);
+        if (groupId) {
+            this.groupRelayUrls.set(groupId, gatewayUrl);
+        }
+        
         // Check if this relay is in our pending connections
         const pending = this.pendingRelayConnections.get(identifier);
         if (pending && pending.status === 'pending') {
-            console.log(`[NostrGroupClient] Found pending connection for ${identifier}, processing...`);
+            console.log(`[NostrGroupClient] Found pending connection for ${identifier}, updating with authenticated URL`);
+            // Update the pending connection with the authenticated URL
+            pending.relayUrl = gatewayUrl;
             this.processRelayConnectionQueue();
         }
     }
@@ -840,11 +860,11 @@ async fetchMultipleProfiles(pubkeys) {
      */
     async fetchUserRelayList() {
         if (!this.user || !this.user.pubkey) return;
-
+    
         return new Promise((resolve) => {
             const subId = `relaylist-${this.user.pubkey.substring(0,8)}`;
             let received = false;
-
+    
             const timeoutId = setTimeout(async () => {
                 this.relayManager.unsubscribe(subId);
                 if (!received) {
@@ -853,7 +873,7 @@ async fetchMultipleProfiles(pubkeys) {
                 console.log('Fetched user relay list event:', this.userRelayListEvent);
                 resolve();
             }, 5000);
-
+    
             this.relayManager.subscribe(subId, [
                 { kinds: [NostrEvents.KIND_USER_RELAY_LIST], authors: [this.user.pubkey], limit: 1 }
             ], (event) => {
@@ -934,23 +954,32 @@ async fetchMultipleProfiles(pubkeys) {
                 try { contentArr = JSON.parse(this.userRelayListEvent.content); } catch { contentArr = []; }
             }
         }
-
+    
         const groupName = (this.groups.get(publicIdentifier)?.name) || '';
     
-        // Update tag format to use public identifier
-        const groupTag = ['group', publicIdentifier, `${gatewayUrl}`, groupName, 'hypertuna:relay'];
-        const rTag = ['r', `${gatewayUrl}`, 'hypertuna:relay'];
-
-
+        // IMPORTANT: Use the full gatewayUrl which should include the token
+        const groupTag = ['group', publicIdentifier, gatewayUrl, groupName, 'hypertuna:relay'];
+        const rTag = ['r', gatewayUrl, 'hypertuna:relay'];
+    
         const remove = (arr, tag) => {
-            const idx = arr.findIndex(t => JSON.stringify(t) === JSON.stringify(tag));
-            if (idx > -1) arr.splice(idx,1);
+            // When removing, match by identifier, not full URL
+            const idx = arr.findIndex(t => 
+                t[0] === tag[0] && 
+                t[1] === tag[1] && 
+                t[t.length - 1] === tag[tag.length - 1]
+            );
+            if (idx > -1) arr.splice(idx, 1);
         };
-
+    
         if (add) {
+            // First remove any existing entries for this identifier
             if (isPublic) {
+                remove(tags, ['group', publicIdentifier, '', '', 'hypertuna:relay']);
+                remove(tags, ['r', '', 'hypertuna:relay']);
                 tags.push(groupTag, rTag);
             } else {
+                remove(contentArr, ['group', publicIdentifier, '', '', 'hypertuna:relay']);
+                remove(contentArr, ['r', '', 'hypertuna:relay']);
                 contentArr.push(groupTag, rTag);
             }
             this.userRelayIds.add(publicIdentifier);
@@ -966,7 +995,7 @@ async fetchMultipleProfiles(pubkeys) {
             this.userRelayIds.delete(publicIdentifier);
             console.log('Removed relay from user list:', publicIdentifier);
         }
-
+    
         const newEvent = await NostrEvents.createUserRelayListEvent(tags, contentArr, this.user.privateKey);
         this.userRelayListEvent = newEvent;
         

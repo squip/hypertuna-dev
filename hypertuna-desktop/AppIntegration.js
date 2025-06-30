@@ -909,7 +909,6 @@ App.syncHypertunaConfigToFile = async function() {
             });
             
             // Add a small delay to prevent flash of "no relays" message
-            // This gives time for any pending events to be processed
             if (groups.length === 0 && retries < 5) {
                 await new Promise(resolve => setTimeout(resolve, 1000));
                 
@@ -942,9 +941,9 @@ App.syncHypertunaConfigToFile = async function() {
             // Clear and populate groups
             groupsList.innerHTML = '';
             
-            groups.forEach(group => {
+            for (const group of groups) {
                 // Skip deleted groups
-                if (group.event && group.event.markedAsDeleted) return;
+                if (group.event && group.event.markedAsDeleted) continue;
                 
                 const groupElement = document.createElement('a');
                 groupElement.href = '#';
@@ -955,6 +954,13 @@ App.syncHypertunaConfigToFile = async function() {
                 
                 // Use hypertunaId as an additional identifier
                 const hypertunaId = group.hypertunaId || '';
+                
+                // Get the actual connection URL from the relay manager
+                let connectionUrl = 'Not connected';
+                const relayUrl = this.nostr.client.groupRelayUrls.get(group.id);
+                if (relayUrl) {
+                    connectionUrl = relayUrl;
+                }
                 
                 groupElement.innerHTML = `
                     <div class="group-avatar">${firstLetter}</div>
@@ -976,7 +982,7 @@ App.syncHypertunaConfigToFile = async function() {
                 });
                 
                 groupsList.appendChild(groupElement);
-            });
+            }
         } catch (e) {
             console.error('Error loading groups:', e);
             groupsList.innerHTML = `
@@ -1620,13 +1626,12 @@ App.syncHypertunaConfigToFile = async function() {
         document.getElementById('btn-cancel-auth').classList.add('hidden');
         
         // Generate QR code for mobile authorization
-        // Use gateway URL from config instead of window.location.origin
         const gatewayUrl = this.currentUser.hypertunaConfig?.gatewayUrl || HypertunaUtils.DEFAULT_GATEWAY_URL;
         const mobileAuthUrl = `${gatewayUrl}/authorize?token=${authResult.authToken}`;
-
+    
         document.getElementById('auth-url').value = mobileAuthUrl;
         
-        // ORIGINAL: Generate QR code
+        // Generate QR code
         if (window.QRCode) {
             const qrContainer = document.getElementById('auth-qr-code');
             qrContainer.innerHTML = ''; // Clear existing QR code
@@ -1640,13 +1645,13 @@ App.syncHypertunaConfigToFile = async function() {
                 correctLevel: QRCode.CorrectLevel.H
             });
         }
-
-        // Update the user's relay list (kind 10009) with the authenticated URL.
-        // This correctly persists the authenticated relay for future sessions.
+    
+        // IMPORTANT: Update the user's relay list with the FULL authenticated URL
         if (this.nostr && this.nostr.client) {
+            // The relayUrl should already include the token from the worker
             await this.nostr.client.updateUserRelayListWithAuth(
-                authResult.publicIdentifier, // The group ID from the worker
-                authResult.relayUrl,
+                authResult.publicIdentifier,
+                authResult.relayUrl, // This should be the full authenticated URL
                 authResult.authToken
             );
         } else {
