@@ -454,23 +454,28 @@ function handleWorkerMessage(message) {
       break
 
     case 'relay-initialized':
-      // New message type when a relay is fully ready
+      // Message when a relay has finished initializing
       if (message.relayKey) {
         console.log(`[App] Relay initialized: ${message.relayKey}`)
         console.log(`[App] Relay gateway URL: ${message.gatewayUrl}`)
         initializedRelays.add(message.relayKey)
 
+        // Register mapping between the worker key and the public identifier first
         if (window.App && window.App.nostr && message.publicIdentifier) {
           window.App.nostr.registerRelayMapping(message.relayKey, message.publicIdentifier)
         }
-        
-        // Resolve any waiting promises for this relay
-        const resolver = relayReadyResolvers.get(message.relayKey)
-        if (resolver) {
-          resolver(true)
-          relayReadyResolvers.delete(message.relayKey)
+
+        // Resolve any promises waiting for this relay using either key
+        const keys = [message.relayKey, message.publicIdentifier]
+        for (const k of keys) {
+          if (!k) continue
+          const resolver = relayReadyResolvers.get(k)
+          if (resolver) {
+            resolver(true)
+            relayReadyResolvers.delete(k)
+          }
         }
-        
+
         // Notify the UI that this relay is ready
         if (window.App && window.App.nostr) {
           const identifier = message.publicIdentifier || message.relayKey
@@ -496,20 +501,26 @@ function handleWorkerMessage(message) {
       break
     
     case 'relay-initialized':
-      // New message type when a relay is fully ready
+      // Message when a relay has finished initializing
       if (message.relayKey) {
         console.log(`[App] Relay initialized: ${message.relayKey}`)
         console.log(`[App] Relay gateway URL: ${message.gatewayUrl}`)
         initializedRelays.add(message.relayKey)
-          
-        // Resolve any waiting promises for this relay
-        const resolver = relayReadyResolvers.get(message.relayKey)
-        if (resolver) {
-          resolver(true)
-          relayReadyResolvers.delete(message.relayKey)
+
+        if (window.App && window.App.nostr && message.publicIdentifier) {
+          window.App.nostr.registerRelayMapping(message.relayKey, message.publicIdentifier)
         }
-          
-        // Notify the UI that this relay is ready
+
+        const keys = [message.relayKey, message.publicIdentifier]
+        for (const k of keys) {
+          if (!k) continue
+          const resolver = relayReadyResolvers.get(k)
+          if (resolver) {
+            resolver(true)
+            relayReadyResolvers.delete(k)
+          }
+        }
+
         if (window.App && window.App.nostr) {
           const identifier = message.publicIdentifier || message.relayKey
           window.App.nostr.handleRelayReady(identifier, message.gatewayUrl)
