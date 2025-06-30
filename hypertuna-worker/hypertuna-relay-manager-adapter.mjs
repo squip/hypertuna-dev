@@ -130,6 +130,25 @@ export async function createRelay(options = {}) {
         const publicIdentifier = npub && name ? 
             generatePublicIdentifier(npub, name) : null;
         
+        // Generate auth token for the admin/creator
+        let authToken = null;
+        const auth_adds = [];
+        
+        if (config.nostr_pubkey_hex) {
+            // Generate auth token for the creator
+            authToken = crypto.randomBytes(32).toString('hex');
+            
+            // Add to auth_adds array
+            auth_adds.push({
+                pubkey: config.nostr_pubkey_hex,
+                token: authToken,
+                subnets: [], // Will be populated on first connection
+                ts: Date.now()
+            });
+            
+            console.log('[RelayAdapter] Generated auth token for creator:', config.nostr_pubkey_hex.substring(0, 8) + '...');
+        }
+        
         // Create relay profile with both internal and public identifiers
         const profileInfo = {
             name: name || `Relay ${relayKey.substring(0, 8)}`,
@@ -151,8 +170,8 @@ export async function createRelay(options = {}) {
             auth_config: {
                 requiresAuth: true,
                 tokenProtected: true,
-                authorizedUsers: [],
-                auth_adds: [],
+                authorizedUsers: auth_adds, // This will be recalculated by saveRelayProfile
+                auth_adds: auth_adds,
                 auth_removes: []
             }
         };
@@ -161,6 +180,19 @@ export async function createRelay(options = {}) {
         const saved = await saveRelayProfile(profileInfo);
         if (!saved) {
             console.log('[RelayAdapter] Warning: Failed to save relay profile');
+        }
+
+        // Import auth data to the auth store
+        if (authToken && config.nostr_pubkey_hex) {
+            const { getRelayAuthStore } = await import('./relay-auth-store.mjs');
+            const authStore = getRelayAuthStore();
+            
+            authStore.addAuth(relayKey, config.nostr_pubkey_hex, authToken, '');
+            if (publicIdentifier) {
+                authStore.addAuth(publicIdentifier, config.nostr_pubkey_hex, authToken, '');
+            }
+            
+            console.log('[RelayAdapter] Added auth token to auth store');
         }
 
         // Load members into in-memory map
@@ -172,15 +204,20 @@ export async function createRelay(options = {}) {
         console.log('[RelayAdapter] Created relay:', relayKey);
         console.log(`[RelayAdapter] Connect at: wss://${config.proxy_server_address}/${relayKey}`);
         
+        // Build the authenticated relay URL
+        const identifierPath = publicIdentifier ? 
+            publicIdentifier.replace(':', '/') : 
+            relayKey;
+        const baseUrl = `wss://${config.proxy_server_address}/${identifierPath}`;
+        const authenticatedUrl = authToken ? `${baseUrl}?token=${authToken}` : baseUrl;
+        
         // Send relay initialized message for newly created relay
         if (global.sendMessage) {
             global.sendMessage({
                 type: 'relay-initialized',
                 relayKey: relayKey, // Internal key for worker
                 publicIdentifier: publicIdentifier, // Public identifier for external use
-                gatewayUrl: publicIdentifier ? 
-                    `wss://${config.proxy_server_address}/${npub}/${name.replace(/\s+/g, '')}` :
-                    `wss://${config.proxy_server_address}/${relayKey}`,
+                gatewayUrl: authenticatedUrl,
                 name: profileInfo.name,
                 isNew: true,
                 timestamp: new Date().toISOString()
@@ -191,9 +228,9 @@ export async function createRelay(options = {}) {
             success: true,
             relayKey,
             publicIdentifier,
-            connectionUrl: publicIdentifier ? 
-                `wss://${config.proxy_server_address}/${npub}/${name.replace(/\s+/g, '')}` :
-                `wss://${config.proxy_server_address}/${relayKey}`,
+            connectionUrl: baseUrl, // Base URL without token
+            authToken: authToken, // Return the token separately
+            relayUrl: authenticatedUrl, // Full authenticated URL
             profile: profileInfo,
             storageDir: defaultStorageDir
         };
@@ -494,7 +531,12 @@ export async function autoConnectStoredRelays(config) {
                     // Load auth config for already active relay if it exists
                     if (profile.auth_config && profile.auth_config.requiresAuth) {
                         const authData = {};
-                        profile.auth_config.authorizedUsers.forEach(user => {
+                        // Use the calculated authorizedUsers list
+                        const authorizedUsers = calculateAuthorizedUsers(
+                            profile.auth_config.auth_adds || [],
+                            profile.auth_config.auth_removes || []
+                        );
+                        authorizedUsers.forEach(user => {
                             authData[user.pubkey] = {
                                 token: user.token,
                                 allowedSubnets: user.subnets || [],
@@ -516,10 +558,20 @@ export async function autoConnectStoredRelays(config) {
                     // Determine if current user has auth token
                     let userAuthToken = null;
                     if (profile.auth_config?.requiresAuth && config.nostr_pubkey_hex) {
-                        const userAuth = profile.auth_config.authorizedUsers.find(
+                        const authorizedUsers = calculateAuthorizedUsers(
+                            profile.auth_config.auth_adds || [],
+                            profile.auth_config.auth_removes || []
+                        );
+                        const userAuth = authorizedUsers.find(
                             u => u.pubkey === config.nostr_pubkey_hex
                         );
                         userAuthToken = userAuth?.token || null;
+                        
+                        if (userAuthToken) {
+                            console.log(`[RelayAdapter] Found auth token for user ${config.nostr_pubkey_hex.substring(0, 8)}... on relay ${profile.relay_key}`);
+                        } else {
+                            console.log(`[RelayAdapter] No auth token found for user ${config.nostr_pubkey_hex.substring(0, 8)}... on relay ${profile.relay_key}`);
+                        }
                     }
 
                     // Build connection URL including token if available
@@ -557,13 +609,13 @@ export async function autoConnectStoredRelays(config) {
                 if (profile.auth_config && profile.auth_config.requiresAuth) {
                     console.log(`[RelayAdapter] Loading auth configuration for relay ${profile.relay_key}`);
                     
-                    // NEW: Calculate authorizedUsers from auth_adds and auth_removes
+                    // Calculate authorizedUsers from auth_adds and auth_removes
                     const authorizedUsers = calculateAuthorizedUsers(
                         profile.auth_config.auth_adds || [],
                         profile.auth_config.auth_removes || []
                     );
                     const authData = {};
-                    authorizedUsers.forEach(user => { // Use the calculated list
+                    authorizedUsers.forEach(user => {
                         authData[user.pubkey] = {
                             token: user.token,
                             allowedSubnets: user.subnets || [],
@@ -618,10 +670,20 @@ export async function autoConnectStoredRelays(config) {
                     // Determine if current user has auth token
                     let userAuthToken = null;
                     if (profile.auth_config?.requiresAuth && config.nostr_pubkey_hex) {
-                        const userAuth = profile.auth_config.authorizedUsers.find(
+                        const authorizedUsers = calculateAuthorizedUsers(
+                            profile.auth_config.auth_adds || [],
+                            profile.auth_config.auth_removes || []
+                        );
+                        const userAuth = authorizedUsers.find(
                             u => u.pubkey === config.nostr_pubkey_hex
                         );
                         userAuthToken = userAuth?.token || null;
+                        
+                        if (userAuthToken) {
+                            console.log(`[RelayAdapter] Found auth token for user ${config.nostr_pubkey_hex.substring(0, 8)}... on relay ${profile.relay_key}`);
+                        } else {
+                            console.log(`[RelayAdapter] No auth token found for user ${config.nostr_pubkey_hex.substring(0, 8)}... on relay ${profile.relay_key}`);
+                        }
                     }
                     
                     // Build connection URL including token if available

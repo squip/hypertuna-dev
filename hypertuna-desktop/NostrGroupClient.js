@@ -1477,7 +1477,10 @@ async fetchMultipleProfiles(pubkeys) {
 
         const relayUrl = NostrEvents._getTagValue(event, 'd');
         if (relayUrl) {
-            this.hypertunaRelayUrls.set(groupId, relayUrl);
+            const existing = this.groupRelayUrls.get(groupId);
+            if (!existing || !existing.includes('token=')) {
+                this.groupRelayUrls.set(groupId, relayUrl);
+            }
         }
         
         console.log(`Processing Hypertuna relay event for group ${groupId} with hypertuna ID ${hypertunaId}`);

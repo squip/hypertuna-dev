@@ -17,7 +17,8 @@ import {
   updateRelayMembers, // This is likely not used directly anymore for member_adds/removes
   updateRelayAuthToken, // <-- NEW IMPORT
   updateRelayMemberSets,
-  calculateMembers
+  calculateMembers,
+  calculateAuthorizedUsers
 } from './hypertuna-relay-profile-manager-bare.mjs'
 import { loadRelayKeyMappings } from './hypertuna-relay-manager-adapter.mjs'
 
@@ -150,10 +151,28 @@ async function addAuthInfoToRelays(relays) {
 
       let token = null
       if (profile.auth_config?.requiresAuth && config.nostr_pubkey_hex) {
-        const userAuth = (profile.auth_config.authorizedUsers || []).find(
+        // Calculate authorized users from auth_adds and auth_removes
+        // const { calculateAuthorizedUsers } = require('./hypertuna-relay-profile-manager-bare.mjs')
+        const authorizedUsers = calculateAuthorizedUsers(
+          profile.auth_config.auth_adds || [],
+          profile.auth_config.auth_removes || []
+        )
+        
+        const userAuth = authorizedUsers.find(
           u => u.pubkey === config.nostr_pubkey_hex
         )
         token = userAuth?.token || null
+        
+        if (!token && profile.auth_tokens && profile.auth_tokens[config.nostr_pubkey_hex]) {
+          // Fallback to legacy auth_tokens if present
+          token = profile.auth_tokens[config.nostr_pubkey_hex]
+        }
+        
+        if (token) {
+          console.log(`[Worker] Found auth token for user on relay ${r.relayKey}`)
+        } else {
+          console.log(`[Worker] No auth token found for user on relay ${r.relayKey}`)
+        }
       }
 
       const identifierPath = profile.public_identifier
