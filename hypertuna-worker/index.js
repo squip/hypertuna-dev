@@ -31,6 +31,7 @@ let isShuttingDown = false
 const relayMembers = new Map()
 const relayMemberAdds = new Map()
 const relayMemberRemoves = new Map()
+let config = null
 
 
 function getUserKey(config) {
@@ -141,6 +142,41 @@ function addMembersToRelays(relays) {
   }))
 }
 
+async function addAuthInfoToRelays(relays) {
+  try {
+    const profiles = await getAllRelayProfiles(global.userConfig?.userKey)
+    return relays.map(r => {
+      const profile = profiles.find(p => p.relay_key === r.relayKey) || {}
+
+      let token = null
+      if (profile.auth_config?.requiresAuth && config.nostr_pubkey_hex) {
+        const userAuth = (profile.auth_config.authorizedUsers || []).find(
+          u => u.pubkey === config.nostr_pubkey_hex
+        )
+        token = userAuth?.token || null
+      }
+
+      const identifierPath = profile.public_identifier
+        ? profile.public_identifier.replace(':', '/')
+        : r.relayKey
+
+      const baseUrl = `wss://${config.proxy_server_address}/${identifierPath}`
+      const connectionUrl = token ? `${baseUrl}?token=${token}` : baseUrl
+
+      return {
+        ...r,
+        publicIdentifier: profile.public_identifier || null,
+        connectionUrl,
+        userAuthToken: token,
+        requiresAuth: profile.auth_config?.requiresAuth || false
+      }
+    })
+  } catch (err) {
+    console.error('[Worker] Failed to add auth info to relays:', err)
+    return relays
+  }
+}
+
 // Make pipe and sendMessage globally available for the relay server
 global.workerPipe = workerPipe
 global.sendMessage = sendMessage
@@ -214,9 +250,10 @@ if (workerPipe) {
 
                   // Send updated relay list
                   const relays = await relayServer.getActiveRelays()
+                  const relaysAuth = await addAuthInfoToRelays(relays)
                   sendMessage({
                     type: 'relay-update',
-                    relays: addMembersToRelays(relays)
+                    relays: addMembersToRelays(relaysAuth)
                   })
                 } catch (err) {
                   sendMessage({
@@ -250,9 +287,10 @@ if (workerPipe) {
 
                   // Send updated relay list
                   const relays = await relayServer.getActiveRelays()
+                  const relaysAuth = await addAuthInfoToRelays(relays)
                   sendMessage({
                     type: 'relay-update',
-                    relays: addMembersToRelays(relays)
+                    relays: addMembersToRelays(relaysAuth)
                   })
                 } catch (err) {
                   sendMessage({
@@ -277,9 +315,10 @@ if (workerPipe) {
                   
                   // Send updated relay list
                   const relays = await relayServer.getActiveRelays()
+                  const relaysAuth = await addAuthInfoToRelays(relays)
                   sendMessage({
                     type: 'relay-update',
-                    relays: addMembersToRelays(relays)
+                    relays: addMembersToRelays(relaysAuth)
                   })
                 } catch (err) {
                   sendMessage({
@@ -375,9 +414,10 @@ if (workerPipe) {
                 try {
                   // Get the active relays
                   const relays = await relayServer.getActiveRelays()
+                  const relaysAuth = await addAuthInfoToRelays(relays)
                   sendMessage({
                     type: 'relay-update',
-                    relays: addMembersToRelays(relays)
+                    relays: addMembersToRelays(relaysAuth)
                   })
                 } catch (err) {
                   sendMessage({
@@ -478,7 +518,7 @@ async function main() {
       console.log('[Worker] Hypertuna Relay Worker starting...')
       
       // Load or create configuration
-      let config = await loadOrCreateConfig()
+      config = await loadOrCreateConfig()
       
       // Wait for config from parent if available
       if (workerPipe) {
