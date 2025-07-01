@@ -527,22 +527,7 @@ function handleWorkerMessage(message) {
         }
       }
       break
-        
-      case 'relay-registration-complete':
-        // When a relay has been registered with gateway
-        if (message.relayKey) {
-          console.log(`[App] Relay registered with gateway: ${message.relayKey}`)
-          addLog(`Relay ${message.relayKey} registered with gateway`, 'status')
-        }
-        break
-        
-      case 'all-relays-initialized':
-        // When all stored relays have been initialized
-        console.log('[App] All stored relays initialized')
-        if (window.App && window.App.nostr) {
-          window.App.nostr.handleAllRelaysReady()
-        }
-        break
+      
       
     case 'relay-created':
       const resolver = relayCreateResolvers.shift()
