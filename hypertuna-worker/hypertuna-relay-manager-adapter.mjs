@@ -142,7 +142,6 @@ export async function createRelay(options = {}) {
             auth_adds.push({
                 pubkey: config.nostr_pubkey_hex,
                 token: authToken,
-                subnets: [], // Will be populated on first connection
                 ts: Date.now()
             });
             
@@ -543,7 +542,6 @@ export async function autoConnectStoredRelays(config) {
                         authorizedUsers.forEach(user => {
                             authData[user.pubkey] = {
                                 token: user.token,
-                                allowedSubnets: user.subnets || [],
                                 createdAt: Date.now(),
                                 lastUsed: Date.now()
                             };
@@ -624,7 +622,6 @@ export async function autoConnectStoredRelays(config) {
                     authorizedUsers.forEach(user => {
                         authData[user.pubkey] = {
                             token: user.token,
-                            allowedSubnets: user.subnets || [],
                             createdAt: Date.now(),
                             lastUsed: Date.now()
                         };

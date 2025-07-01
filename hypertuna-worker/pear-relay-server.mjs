@@ -820,7 +820,7 @@ function setupProtocolHandlers(protocol) {
     
     try {
       const body = JSON.parse(request.body.toString());
-      const { pubkey, token, identifier, subnetHash } = body;
+      const { pubkey, token, identifier } = body;
       
       // Resolve the public identifier to the internal relay key
       let internalRelayKey = identifier;
@@ -834,7 +834,7 @@ function setupProtocolHandlers(protocol) {
         }
       }
       
-      if (!pubkey || !token || !identifier || !subnetHash) {
+      if (!pubkey || !token || !identifier) {
         // This check should ideally happen earlier, but for now, it's fine here.
         // The `internalRelayKey` might still be the `identifier` if resolution failed.
         console.error(`[RelayServer] Missing required fields for finalization`);
@@ -848,13 +848,12 @@ function setupProtocolHandlers(protocol) {
       
       console.log(`[RelayServer] Finalizing for pubkey: ${pubkey.substring(0, 8)}...`);
       console.log(`[RelayServer] Identifier: ${identifier}`);
-      console.log(`[RelayServer] Subnet hash: ${subnetHash.substring(0, 8)}...`);
       
       // Get auth store
       const authStore = getRelayAuthStore();
       
       // Store the authentication
-      authStore.addAuth(internalRelayKey, pubkey, token, subnetHash);
+      authStore.addAuth(internalRelayKey, pubkey, token);
       
       // Get relay profile to update members
       let profile = await getRelayProfileByKey(identifier);
@@ -864,9 +863,8 @@ function setupProtocolHandlers(protocol) {
       
       if (profile) {
         // Update profile with auth token
-        const { updateRelayAuthToken } = await import('./hypertuna-relay-profile-manager-bare.mjs'); 
-        // Pass subnetHash as an array to match the function signature
-        await updateRelayAuthToken(identifier, pubkey, token, [subnetHash]);
+        const { updateRelayAuthToken } = await import('./hypertuna-relay-profile-manager-bare.mjs');
+        await updateRelayAuthToken(identifier, pubkey, token);
         // Update member lists
         const currentAdds = profile.member_adds || [];
         const currentRemoves = profile.member_removes || [];
@@ -889,8 +887,7 @@ function setupProtocolHandlers(protocol) {
         await updateRelayMemberSets(identifier, currentAdds, currentRemoves);
         
         // Publish kind 9000 event
-        // Pass subnetHash as an array
-        await publishMemberAddEvent(identifier, pubkey, token, [subnetHash]);
+        await publishMemberAddEvent(identifier, pubkey, token);
       }
       
       // Generate relay connection URL
@@ -929,112 +926,6 @@ function setupProtocolHandlers(protocol) {
   });
 
   
-  // Add authorize endpoint for mobile subnet addition
-protocol.handle('/authorize', async (request) => {
-  console.log(`[RelayServer] ========================================`);
-  console.log(`[RelayServer] AUTHORIZE REQUEST (Mobile subnet)`);
-  
-  try {
-    const body = JSON.parse(request.body.toString());
-    const { token, relayKey, subnetHash } = body;
-    
-    if (!token) {
-      console.error(`[RelayServer] Missing token`);
-      updateMetrics(false);
-      return {
-        statusCode: 400,
-        headers: { 'content-type': 'application/json' },
-        body: Buffer.from(JSON.stringify({ error: 'Missing token' }))
-      };
-    }
-    
-    console.log(`[RelayServer] Token: ${token.substring(0, 16)}...`);
-    console.log(`[RelayServer] Relay: ${relayKey || 'not specified'}`);
-    console.log(`[RelayServer] Subnet: ${subnetHash?.substring(0, 8)}...`);
-    
-    const authStore = getRelayAuthStore();
-    
-    // Find the auth entry by token
-    let foundAuth = null;
-    let foundRelay = null;
-    
-    if (relayKey) {
-      // Check specific relay
-      const auth = authStore.verifyAuth(relayKey, token, subnetHash);
-      if (auth) {
-        foundAuth = auth;
-        foundRelay = relayKey;
-      }
-    } else {
-      // Search all relays (less efficient but supports QR code without relay info)
-      const activeRelays = await getActiveRelays();
-      for (const relay of activeRelays) {
-        const auth = authStore.getAuthByToken(relay.relayKey, token);
-        if (auth) {
-          foundAuth = auth;
-          foundRelay = relay.relayKey;
-          break;
-        }
-      }
-    }
-    
-    if (!foundAuth) {
-      console.error(`[RelayServer] Invalid token`);
-      updateMetrics(false);
-      return {
-        statusCode: 403,
-        headers: { 'content-type': 'application/json' },
-        body: Buffer.from(JSON.stringify({ error: 'Invalid token' }))
-      };
-    }
-    
-    // Add the new subnet
-    const added = authStore.addSubnet(foundRelay, foundAuth.pubkey, subnetHash);
-    
-    if (added) {
-      console.log(`[RelayServer] Added subnet for ${foundAuth.pubkey.substring(0, 8)}...`);
-      // Persist subnet update to profile
-      try {
-        await updateRelayAuthToken(foundRelay, foundAuth.pubkey, token, [subnetHash]);
-        await publishMemberAddEvent(foundRelay, foundAuth.pubkey, token, [subnetHash]);
-      } catch (persistErr) {
-        console.error('[RelayServer] Failed to persist mobile subnet:', persistErr.message);
-      }
-      
-      console.log(`[RelayServer] ========================================`);
-      
-      updateMetrics(true);
-      return {
-        statusCode: 200,
-        headers: { 'content-type': 'application/json' },
-        body: Buffer.from(JSON.stringify({
-          success: true,
-          message: 'Mobile device authorized'
-        }))
-      };
-    } else {
-      updateMetrics(false);
-      return {
-        statusCode: 400,
-        headers: { 'content-type': 'application/json' },
-        body: Buffer.from(JSON.stringify({ error: 'Failed to add subnet' }))
-      };
-    }
-    
-  } catch (error) {
-    console.error(`[RelayServer] ========================================`);
-    console.error(`[RelayServer] AUTHORIZE ERROR`);
-    console.error(`[RelayServer] Error:`, error.message);
-    console.error(`[RelayServer] ========================================`);
-    
-    updateMetrics(false);
-    return {
-      statusCode: 500,
-      headers: { 'content-type': 'application/json' },
-      body: Buffer.from(JSON.stringify({ error: error.message }))
-    };
-  }
-});
 
   // Disconnect from relay
   protocol.handle('/relay/:identifier/disconnect', async (request) => {
@@ -1113,11 +1004,10 @@ protocol.handle('/authorize', async (request) => {
     console.log(`[RelayServer] Relay message for identifier: ${identifier}, connectionKey: ${connectionKey}`);
     
     try {
-      // Extract auth token and subnet hash from request headers
+      // Extract auth token from request headers
       const authToken = request.headers['x-auth-token'];
-      const subnetHash = request.headers['x-subnet-hash'];
-      
-      console.log(`[RelayServer] Auth token present: ${!!authToken}, Subnet hash present: ${!!subnetHash}`);
+
+      console.log(`[RelayServer] Auth token present: ${!!authToken}`);
       
       // Check if identifier is a public identifier or relay key
       let relayKey = identifier;
@@ -1178,7 +1068,7 @@ protocol.handle('/authorize', async (request) => {
           // Some relays might allow public read access
           // You can customize this based on your requirements
           if (profile?.auth_config?.publicRead !== true) {
-            if (!authToken || !subnetHash) {
+            if (!authToken) {
               console.warn(`[RelayServer] Missing auth for REQ on protected relay`);
               updateMetrics(false);
               return {
@@ -1189,9 +1079,9 @@ protocol.handle('/authorize', async (request) => {
                 ]))
               };
             }
-            
+
             // Verify auth for REQ
-            const auth = authStore.verifyAuth(relayKey, authToken, subnetHash);
+            const auth = authStore.verifyAuth(relayKey, authToken);
             if (!auth) {
               console.warn(`[RelayServer] Invalid auth for REQ`);
               updateMetrics(false);
@@ -1212,8 +1102,8 @@ protocol.handle('/authorize', async (request) => {
         if (nostrMessage[0] === 'EVENT') {
           const event = nostrMessage.length === 2 ? nostrMessage[1] : nostrMessage[2];
           
-          if (!authToken || !subnetHash) {
-            console.warn(`[RelayServer] Missing auth token or subnet hash for EVENT`);
+          if (!authToken) {
+            console.warn(`[RelayServer] Missing auth token for EVENT`);
             updateMetrics(false);
             
             // Return proper NOSTR OK response with auth error
@@ -1226,9 +1116,9 @@ protocol.handle('/authorize', async (request) => {
           }
           
           // Verify the auth
-          const auth = authStore.verifyAuth(relayKey, authToken, subnetHash);
+          const auth = authStore.verifyAuth(relayKey, authToken);
           if (!auth) {
-            console.warn(`[RelayServer] Invalid auth token or subnet`);
+            console.warn(`[RelayServer] Invalid auth token`);
             updateMetrics(false);
             
             const okResponse = ['OK', event?.id || '', false, 'error: invalid authentication'];
@@ -1335,9 +1225,8 @@ protocol.handle('/authorize', async (request) => {
   // Handle relay subscriptions (from gateway)
   protocol.handle('/get/relay/:identifier/:connectionKey', async (request) => {
     const identifier = request.params.identifier;
-    // Extract auth token and subnet hash from request headers
+    // Extract auth token from request headers
     const authToken = request.headers['x-auth-token'];
-    const subnetHash = request.headers['x-subnet-hash'];
     const connectionKey = request.params.connectionKey;
     
     console.log(`[RelayServer] Checking subscriptions for identifier: ${identifier}, connectionKey: ${connectionKey}`);
@@ -1381,7 +1270,7 @@ protocol.handle('/authorize', async (request) => {
           // This endpoint is implicitly for REQ messages (fetching events for a subscription)
           // Check if public read access is explicitly allowed
           if (profile?.auth_config?.publicRead !== true) {
-            if (!authToken || !subnetHash) {
+            if (!authToken) {
               console.warn(`[RelayServer] Missing auth for read access on protected relay`);
               updateMetrics(false);
               return {
@@ -1394,7 +1283,7 @@ protocol.handle('/authorize', async (request) => {
             }
 
             // Verify auth
-            const auth = authStore.verifyAuth(relayKey, authToken, subnetHash);
+            const auth = authStore.verifyAuth(relayKey, authToken);
             if (!auth) {
               console.warn(`[RelayServer] Invalid auth for read access`);
               updateMetrics(false);
@@ -1482,7 +1371,7 @@ protocol.handle('/authorize', async (request) => {
 
 // Helper function to publish member add event (kind 9000)
 // role can be 'admin' when the creator is automatically authorized during relay creation
-async function publishMemberAddEvent(identifier, pubkey, token, subnetHashes = [], role = 'member') {
+async function publishMemberAddEvent(identifier, pubkey, token, role = 'member') {
   try {
     console.log(`[RelayServer] Publishing kind 9000 event for ${pubkey.substring(0, 8)}...`);
     
@@ -1493,7 +1382,7 @@ async function publishMemberAddEvent(identifier, pubkey, token, subnetHashes = [
       created_at: Math.floor(Date.now() / 1000),
       tags: [
         ['h', identifier],
-        ['p', pubkey, role, token, ...subnetHashes] // Spread all subnet hashes
+        ['p', pubkey, role, token]
       ],
       pubkey: config.nostr_pubkey_hex
     };
@@ -1740,12 +1629,6 @@ async function registerWithGateway(relayProfileInfo = null) {
       console.log('[RelayServer] Gateway HTTP registration response:', response);
       console.log('[RelayServer] Registration SUCCESSFUL');
 
-      // Store subnet hash from gateway response if provided
-      if (response && response.subnetHash) {
-          config.subnetHash = response.subnetHash;
-          await saveConfig(config);
-          console.log(`[RelayServer] Stored subnet hash: ${config.subnetHash.substring(0, 8)}...`);
-      }
 
       // Notify parent process
       if (global.sendMessage) {
@@ -1765,7 +1648,6 @@ async function registerWithGateway(relayProfileInfo = null) {
 
 // Export relay management functions for worker access
 export async function createRelay(options) {
-  // The subnetHash is no longer passed in, it's retrieved from the config
   const { name, description, isPublic = false, isOpen = false } = options;
   console.log('[RelayServer] Creating relay via adapter:', { name, description, isPublic, isOpen });
 
@@ -1781,15 +1663,15 @@ export async function createRelay(options) {
     await updateHealthState();
     
     // Auto-authorize the creator
-    if (config.subnetHash) {
+    {
       try {
         const adminPubkey = config.nostr_pubkey_hex;
         const challengeManager = getChallengeManager();
         const authToken = challengeManager.generateAuthToken(adminPubkey);
         const authStore = getRelayAuthStore();
         const { updateRelayAuthToken } = await import('./hypertuna-relay-profile-manager-bare.mjs');
-        authStore.addAuth(result.relayKey, adminPubkey, authToken, config.subnetHash);
-        await updateRelayAuthToken(result.relayKey, adminPubkey, authToken, [config.subnetHash]);
+        authStore.addAuth(result.relayKey, adminPubkey, authToken);
+        await updateRelayAuthToken(result.relayKey, adminPubkey, authToken);
 
         result.authToken = authToken;
         result.relayUrl = `wss://${config.proxy_server_address}/${result.publicIdentifier}?token=${authToken}`;
@@ -1799,7 +1681,7 @@ export async function createRelay(options) {
         result.profile.isOpen = isOpen;
         if (!result.profile.auth_config) result.profile.auth_config = {};
         await saveRelayProfile(result.profile);
-        await publishMemberAddEvent(result.publicIdentifier, adminPubkey, authToken, [config.subnetHash], 'admin');
+        await publishMemberAddEvent(result.publicIdentifier, adminPubkey, authToken, 'admin');
         console.log(`[RelayServer] Auto-authorized creator ${adminPubkey.substring(0, 8)}...`);
       } catch (authError) {
         console.error('[RelayServer] Failed to auto-authorize creator:', authError);
@@ -1910,18 +1792,11 @@ export async function startJoinAuthentication(options) {
     const joinEvent = await createGroupJoinRequest(publicIdentifier, userNsec);
     console.log(`[RelayServer] Created join event ID: ${joinEvent.id.substring(0, 8)}...`);
     
-    // 2. Retrieve subnetHash (should have been stored during gateway registration)
-    const requesterSubnetHash = config.subnetHash;
-    if (!requesterSubnetHash) {
-      throw new Error('Subnet hash not available. Ensure worker is registered with gateway.');
-    }
-    console.log(`[RelayServer] Using subnet hash: ${requesterSubnetHash.substring(0, 8)}...`);
-    
-    // 3. Make an https.request to the gateway's /post/join/:identifier endpoint
+    // 2. Make an https.request to the gateway's /post/join/:identifier endpoint
     const gatewayUrl = new URL(config.gatewayUrl);
     const postData = JSON.stringify({
       event: joinEvent,
-      requesterSubnetHash: requesterSubnetHash
+      requesterSubnetHash: null
     });
     
     const requestOptions = {
@@ -2103,13 +1978,13 @@ export async function startJoinAuthentication(options) {
       throw new Error('Final response from gateway missing authToken or relayUrl');
     }
 
-    // Persist the auth token and subnet hash to the local relay profile
+    // Persist the auth token to the local relay profile
     console.log(`[RelayServer] Persisting auth token for ${userPubkey.substring(0, 8)}...`);
-    await updateRelayAuthToken(publicIdentifier, userPubkey, authToken, [requesterSubnetHash]);
+    await updateRelayAuthToken(publicIdentifier, userPubkey, authToken);
 
     // Publish kind 9000 event to announce the new member
     console.log('[RelayServer] Publishing kind 9000 member add event...');
-    await publishMemberAddEvent(publicIdentifier, userPubkey, authToken, [requesterSubnetHash]);
+    await publishMemberAddEvent(publicIdentifier, userPubkey, authToken);
 
     // Notify the desktop UI of success
     if (global.sendMessage) {
