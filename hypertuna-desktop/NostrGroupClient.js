@@ -1632,7 +1632,7 @@ async fetchMultipleProfiles(pubkeys) {
         event.tags.forEach(tag => {
             if (tag[0] === 'p' && tag[1]) {
                 const pubkey = tag[1];
-                const rolesAndAuthData = tag.slice(2); // e.g., ['member', token, subnetHash]
+                const rolesAndAuthData = tag.slice(2); // e.g., ['member', token, subnetHash1, subnetHash2]
                 const actualRoles = [rolesAndAuthData[0]]; // 'member' or 'admin'
                 const token = rolesAndAuthData[1]; // The auth token
                 const subnetHashes = rolesAndAuthData.slice(2); // All subsequent elements are subnet hashes
@@ -1640,8 +1640,8 @@ async fetchMultipleProfiles(pubkeys) {
                 addMap.set(pubkey, { ts: event.created_at, roles: actualRoles });
                 this.relevantPubkeys.add(pubkey);
 
-                // If token and subnetHash are present, send to worker for auth data update
-                if (token && subnetHash && window.workerPipe) {
+                // If token and at least one subnet hash are present, send to worker for auth data update
+                if (token && subnetHashes.length > 0 && window.workerPipe) {
                     const relayKey = this.publicToInternalMap.get(groupId) || null;
                     const msg = {
                         type: 'update-auth-data',
