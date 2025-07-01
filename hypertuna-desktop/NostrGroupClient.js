@@ -286,7 +286,7 @@ class NostrGroupClient {
 
                         // Check if we have an updated URL from the worker
                         const updatedUrl = this.groupRelayUrls.get(identifier);
-                        if (updatedUrl && updatedUrl !== connection.relayUrl) {
+                        if (updatedUrl && updatedUrl !== connection.relayUrl && updatedUrl.includes('token=')) {
                             console.log(`[NostrGroupClient] Using updated authenticated URL for ${identifier}`);
                             connection.relayUrl = updatedUrl;
                         }
@@ -349,11 +349,13 @@ class NostrGroupClient {
         
         // Check if this relay is in our pending connections
         const pending = this.pendingRelayConnections.get(identifier);
-        if (pending && pending.status === 'pending') {
+        if (pending && pending.status !== 'connected') {
             console.log(`[NostrGroupClient] Found pending connection for ${identifier}, updating with authenticated URL`);
             // Update the pending connection with the authenticated URL
             pending.relayUrl = gatewayUrl;
-            this.processRelayConnectionQueue();
+            if (pending.status === 'pending') {
+                this.processRelayConnectionQueue();
+            }
         }
     }
 
