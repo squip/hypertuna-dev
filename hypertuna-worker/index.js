@@ -407,12 +407,13 @@ if (workerPipe) {
               console.log('[Worker] Update auth data requested:', message.data);
               if (relayServer) {
                 try {
-                  const { relayKey, publicIdentifier, pubkey, token, subnetHash } = message.data;
+                  const { relayKey, publicIdentifier, pubkey, token, subnetHashes } = message.data;
                   const identifier = relayKey || publicIdentifier;
                   if (!identifier) {
                     throw new Error('No identifier provided for auth data update');
                   }
-                  await updateRelayAuthToken(identifier, pubkey, token, subnetHash);
+                  const subnets = Array.isArray(subnetHashes) ? subnetHashes : [];
+                  await updateRelayAuthToken(identifier, pubkey, token, subnets);
                   sendMessage({
                     type: 'auth-data-updated',
                     identifier: identifier,
