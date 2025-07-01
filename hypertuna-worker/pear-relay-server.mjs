@@ -1637,6 +1637,18 @@ async function registerWithGateway(relayProfileInfo = null) {
               type: 'gateway-registered',
               data: response
           });
+
+          if (relayProfileInfo) {
+              const identifier = relayProfileInfo.public_identifier || relayProfileInfo.relay_key;
+              const gwUrl = `wss://${config.proxy_server_address}/${identifier.replace(':', '/')}`;
+              global.sendMessage({
+                  type: 'relay-registration-complete',
+                  relayKey: relayProfileInfo.relay_key,
+                  publicIdentifier: relayProfileInfo.public_identifier,
+                  gatewayUrl: gwUrl,
+                  timestamp: new Date().toISOString()
+              });
+          }
       }
   } catch (error) {
       console.error('[RelayServer] Gateway HTTP registration FAILED:', error.message);

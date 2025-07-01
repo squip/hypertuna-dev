@@ -20,8 +20,28 @@ let healthState = null
 let gatewayRegistered = false
 let relayCreateResolvers = []
 const relayJoinResolvers = new Map() // To manage join flow promises
-let relayReadyResolvers = new Map() // Add this to track relay readiness promises
-let initializedRelays = new Set() // Track which relays are ready
+let relayReadyResolvers = new Map() // Track relay readiness promises
+let initializedRelays = new Set() // Relays that finished initialization
+let registeredRelays = new Set() // Relays registered with gateway
+let readyNotified = new Set() // Relays already notified to Nostr layer
+
+function isRelayFullyReady(key) {
+  return initializedRelays.has(key) && registeredRelays.has(key)
+}
+
+function resolveRelayIfReady(key, gatewayUrl) {
+  if (isRelayFullyReady(key)) {
+    const resolver = relayReadyResolvers.get(key)
+    if (resolver) {
+      resolver(true)
+      relayReadyResolvers.delete(key)
+    }
+    if (!readyNotified.has(key) && window.App && window.App.nostr && gatewayUrl) {
+      window.App.nostr.handleRelayReady(key, gatewayUrl)
+      readyNotified.add(key)
+    }
+  }
+}
 
 // Promise resolution for swarm key
 let swarmKeyPromise = null
@@ -126,6 +146,11 @@ async function startWorker() {
         if (swarmKeyResolver) swarmKeyResolver(null);
         return swarmKeyPromise;
     }
+
+    // Reset relay tracking state
+    initializedRelays.clear();
+    registeredRelays.clear();
+    relayReadyResolvers.clear();
     
     try {
         addLog('Starting relay worker...', 'status')
@@ -341,6 +366,10 @@ async function startWorker() {
             addLog('Worker process closed', 'status')
             updateWorkerStatus('stopped', 'Stopped')
             workerPipe = null
+            initializedRelays.clear()
+            registeredRelays.clear()
+            relayReadyResolvers.clear()
+            readyNotified.clear()
             stopPolling()
         })
         
@@ -398,6 +427,10 @@ async function stopWorker() {
         workerPipe.end()
         workerPipe = null
         updateWorkerStatus('stopped', 'Stopped')
+        initializedRelays.clear()
+        registeredRelays.clear()
+        relayReadyResolvers.clear()
+        readyNotified.clear()
       }
     }, 3000)
     
@@ -458,29 +491,16 @@ function handleWorkerMessage(message) {
       if (message.relayKey) {
         console.log(`[App] Relay initialized: ${message.relayKey}`)
         console.log(`[App] Relay gateway URL: ${message.gatewayUrl}`)
-        initializedRelays.add(message.relayKey)
 
-        // Register mapping between the worker key and the public identifier first
+        initializedRelays.add(message.relayKey)
+        if (message.publicIdentifier) initializedRelays.add(message.publicIdentifier)
+
         if (window.App && window.App.nostr && message.publicIdentifier) {
           window.App.nostr.registerRelayMapping(message.relayKey, message.publicIdentifier)
         }
 
-        // Resolve any promises waiting for this relay using either key
-        const keys = [message.relayKey, message.publicIdentifier]
-        for (const k of keys) {
-          if (!k) continue
-          const resolver = relayReadyResolvers.get(k)
-          if (resolver) {
-            resolver(true)
-            relayReadyResolvers.delete(k)
-          }
-        }
-
-        // Notify the UI that this relay is ready
-        if (window.App && window.App.nostr) {
-          const identifier = message.publicIdentifier || message.relayKey
-          window.App.nostr.handleRelayReady(identifier, message.gatewayUrl)
-        }
+        resolveRelayIfReady(message.relayKey, message.gatewayUrl)
+        if (message.publicIdentifier) resolveRelayIfReady(message.publicIdentifier, message.gatewayUrl)
       }
       break
       
@@ -489,6 +509,10 @@ function handleWorkerMessage(message) {
       if (message.relayKey) {
         console.log(`[App] Relay registered with gateway: ${message.relayKey}`)
         addLog(`Relay ${message.relayKey} registered with gateway`, 'status')
+        registeredRelays.add(message.relayKey)
+        if (message.publicIdentifier) registeredRelays.add(message.publicIdentifier)
+        resolveRelayIfReady(message.relayKey, message.gatewayUrl)
+        if (message.publicIdentifier) resolveRelayIfReady(message.publicIdentifier, message.gatewayUrl)
       }
       break
       
@@ -500,33 +524,7 @@ function handleWorkerMessage(message) {
       }
       break
     
-    case 'relay-initialized':
-      // Message when a relay has finished initializing
-      if (message.relayKey) {
-        console.log(`[App] Relay initialized: ${message.relayKey}`)
-        console.log(`[App] Relay gateway URL: ${message.gatewayUrl}`)
-        initializedRelays.add(message.relayKey)
 
-        if (window.App && window.App.nostr && message.publicIdentifier) {
-          window.App.nostr.registerRelayMapping(message.relayKey, message.publicIdentifier)
-        }
-
-        const keys = [message.relayKey, message.publicIdentifier]
-        for (const k of keys) {
-          if (!k) continue
-          const resolver = relayReadyResolvers.get(k)
-          if (resolver) {
-            resolver(true)
-            relayReadyResolvers.delete(k)
-          }
-        }
-
-        if (window.App && window.App.nostr) {
-          const identifier = message.publicIdentifier || message.relayKey
-          window.App.nostr.handleRelayReady(identifier, message.gatewayUrl)
-        }
-      }
-      break
       
       
     case 'relay-created':
@@ -610,9 +608,9 @@ function handleWorkerMessage(message) {
 
 // Add function to wait for a specific relay to be ready
 window.waitForRelayReady = function(relayKey, timeout = 30000) {
-  // If already initialized, resolve immediately
-  if (initializedRelays.has(relayKey)) {
-    console.log(`[App] Relay ${relayKey} already initialized`)
+  // If already ready, resolve immediately
+  if (isRelayFullyReady(relayKey)) {
+    console.log(`[App] Relay ${relayKey} already ready`)
     return Promise.resolve(true)
   }
 
@@ -629,8 +627,8 @@ window.waitForRelayReady = function(relayKey, timeout = 30000) {
     setTimeout(() => {
       if (relayReadyResolvers.has(relayKey)) {
         relayReadyResolvers.delete(relayKey)
-        console.log(`[App] Timeout waiting for relay ${relayKey} to initialize`)
-        reject(new Error(`Timeout waiting for relay ${relayKey} to initialize`))
+        console.log(`[App] Timeout waiting for relay ${relayKey} to become ready`)
+        reject(new Error(`Timeout waiting for relay ${relayKey} to become ready`))
       }
     }, timeout)
   })
@@ -638,7 +636,7 @@ window.waitForRelayReady = function(relayKey, timeout = 30000) {
 
 // Add function to check if a relay is ready
 window.isRelayReady = function(relayKey) {
-  return initializedRelays.has(relayKey)
+  return isRelayFullyReady(relayKey)
 }
 
 function startHealthPolling() {
