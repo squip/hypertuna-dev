@@ -444,7 +444,7 @@ class EnhancedHyperswarmPool {
   }
  }
  
- async function forwardMessageToPeerHyperswarm(peerPublicKey, identifier, message, connectionKey, connectionPool, subnetHash, authToken) {
+async function forwardMessageToPeerHyperswarm(peerPublicKey, identifier, message, connectionKey, connectionPool, authToken) {
   try {
     console.log(`[ForwardMessage] ========================================`);
     console.log(`[ForwardMessage] FORWARDING RELAY MESSAGE`);
@@ -452,7 +452,6 @@ class EnhancedHyperswarmPool {
     console.log(`[ForwardMessage] Connection: ${connectionKey}`);
     console.log(`[ForwardMessage] Peer: ${peerPublicKey.substring(0, 8)}...`);
     console.log(`[ForwardMessage] Has auth: ${!!authToken}`);
-    console.log(`[ForwardMessage] Subnet: ${subnetHash?.substring(0, 8)}...`);
     
     const connection = await connectionPool.getConnection(peerPublicKey);
     
@@ -460,9 +459,6 @@ class EnhancedHyperswarmPool {
     const headers = { 'content-type': 'application/json' };
     if (authToken) {
       headers['x-auth-token'] = authToken;
-    }
-    if (subnetHash) {
-      headers['x-subnet-hash'] = subnetHash;
     }
     
     const response = await connection.sendRequest({
@@ -501,7 +497,6 @@ class EnhancedHyperswarmPool {
     console.log(`[ForwardJoin] Relay: ${identifier}`);
     console.log(`[ForwardJoin] Peer: ${peer.publicKey.substring(0, 8)}...`);
     console.log(`[ForwardJoin] Has event: ${!!requestData.event}`);
-    console.log(`[ForwardJoin] Subnet hash: ${requestData.requesterSubnetHash?.substring(0, 8)}...`);
     
     const connection = await connectionPool.getConnection(peer.publicKey);
     
@@ -570,7 +565,7 @@ async function forwardCallbackToPeer(peer, path, requestData, connectionPool) {
   }
 }
  
- async function getEventsFromPeerHyperswarm(peerPublicKey, relayKey, connectionKey, connectionPool, authToken = null, subnetHash = null) {
+async function getEventsFromPeerHyperswarm(peerPublicKey, relayKey, connectionKey, connectionPool, authToken = null) {
   try {
     console.log(`[GetEvents] Checking for events - relay: ${relayKey}, connection: ${connectionKey}`);
     
@@ -579,9 +574,6 @@ async function forwardCallbackToPeer(peer, path, requestData, connectionPool) {
     const headers = { 'accept': 'application/json' };
     if (authToken) {
       headers['x-auth-token'] = authToken;
-    }
-    if (subnetHash) {
-      headers['x-subnet-hash'] = subnetHash;
     }
 
     const response = await connection.sendRequest({

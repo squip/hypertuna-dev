@@ -53,7 +53,7 @@ function ensureProfileSchema(profile) {
         profile.auth_config = {
             requiresAuth: false,
             tokenProtected: false,
-            authorizedUsers: [], // Array of { pubkey, token, subnets }
+            authorizedUsers: [], // Array of { pubkey, token }
             auth_adds: [],
             auth_removes: []
         };
@@ -89,7 +89,7 @@ function ensureProfileSchema(profile) {
 
 // NEW FUNCTION: Calculate the final list of authorized users
 export function calculateAuthorizedUsers(auth_adds = [], auth_removes = []) {
-    const addMap = new Map(); // pubkey -> { token, subnets, ts }
+    const addMap = new Map(); // pubkey -> { token, ts }
     for (const auth of auth_adds) {
         addMap.set(auth.pubkey, auth);
     }
@@ -124,22 +124,12 @@ export async function updateRelayAuthToken(identifier, pubkey, token, newSubnetH
         
         // NEW: Update auth_adds array
         const existingAuthAddIndex = profile.auth_config.auth_adds.findIndex(a => a.pubkey === pubkey);
-        const newAuthEntry = { pubkey, token, subnets: newSubnetHashes, ts: Date.now() };
+        const newAuthEntry = { pubkey, token, ts: Date.now() };
 
         if (existingAuthAddIndex !== -1) {
             // Update existing entry
             const existingAuth = profile.auth_config.auth_adds[existingAuthAddIndex];
             existingAuth.token = token; // Always update token
-            // Merge new subnets with existing ones
-            newSubnetHashes.forEach(newHash => {
-                if (!existingAuth.subnets.includes(newHash)) {
-                    existingAuth.subnets.push(newHash);
-                }
-            });
-            // Ensure subnets array is unique
-            existingAuth.subnets = [...new Set(existingAuth.subnets)];
-
-            // Update timestamp
             existingAuth.ts = newAuthEntry.ts;
         } else {
             // Add new entry
@@ -163,18 +153,9 @@ export async function updateRelayAuthToken(identifier, pubkey, token, newSubnetH
             try {
                 const { getRelayAuthStore } = await import('./relay-auth-store.mjs');
                 const store = getRelayAuthStore();
-                const firstSubnet = newSubnetHashes[0] || null;
-                if (firstSubnet) {
-                    store.addAuth(profile.relay_key, pubkey, token, firstSubnet);
-                    if (profile.public_identifier) {
-                        store.addAuth(profile.public_identifier, pubkey, token, firstSubnet);
-                    }
-                    for (const sub of newSubnetHashes.slice(1)) {
-                        store.addSubnet(profile.relay_key, pubkey, sub);
-                        if (profile.public_identifier) {
-                            store.addSubnet(profile.public_identifier, pubkey, sub);
-                        }
-                    }
+                store.addAuth(profile.relay_key, pubkey, token);
+                if (profile.public_identifier) {
+                    store.addAuth(profile.public_identifier, pubkey, token);
                 }
             } catch (err) {
                 console.error('[ProfileManager] Failed to update auth store:', err);

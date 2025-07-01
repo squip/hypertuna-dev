@@ -44,11 +44,9 @@ function extractTokenFromReq(req) {
 }
 
 function isAuthorized(token, ip) {
-  const subnet = get24Subnet(ip);
-  const ipHash = sha256(subnet);
   for (const pubkey in allowlist) {
     const entry = allowlist[pubkey];
-    if (entry.token === token && entry.allowedSubnets.includes(ipHash)) {
+    if (entry.token === token) {
       return pubkey;
     }
   }
@@ -145,12 +143,8 @@ server.on('request', async (req, res) => {
         console.log('  Decrypted:', decrypted);
         if (decrypted === challenge) {
           const token = createToken(pubkey);
-          const subnet = get24Subnet(normalizeIp(req.socket.remoteAddress));
-          const subnetHash = sha256(subnet);
-
           allowlist[pubkey] = {
-            token,
-            allowedSubnets: [subnetHash]
+            token
           };
 
           delete pendingChallenges[pubkey];
@@ -188,11 +182,9 @@ server.on('request', async (req, res) => {
   if (req.method === 'GET' && pathname === '/authorize') {
     const session = qrSessions[parsed.query.session];
     if (!session) return res.end('Invalid or expired session.');
-    const mobileIp = normalizeIp(req.socket.remoteAddress);
-    const subnetHash = sha256(get24Subnet(mobileIp));
     const entry = allowlist[session.pubkey];
-    if (entry && !entry.allowedSubnets.includes(subnetHash)) {
-      entry.allowedSubnets.push(subnetHash);
+    if (entry) {
+      // Mobile IP authorized
     }
     return res.end('✅ Mobile IP authorized.');
   }

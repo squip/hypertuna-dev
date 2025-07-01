@@ -12,7 +12,7 @@ async function setupLegacyProfile() {
   const profile = {
     relay_key: 'relay1',
     name: 'Legacy',
-    auth_adds: [{ pubkey: 'pub1', token: 'old', subnets: [], ts: 1 }],
+    auth_adds: [{ pubkey: 'pub1', token: 'old', ts: 1 }],
     auth_removes: [],
     auth_config: { requiresAuth: true, tokenProtected: true }
   }
@@ -23,10 +23,10 @@ async function setupLegacyProfile() {
 
 test('updateRelayAuthToken migrates legacy auth fields', async t => {
   const tmp = await setupLegacyProfile()
-  await updateRelayAuthToken('relay1', 'pub1', 'new', ['sub1'])
+  await updateRelayAuthToken('relay1', 'pub1', 'new')
   const profiles = await getAllRelayProfiles()
   t.is(profiles[0].auth_adds, undefined)
   t.is(profiles[0].auth_removes, undefined)
-  t.alike(profiles[0].auth_config.auth_adds, [{ pubkey: 'pub1', token: 'new', subnets: ['sub1'], ts: profiles[0].auth_config.auth_adds[0].ts }])
+  t.alike(profiles[0].auth_config.auth_adds, [{ pubkey: 'pub1', token: 'new', ts: profiles[0].auth_config.auth_adds[0].ts }])
   await fs.rm(tmp, { recursive: true, force: true })
 })
