@@ -36,6 +36,7 @@ class NostrGroupClient {
         this.pendingRelayConnections = new Map(); // Track pending connections
         this.relayConnectionAttempts = new Map(); // Track retry attempts
         this.maxRetryAttempts = 3;
+        this.relayReadyStates = new Map(); // Track readiness info when received early
         // Mapping between public identifiers and internal relay keys (if available)
         this.publicToInternalMap = new Map();
         this.internalToPublicMap = new Map();
@@ -260,6 +261,20 @@ class NostrGroupClient {
                 isRegistered: false
             });
             console.log(`[NostrGroupClient] Queued connection for relay ${publicIdentifier} with URL ${relayUrl}`);
+
+            // Apply any readiness state that arrived before queueing
+            if (this.relayReadyStates.has(publicIdentifier)) {
+                const state = this.relayReadyStates.get(publicIdentifier);
+                const connection = this.pendingRelayConnections.get(publicIdentifier);
+                if (state.isInitialized) {
+                    connection.isInitialized = true;
+                    connection.relayUrl = state.relayUrl || relayUrl;
+                }
+                if (state.isRegistered) {
+                    connection.isRegistered = true;
+                }
+                this._attemptConnectionIfReady(publicIdentifier);
+            }
         }
     }
 
@@ -275,6 +290,13 @@ class NostrGroupClient {
             connection.relayUrl = gatewayUrl; // Use the authenticated URL from the worker
             console.log(`[NostrGroupClient] Relay ${identifier} is now initialized. Checking readiness...`);
             this._attemptConnectionIfReady(identifier);
+        } else {
+            // Store readiness state for later when the connection is queued
+            this.relayReadyStates.set(identifier, {
+                ...(this.relayReadyStates.get(identifier) || {}),
+                isInitialized: true,
+                relayUrl: gatewayUrl
+            });
         }
     }
 
@@ -289,6 +311,12 @@ class NostrGroupClient {
             connection.isRegistered = true;
             console.log(`[NostrGroupClient] Relay ${identifier} is now registered. Checking readiness...`);
             this._attemptConnectionIfReady(identifier);
+        } else {
+            // Store state for later
+            this.relayReadyStates.set(identifier, {
+                ...(this.relayReadyStates.get(identifier) || {}),
+                isRegistered: true
+            });
         }
     }
 
@@ -327,6 +355,26 @@ class NostrGroupClient {
 
         // Emit event that we're fully initialized
         this.emit('relays:ready');
+    }
+
+    /**
+     * Process all queued relay connections applying any stored readiness info
+     */
+    processRelayConnectionQueue() {
+        for (const [identifier, connection] of this.pendingRelayConnections.entries()) {
+            if (this.relayReadyStates.has(identifier)) {
+                const state = this.relayReadyStates.get(identifier);
+                if (state.isInitialized) {
+                    connection.isInitialized = true;
+                    connection.relayUrl = state.relayUrl || connection.relayUrl;
+                }
+                if (state.isRegistered) {
+                    connection.isRegistered = true;
+                }
+            }
+
+            this._attemptConnectionIfReady(identifier);
+        }
     }
 
     /**
