@@ -65,9 +65,9 @@ class NostrIntegration {
     /**
      * Handle relay ready notification from worker
      */
-    handleRelayInitialized(identifier, gatewayUrl) {
+    handleRelayInitialized(identifier, gatewayUrl, authToken = null) {
         if (this.client) {
-            this.client.handleRelayInitialized(identifier, gatewayUrl);
+            this.client.handleRelayInitialized(identifier, gatewayUrl, authToken);
         }
     }
 
