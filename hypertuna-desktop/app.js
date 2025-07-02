@@ -464,7 +464,9 @@ function handleWorkerMessage(message) {
         }
 
         // Notify the UI that this relay is ready
-        if (window.App && window.App.nostr) {
+        if (window.App && typeof window.App.handleRelayInitialized === 'function') {
+          window.App.handleRelayInitialized(message)
+        } else if (window.App && window.App.nostr) {
           const identifier = message.publicIdentifier || message.relayKey
           window.App.nostr.handleRelayInitialized(identifier, message.gatewayUrl, message.userAuthToken)
         }
@@ -478,7 +480,9 @@ function handleWorkerMessage(message) {
         addLog(`Relay ${message.relayKey} registered with gateway`, 'status')
 
         // Notify the nostr client that this relay is fully registered and ready for connection
-        if (window.App && window.App.nostr) {
+        if (window.App && typeof window.App.handleRelayRegistered === 'function') {
+            window.App.handleRelayRegistered(message);
+        } else if (window.App && window.App.nostr) {
             const identifier = message.publicIdentifier || message.relayKey;
             window.App.nostr.handleRelayRegistered(identifier);
         }
