@@ -466,7 +466,7 @@ function handleWorkerMessage(message) {
         // Notify the UI that this relay is ready
         if (window.App && window.App.nostr) {
           const identifier = message.publicIdentifier || message.relayKey
-          window.App.nostr.handleRelayInitialized(identifier, message.gatewayUrl)
+          window.App.nostr.handleRelayInitialized(identifier, message.gatewayUrl, message.userAuthToken)
         }
       }
       break
