@@ -26,17 +26,18 @@ import {
   getRelayMembers
 } from './hypertuna-relay-manager-adapter.mjs';
 
-import { 
-  findRelayByPublicIdentifier, 
+import {
+  findRelayByPublicIdentifier,
   getRelayKeyFromPublicIdentifier,
-  isRelayActiveByPublicIdentifier 
+  isRelayActiveByPublicIdentifier
 } from './relay-lookup-utils.mjs';
 
 import {
   updateRelayMemberSets,
   getRelayProfileByKey,
   getRelayProfileByPublicIdentifier,
-  saveRelayProfile
+  saveRelayProfile,
+  calculateAuthorizedUsers
 } from './hypertuna-relay-profile-manager-bare.mjs';
 
 
@@ -136,14 +137,33 @@ export async function initializeRelayServer(customConfig = {}) {
                 const profile = await getRelayProfileByKey(relayKey);
                 if (profile) {
                     await registerWithGateway(profile);
-                    
+
+                    // Determine auth token for current user if required
+                    let userAuthToken = null;
+                    if (profile.auth_config?.requiresAuth && config.nostr_pubkey_hex) {
+                        const authorizedUsers = calculateAuthorizedUsers(
+                            profile.auth_config.auth_adds || [],
+                            profile.auth_config.auth_removes || []
+                        );
+                        const userAuth = authorizedUsers.find(u => u.pubkey === config.nostr_pubkey_hex);
+                        userAuthToken = userAuth?.token || null;
+                    }
+
+                    // Build connection URL including public identifier and token
+                    const identifierPath = profile.public_identifier ?
+                        profile.public_identifier.replace(':', '/') :
+                        relayKey;
+                    const baseUrl = `wss://${config.proxy_server_address}/${identifierPath}`;
+                    const connectionUrl = userAuthToken ? `${baseUrl}?token=${userAuthToken}` : baseUrl;
+
                     // Send registration complete message
                     if (global.sendMessage) {
                         global.sendMessage({
                             type: 'relay-registration-complete',
                             relayKey: relayKey,
                             publicIdentifier: profile.public_identifier,
-                            gatewayUrl: `wss://${config.proxy_server_address}/${relayKey}`,
+                            gatewayUrl: connectionUrl,
+                            authToken: userAuthToken,
                             timestamp: new Date().toISOString()
                         });
                     }
