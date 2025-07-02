@@ -244,8 +244,6 @@ class NostrGroupClient {
             }
         }
         
-        // Start processing the queue
-        this.processRelayConnectionQueue();
     }
 
     /**
@@ -257,104 +255,63 @@ class NostrGroupClient {
                 identifier: publicIdentifier,
                 relayUrl,
                 attempts: 0,
-                status: 'pending'
+                status: 'pending',
+                isInitialized: false,
+                isRegistered: false
             });
             console.log(`[NostrGroupClient] Queued connection for relay ${publicIdentifier} with URL ${relayUrl}`);
         }
     }
 
     /**
-     * Process pending relay connections with worker readiness check
+     * Handle relay initialized signal from the app layer.
+     * This means the worker has started the relay instance.
      */
-    async processRelayConnectionQueue() {
-        for (const [identifier, connection] of this.pendingRelayConnections) {
-            if (connection.status === 'connecting' || connection.status === 'connected') {
-                continue;
-            }
-
-            connection.status = 'connecting';
-
-            try {
-                // Wait for relay to be ready in worker
-                const internalKey = this.publicToInternalMap.get(identifier) || identifier;
-                console.log(`[NostrGroupClient] Waiting for relay ${identifier} (internal key: ${internalKey}) to be ready...`);
-
-                if (window.waitForRelayReady) {
-                    try {
-                        await window.waitForRelayReady(internalKey, 15000); // 15 second timeout
-                        console.log(`[NostrGroupClient] Relay ${identifier} is ready, connecting using URL ${connection.relayUrl}`);
-
-                        // Check if we have an updated URL from the worker
-                        const updatedUrl = this.groupRelayUrls.get(identifier);
-                        if (updatedUrl && updatedUrl !== connection.relayUrl && updatedUrl.includes('token=')) {
-                            console.log(`[NostrGroupClient] Using updated authenticated URL for ${identifier}`);
-                            connection.relayUrl = updatedUrl;
-                        }
-                    } catch (e) {
-                        console.log(`[NostrGroupClient] Relay ${identifier} not ready yet: ${e.message}`);
-                        connection.status = 'pending';
-                        connection.attempts++;
-                        
-                        // Retry later if under max attempts
-                        if (connection.attempts < this.maxRetryAttempts) {
-                            setTimeout(() => {
-                                this.processRelayConnectionQueue();
-                            }, 5000 * connection.attempts); // Exponential backoff
-                        } else {
-                            connection.status = 'failed';
-                            console.error(`[NostrGroupClient] Failed to connect to relay ${identifier} after ${this.maxRetryAttempts} attempts`);
-                        }
-                        continue;
-                    }
-                }
-                
-                // Now try to connect with the authenticated URL
-                await this.connectToGroupRelay(connection.identifier, connection.relayUrl);
-                connection.status = 'connected';
-                this.pendingRelayConnections.delete(identifier);
-                
-            } catch (e) {
-                console.error(`[NostrGroupClient] Error connecting to relay ${identifier}:`, e);
-                connection.status = 'failed';
-            }
-        }
-        
-        // Check if there are still pending connections
-        const pendingCount = Array.from(this.pendingRelayConnections.values())
-            .filter(c => c.status === 'pending').length;
-            
-        if (pendingCount > 0) {
-            console.log(`[NostrGroupClient] ${pendingCount} relays still pending, will retry...`);
-            setTimeout(() => {
-                this.processRelayConnectionQueue();
-            }, 5000);
+    handleRelayInitialized(identifier, gatewayUrl) {
+        console.log(`[NostrGroupClient] Relay initialized signal for ${identifier}.`);
+        const connection = this.pendingRelayConnections.get(identifier);
+        if (connection) {
+            connection.isInitialized = true;
+            connection.relayUrl = gatewayUrl; // Use the authenticated URL from the worker
+            console.log(`[NostrGroupClient] Relay ${identifier} is now initialized. Checking readiness...`);
+            this._attemptConnectionIfReady(identifier);
         }
     }
 
     /**
-     * Handle relay ready notification from worker
+     * Handle relay registered signal from the app layer.
+     * This is the final signal to proceed with the connection.
      */
-    handleRelayReady(identifier, gatewayUrl) {
-        console.log(`[NostrGroupClient] Relay ready notification for ${identifier}. Gateway URL: ${gatewayUrl}`);
-        
-        // The gatewayUrl from the worker should already include the token
-        // Store it in our groupRelayUrls map for future use
-        this.groupRelayUrls.set(identifier, gatewayUrl);
-        
-        // If this is a public identifier, also get the groupId
-        const groupId = this.hypertunaGroups.get(identifier);
-        if (groupId) {
-            this.groupRelayUrls.set(groupId, gatewayUrl);
+    async handleRelayRegistered(identifier) {
+        console.log(`[NostrGroupClient] Relay registered signal for ${identifier}.`);
+        const connection = this.pendingRelayConnections.get(identifier);
+        if (connection) {
+            connection.isRegistered = true;
+            console.log(`[NostrGroupClient] Relay ${identifier} is now registered. Checking readiness...`);
+            this._attemptConnectionIfReady(identifier);
         }
-        
-        // Check if this relay is in our pending connections
-        const pending = this.pendingRelayConnections.get(identifier);
-        if (pending && pending.status !== 'connected') {
-            console.log(`[NostrGroupClient] Found pending connection for ${identifier}, updating with authenticated URL`);
-            // Update the pending connection with the authenticated URL
-            pending.relayUrl = gatewayUrl;
-            if (pending.status === 'pending') {
-                this.processRelayConnectionQueue();
+    }
+
+    /**
+     * Checks if a relay is both initialized and registered, then connects.
+     * This is called by both handleRelayInitialized and handleRelayRegistered
+     * to make the process resilient to message ordering.
+     * @private
+     */
+    async _attemptConnectionIfReady(identifier) {
+        const connection = this.pendingRelayConnections.get(identifier);
+
+        // Proceed only if both flags are true and we haven't already tried to connect
+        if (connection && connection.isInitialized && connection.isRegistered && connection.status === 'pending') {
+            console.log(`[NostrGroupClient] All checks passed for ${identifier}. Connecting to ${connection.relayUrl}`);
+            connection.status = 'connecting'; // Prevent duplicate attempts
+            try {
+                await this.connectToGroupRelay(identifier, connection.relayUrl);
+                connection.status = 'connected';
+                this.pendingRelayConnections.delete(identifier); // Clean up successful connection
+            } catch (e) {
+                console.error(`[NostrGroupClient] Final connection attempt failed for ${identifier}:`, e);
+                connection.status = 'failed'; // Mark as failed to prevent retries from this flow
             }
         }
     }

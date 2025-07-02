@@ -142,6 +142,7 @@ export async function initializeRelayServer(customConfig = {}) {
                         global.sendMessage({
                             type: 'relay-registration-complete',
                             relayKey: relayKey,
+                            publicIdentifier: profile.public_identifier,
                             gatewayUrl: `wss://${config.proxy_server_address}/${relayKey}`,
                             timestamp: new Date().toISOString()
                         });

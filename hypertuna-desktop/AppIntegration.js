@@ -2622,6 +2622,15 @@ App.setupFollowingModalListeners = function() {
         }
     });
 };
+
+    /**
+     * Handle relay registered notification from worker
+     */
+    App.handleRelayRegistered = function(identifier) {
+        if (this.nostr) {
+            this.nostr.handleRelayRegistered(identifier);
+        }
+    };
     
     /**
      * Replace update profile method
