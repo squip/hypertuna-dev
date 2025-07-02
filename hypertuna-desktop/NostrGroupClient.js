@@ -2344,7 +2344,7 @@ async fetchMultipleProfiles(pubkeys) {
         const discoveryRelays = Array.from(this.relayManager.discoveryRelays);
         await this.relayManager.publishToRelays(newEvent, discoveryRelays);
         
-        console.log('[NostrGroupClient] Updated relay list with authenticated URL');
+        console.log(`[NostrGroupClient] Updated relay list with authenticated URL:`, authenticatedUrl);
         
         // Connect to the authenticated relay
         await this.connectToGroupRelay(publicIdentifier, authenticatedUrl);

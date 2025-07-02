@@ -111,7 +111,7 @@ export async function initializeRelayServer(customConfig = {}) {
 
   // Initialize challenge manager with relay private key
   console.log('[RelayServer] Initializing challenge manager...');
-  initializeChallengeManager(config.proxy_privateKey);
+  initializeChallengeManager(config.nostr_nsec_hex);
   
   // Initialize auth store
   const authStore = getRelayAuthStore();
