@@ -11,6 +11,7 @@ import { ConfigLogger } from './ConfigLogger.js';
 import NostrEvents from './NostrEvents.js';  // Add this import
 import MembersList from './MembersList.js';
 
+const relayReadinessTracker = new Map(); // Track relay readiness state
 
 /**
  * This function modifies the existing App object to use real nostr relays
@@ -2623,10 +2624,75 @@ App.setupFollowingModalListeners = function() {
     });
 };
 
-    /**
-     * Handle relay registered notification from worker
-     */
-    App.handleRelayRegistered = function(identifier) {
+
+    // Update handleRelayInitialized in AppIntegration.js:
+    App.handleRelayInitialized = function(data) {
+        console.log('[App] Received relay-initialized:', {
+            relayKey: data.relayKey,
+            publicIdentifier: data.publicIdentifier,
+            hasUrl: !!data.gatewayUrl,
+            hasToken: data.gatewayUrl?.includes('?token='),
+            timestamp: data.timestamp
+        });
+        
+        const identifier = data.publicIdentifier || data.relayKey;
+        
+        // Track state
+        if (!relayReadinessTracker.has(identifier)) {
+            relayReadinessTracker.set(identifier, {
+                initialized: false,
+                registered: false,
+                initCount: 0,
+                regCount: 0,
+                lastUrl: null
+            });
+        }
+        
+        const state = relayReadinessTracker.get(identifier);
+        state.initialized = true;
+        state.initCount++;
+        state.lastUrl = data.gatewayUrl;
+        
+        console.log(`[App] Relay ${identifier} state after initialized:`, state);
+        
+        if (this.nostr) {
+            this.nostr.handleRelayInitialized(identifier, data.gatewayUrl, data.userAuthToken);
+        }
+    };
+
+    // Add handleRelayRegistered if it doesn't exist:
+    App.handleRelayRegistered = function(data) {
+        console.log('[App] Received relay-registration-complete:', {
+            relayKey: data.relayKey,
+            publicIdentifier: data.publicIdentifier,
+            hasUrl: !!data.gatewayUrl,
+            hasToken: data.gatewayUrl?.includes('?token='),
+            timestamp: data.timestamp
+        });
+        
+        const identifier = data.publicIdentifier || data.relayKey;
+        
+        // Track state
+        if (!relayReadinessTracker.has(identifier)) {
+            relayReadinessTracker.set(identifier, {
+                initialized: false,
+                registered: false,
+                initCount: 0,
+                regCount: 0,
+                lastUrl: null
+            });
+        }
+        
+        const state = relayReadinessTracker.get(identifier);
+        state.registered = true;
+        state.regCount++;
+        if (data.gatewayUrl) {
+            state.lastUrl = data.gatewayUrl;
+        }
+        
+        console.log(`[App] Relay ${identifier} state after registered:`, state);
+        console.log('[App] All relay states:', Array.from(relayReadinessTracker.entries()));
+        
         if (this.nostr) {
             this.nostr.handleRelayRegistered(identifier);
         }
