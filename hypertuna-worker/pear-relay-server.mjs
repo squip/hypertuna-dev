@@ -1778,28 +1778,38 @@ export async function createRelay(options) {
   });
   
   if (result.success) {
+    // This is now the single source of truth for token generation on creation.
     await updateHealthState();
     
     // Auto-authorize the creator
-    if (config.subnetHash) {
+    // Use nostr_pubkey_hex to check if an admin exists to be authorized.
+    if (config.nostr_pubkey_hex) {
       try {
         const adminPubkey = config.nostr_pubkey_hex;
         const challengeManager = getChallengeManager();
         const authToken = challengeManager.generateAuthToken(adminPubkey);
         const authStore = getRelayAuthStore();
-        const { updateRelayAuthToken } = await import('./hypertuna-relay-profile-manager-bare.mjs');
-        authStore.addAuth(result.relayKey, adminPubkey, authToken, config.subnetHash);
-        await updateRelayAuthToken(result.relayKey, adminPubkey, authToken, [config.subnetHash]);
+        
+        // The subnet hash might not be available immediately, but we can still create the token.
+        const subnetHashes = config.subnetHash ? [config.subnetHash] : [];
 
+        // Add auth to the in-memory store
+        authStore.addAuth(result.relayKey, adminPubkey, authToken, subnetHashes[0] || '');
+        
+        // Persist the token to the relay's profile on disk.
+        // This now adds the first auth entry.
+        const updatedProfile = await updateRelayAuthToken(result.relayKey, adminPubkey, authToken, subnetHashes);
+
+        // CRITICAL: Update the profile in the result object to ensure consistency.
+        if (updatedProfile) {
+          result.profile = updatedProfile;
+        }
+        
+        // Update the result object with the definitive token and URL.
         result.authToken = authToken;
-        result.relayUrl = `wss://${config.proxy_server_address}/${result.publicIdentifier}?token=${authToken}`;
+        result.relayUrl = `wss://${config.proxy_server_address}/${result.publicIdentifier.replace(':', '/')}?token=${authToken}`;
 
-        // Persist visibility settings
-        result.profile.isPublic = isPublic;
-        result.profile.isOpen = isOpen;
-        if (!result.profile.auth_config) result.profile.auth_config = {};
-        await saveRelayProfile(result.profile);
-        await publishMemberAddEvent(result.publicIdentifier, adminPubkey, authToken, [config.subnetHash], 'admin');
+        await publishMemberAddEvent(result.publicIdentifier, adminPubkey, authToken, subnetHashes, 'admin');
         console.log(`[RelayServer] Auto-authorized creator ${adminPubkey.substring(0, 8)}...`);
       } catch (authError) {
         console.error('[RelayServer] Failed to auto-authorize creator:', authError);

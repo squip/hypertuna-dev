@@ -130,24 +130,10 @@ export async function createRelay(options = {}) {
         const publicIdentifier = npub && name ? 
             generatePublicIdentifier(npub, name) : null;
         
-        // Generate auth token for the admin/creator
-        let authToken = null;
-        const auth_adds = [];
-        
-        if (config.nostr_pubkey_hex) {
-            // Generate auth token for the creator
-            authToken = crypto.randomBytes(32).toString('hex');
-            
-            // Add to auth_adds array
-            auth_adds.push({
-                pubkey: config.nostr_pubkey_hex,
-                token: authToken,
-                subnets: [], // Will be populated on first connection
-                ts: Date.now()
-            });
-            
-            console.log('[RelayAdapter] Generated auth token for creator:', config.nostr_pubkey_hex.substring(0, 8) + '...');
-        }
+        // Auth token will be generated and added in pear-relay-server.mjs
+        // to ensure a single, consistent token source.
+        const authToken = null; // No token generated here.
+        const auth_adds = []; // Initially empty.
         
         // Create relay profile with both internal and public identifiers
         const profileInfo = {
