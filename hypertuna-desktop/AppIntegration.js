@@ -2697,6 +2697,16 @@ App.setupFollowingModalListeners = function() {
             this.nostr.handleRelayRegistered(identifier);
         }
     };
+
+    // Process any queued worker messages that arrived before handlers were ready
+    if (window.pendingRelayMessages) {
+        while (window.pendingRelayMessages.initialized.length) {
+            App.handleRelayInitialized(window.pendingRelayMessages.initialized.shift());
+        }
+        while (window.pendingRelayMessages.registered.length) {
+            App.handleRelayRegistered(window.pendingRelayMessages.registered.shift());
+        }
+    }
     
     /**
      * Replace update profile method
