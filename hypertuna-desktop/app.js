@@ -21,6 +21,13 @@ let gatewayRegistered = false
 let relayCreateResolvers = []
 let initializedRelays = new Set() // Track which relays are ready
 
+// Store worker messages that may arrive before AppIntegration sets up handlers
+let pendingRelayMessages = {
+  initialized: [],
+  registered: []
+}
+window.pendingRelayMessages = pendingRelayMessages
+
 // Promise resolution for swarm key
 let swarmKeyPromise = null
 let swarmKeyResolver = null
@@ -463,12 +470,11 @@ function handleWorkerMessage(message) {
           window.App.nostr.registerRelayMapping(message.relayKey, message.publicIdentifier)
         }
 
-        // Notify the UI that this relay is ready
+        // Notify the UI that this relay is ready or queue if handler not yet present
         if (window.App && typeof window.App.handleRelayInitialized === 'function') {
           window.App.handleRelayInitialized(message)
-        } else if (window.App && window.App.nostr) {
-          const identifier = message.publicIdentifier || message.relayKey
-          window.App.nostr.handleRelayInitialized(identifier, message.gatewayUrl, message.userAuthToken)
+        } else {
+          pendingRelayMessages.initialized.push(message)
         }
       }
       break
@@ -482,9 +488,8 @@ function handleWorkerMessage(message) {
         // Notify the nostr client that this relay is fully registered and ready for connection
         if (window.App && typeof window.App.handleRelayRegistered === 'function') {
             window.App.handleRelayRegistered(message);
-        } else if (window.App && window.App.nostr) {
-            const identifier = message.publicIdentifier || message.relayKey;
-            window.App.nostr.handleRelayRegistered(identifier);
+        } else {
+            pendingRelayMessages.registered.push(message);
         }
       }
       break

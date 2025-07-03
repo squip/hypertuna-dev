@@ -417,43 +417,6 @@ class NostrGroupClient {
         });
     }
 
-    /**
-     * Checks if a relay is both initialized and registered, then connects.
-     * This is called by both handleRelayInitialized and handleRelayRegistered
-     * to make the process resilient to message ordering.
-     * @private
-     */
-    async _attemptConnectionIfReady(identifier) {
-        const connection = this.pendingRelayConnections.get(identifier);
-    
-        if (!connection) {
-            console.log(`[NostrGroupClient] No pending connection for ${identifier} yet.`);
-            return;
-        }
-    
-        // Only proceed if we have a valid authenticated URL
-        if (connection.isInitialized && connection.isRegistered && 
-            connection.status === 'pending' && connection.relayUrl && 
-            connection.relayUrl.includes('?token=')) {
-            
-            console.log(`[NostrGroupClient] All checks passed for ${identifier}. Connecting to ${connection.relayUrl}`);
-            connection.status = 'connecting';
-            
-            try {
-                await this.connectToGroupRelay(identifier, connection.relayUrl);
-                connection.status = 'connected';
-                this.pendingRelayConnections.delete(identifier);
-            } catch (e) {
-                console.error(`[NostrGroupClient] Final connection attempt failed for ${identifier}:`, e);
-                connection.status = 'failed';
-            }
-        } else {
-            console.log(`[NostrGroupClient] Waiting on readiness for ${identifier}. ` +
-                `Initialized=${connection.isInitialized}, ` +
-                `Registered=${connection.isRegistered}, ` +
-                `Has valid URL=${connection.relayUrl && connection.relayUrl.includes('?token=')}`);
-        }
-    }
 
     /**
      * Handle all relays ready notification
