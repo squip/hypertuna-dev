@@ -1192,6 +1192,9 @@
           deleteGroup() {},
           updateProfile() {},
       };
+
+      // Expose App globally so worker handlers can access it
+      window.App = App;
       
       // Local storage based relay simulation - for backward compatibility
       const LocalRelay = {
