@@ -133,6 +133,40 @@ class PeerHealthManager {
     try {
       console.log(`[${new Date().toISOString()}] Attempting health check for peer: ${peer.publicKey.substring(0, 8)}...`);
       
+      // Check if this is a Hyperswarm peer and if we already have a healthy connection
+      if (peer.mode === 'hyperswarm') {
+        const connection = connectionPool.connections.get(peer.publicKey);
+        if (connection && connection.connected) {
+          // If we have an active connection, just verify it's still responsive
+          console.log(`[${new Date().toISOString()}] Peer ${peer.publicKey.substring(0, 8)} has active connection, performing quick health check`);
+          
+          try {
+            const isHealthy = await checkPeerHealthWithHyperswarm(peer, connectionPool);
+            
+            console.log(`[${new Date().toISOString()}] Health check response for peer ${peer.publicKey.substring(0, 8)}: ${isHealthy ? 'healthy' : 'unhealthy'}`);
+            
+            if (isHealthy) {
+              peer.lastSeen = now;
+              this.healthChecks.set(peer.publicKey, {
+                lastCheck: now,
+                status: 'healthy',
+                responseTime: Date.now() - now
+              });
+        
+              if (this.failureCount.get(peer.publicKey)) {
+                this.metrics.recoveredPeers++;
+                this.failureCount.delete(peer.publicKey);
+              }
+        
+              return true;
+            }
+          } catch (healthError) {
+            console.log(`[${new Date().toISOString()}] Health check failed, but connection exists. Will retry connection.`);
+            // Don't immediately fail - try to reconnect
+          }
+        }
+      }
+      
       // Use Hyperswarm health check
       const isHealthy = await checkPeerHealthWithHyperswarm(peer, connectionPool);
       
@@ -710,26 +744,54 @@ app.post('/register', async (req, res) => {
       });
     }
 
+    // Mark peer as initially healthy since it just registered
+    // This prevents immediate "no healthy peers" errors
+    peerHealthManager.healthChecks.set(publicKey, {
+      lastCheck: Date.now(),
+      status: 'healthy',
+      responseTime: 0
+    });
+
     // Attempt to establish Hyperswarm connection
     console.log(`[${new Date().toISOString()}] Attempting to establish Hyperswarm connection to peer ${publicKey.substring(0, 8)}...`);
     
-    // Schedule connection attempt (non-blocking)
+    // Schedule connection attempt (non-blocking) with a delay
     setTimeout(async () => {
       try {
-        const connection = await connectionPool.getConnection(publicKey);
-        if (connection) {
+        // Check if we already have a connection from the peer
+        const existingConnection = connectedPeers.get(publicKey);
+        if (existingConnection && existingConnection.protocol) {
+          console.log(`[${new Date().toISOString()}] Peer already connected via incoming connection`);
           peer.status = 'connected';
-          console.log(`[${new Date().toISOString()}] Successfully connected to Hyperswarm peer ${publicKey.substring(0, 8)}...`);
           
-          // Perform initial health check
+          // Perform health check on existing connection
           const isHealthy = await peerHealthManager.checkPeerHealth(peer, connectionPool);
-          console.log(`[${new Date().toISOString()}] Initial health check for Hyperswarm peer:`, isHealthy);
+          console.log(`[${new Date().toISOString()}] Health check for existing connection:`, isHealthy);
+        } else {
+          // Try to establish outgoing connection
+          const connection = await connectionPool.getConnection(publicKey);
+          if (connection) {
+            peer.status = 'connected';
+            console.log(`[${new Date().toISOString()}] Successfully connected to Hyperswarm peer ${publicKey.substring(0, 8)}...`);
+            
+            // Perform initial health check
+            const isHealthy = await peerHealthManager.checkPeerHealth(peer, connectionPool);
+            console.log(`[${new Date().toISOString()}] Initial health check for Hyperswarm peer:`, isHealthy);
+          }
         }
       } catch (error) {
         console.error(`[${new Date().toISOString()}] Failed to connect to Hyperswarm peer:`, error.message);
         peer.status = 'connection_failed';
+        
+        // Still mark as potentially healthy if it just registered
+        // It might connect to us instead
+        peerHealthManager.healthChecks.set(publicKey, {
+          lastCheck: Date.now(),
+          status: 'pending',
+          error: 'Outgoing connection failed, waiting for incoming'
+        });
       }
-    }, 1000); // Small delay to allow response to be sent
+    }, 2000); // 2 second delay to allow for incoming connections
 
     await updateNetworkStats();
 

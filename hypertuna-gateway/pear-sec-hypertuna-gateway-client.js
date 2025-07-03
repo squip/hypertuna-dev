@@ -43,14 +43,19 @@ class HyperswarmConnection {
       // Try to connect directly to the peer's public key
       console.log(`[HyperswarmConnection] Attempting direct connection to peer...`);
       
-      // Create a connection promise
+      // Create a connection promise with longer timeout
       const connectionPromise = this._waitForOrCreateConnection(this.publicKey);
       
-      // Wait for connection
-      const connection = await connectionPromise;
+      // Wait for connection with timeout
+      const connection = await Promise.race([
+        connectionPromise,
+        new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Connection timeout')), 20000) // Increase timeout
+        )
+      ]);
       
       if (!connection) {
-        throw new Error('Failed to connect to peer - timeout');
+        throw new Error('Failed to connect to peer - no connection established');
       }
       
       console.log(`[HyperswarmConnection] Stream established with peer`);
@@ -60,16 +65,23 @@ class HyperswarmConnection {
       console.log(`[HyperswarmConnection] Creating RelayProtocol with gateway handshake...`);
       this.protocol = new RelayProtocolWithGateway(connection, false);
       
-      // Wait for protocol handshake
+      // Wait for protocol handshake with proper error handling
       console.log(`[HyperswarmConnection] Waiting for protocol handshake...`);
       await new Promise((resolve, reject) => {
         const timeout = setTimeout(() => {
           console.error(`[HyperswarmConnection] Protocol handshake TIMEOUT`);
           reject(new Error('Protocol handshake timeout'));
-        }, 10000);
+        }, 15000); // Increase handshake timeout
         
-        this.protocol.once('open', (handshake) => {
+        const cleanup = () => {
           clearTimeout(timeout);
+          this.protocol.removeListener('open', onOpen);
+          this.protocol.removeListener('close', onClose);
+          this.protocol.removeListener('error', onError);
+        };
+        
+        const onOpen = (handshake) => {
+          cleanup();
           this.connected = true;
           this.connecting = false;
           console.log(`[HyperswarmConnection] ----------------------------------------`);
@@ -78,20 +90,35 @@ class HyperswarmConnection {
           console.log(`[HyperswarmConnection] Received handshake:`, JSON.stringify(handshake, null, 2));
           console.log(`[HyperswarmConnection] ----------------------------------------`);
           resolve();
-        });
+        };
         
-        this.protocol.once('close', () => {
-          clearTimeout(timeout);
+        const onClose = () => {
+          cleanup();
           this.connected = false;
           this.connecting = false;
           console.error(`[HyperswarmConnection] Protocol closed during handshake`);
           reject(new Error('Protocol closed during handshake'));
-        });
+        };
+        
+        const onError = (err) => {
+          cleanup();
+          this.connected = false;
+          this.connecting = false;
+          console.error(`[HyperswarmConnection] Protocol error during handshake:`, err);
+          reject(err);
+        };
+        
+        this.protocol.once('open', onOpen);
+        this.protocol.once('close', onClose);
+        this.protocol.once('error', onError);
       });
       
-      // Send gateway identification
+      // Send gateway identification after handshake completes
       console.log(`[HyperswarmConnection] Sending gateway identification...`);
       await this._identifyAsGateway();
+      
+      // Wait a bit to ensure the peer has processed our identification
+      await new Promise(resolve => setTimeout(resolve, 500));
       
       console.log(`[HyperswarmConnection] Connection fully established`);
       console.log(`[HyperswarmConnection] ========================================`);
@@ -103,6 +130,18 @@ class HyperswarmConnection {
       console.error(`[HyperswarmConnection] Stack:`, err.stack);
       console.error(`[HyperswarmConnection] ========================================`);
       this.connecting = false;
+      this.connected = false;
+      
+      // Clean up on failure
+      if (this.protocol) {
+        this.protocol.destroy();
+        this.protocol = null;
+      }
+      if (this.stream) {
+        this.stream.destroy();
+        this.stream = null;
+      }
+      
       throw err;
     }
   }
