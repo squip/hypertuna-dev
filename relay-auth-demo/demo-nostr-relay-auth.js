@@ -45,10 +45,10 @@ function extractTokenFromReq(req) {
 
 function isAuthorized(token, ip) {
   const subnet = get24Subnet(ip);
-  const ipHash = sha256(subnet);
+  const ipHash = sha256(subnet); // retained for logging or future use
   for (const pubkey in allowlist) {
     const entry = allowlist[pubkey];
-    if (entry.token === token && entry.allowedSubnets.includes(ipHash)) {
+    if (entry.token === token) {
       return pubkey;
     }
   }
