@@ -13,6 +13,7 @@ class HyperswarmConnection {
     this.stream = null;
     this.connected = false;
     this.connecting = false;
+    this.connectPromise = null;
     this.lastUsed = Date.now();
     this.connectionAttempts = 0;
   }
@@ -22,16 +23,17 @@ class HyperswarmConnection {
       console.log(`[HyperswarmConnection] Already connected to ${this.publicKey.substring(0, 8)}...`);
       return;
     }
-    
-    if (this.connecting) {
-      console.log(`[HyperswarmConnection] Already connecting to ${this.publicKey.substring(0, 8)}...`);
-      return;
+
+    if (this.connectPromise) {
+      console.log(`[HyperswarmConnection] Awaiting existing connection attempt to ${this.publicKey.substring(0, 8)}...`);
+      return this.connectPromise;
     }
-    
-    this.connecting = true;
+
     this.connectionAttempts++;
-    
-    try {
+    this.connecting = true;
+
+    this.connectPromise = (async () => {
+      try {
       console.log(`[HyperswarmConnection] ========================================`);
       console.log(`[HyperswarmConnection] CONNECTION ATTEMPT #${this.connectionAttempts}`);
       console.log(`[HyperswarmConnection] Target peer: ${this.publicKey}`);
@@ -119,19 +121,18 @@ class HyperswarmConnection {
       
       // Wait a bit to ensure the peer has processed our identification
       await new Promise(resolve => setTimeout(resolve, 500));
-      
+
       console.log(`[HyperswarmConnection] Connection fully established`);
-      console.log(`[HyperswarmConnection] ========================================`);
-      
+      console.log(`[HyperswarmConnection] ======================================`);
+
     } catch (err) {
-      console.error(`[HyperswarmConnection] ========================================`);
+      console.error(`[HyperswarmConnection] =====================================`);
       console.error(`[HyperswarmConnection] CONNECTION FAILED`);
       console.error(`[HyperswarmConnection] Error:`, err.message);
       console.error(`[HyperswarmConnection] Stack:`, err.stack);
-      console.error(`[HyperswarmConnection] ========================================`);
-      this.connecting = false;
+      console.error(`[HyperswarmConnection] =====================================`);
       this.connected = false;
-      
+
       // Clean up on failure
       if (this.protocol) {
         this.protocol.destroy();
@@ -141,8 +142,17 @@ class HyperswarmConnection {
         this.stream.destroy();
         this.stream = null;
       }
-      
+
       throw err;
+    } finally {
+      this.connecting = false;
+    }
+    })();
+
+    try {
+      await this.connectPromise;
+    } finally {
+      this.connectPromise = null;
     }
   }
   
