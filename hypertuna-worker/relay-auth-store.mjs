@@ -78,19 +78,19 @@ getAuthByToken(relayKey, token) {
   }
   
   /**
-   * Verify token and subnet
+   * Verify token only (subnet is ignored)
    * @param {string} relayKey - Relay identifier
    * @param {string} token - Auth token
-   * @param {string} subnetHash - Client subnet hash
+   * @param {string} [subnetHash] - Client subnet hash (ignored)
    * @returns {Object|null} - User auth data or null
    */
   verifyAuth(relayKey, token, subnetHash) {
     const relayAuth = this.relayAuths.get(relayKey);
     if (!relayAuth) return null;
-    
+
     // Find user by token
     for (const [pubkey, auth] of relayAuth) {
-      if (auth.token === token && auth.allowedSubnets.includes(subnetHash)) {
+      if (auth.token === token) {
         auth.lastUsed = Date.now();
         return { pubkey, ...auth };
       }

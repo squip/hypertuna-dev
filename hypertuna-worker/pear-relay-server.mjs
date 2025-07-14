@@ -1251,8 +1251,8 @@ protocol.handle('/authorize', async (request) => {
           // Some relays might allow public read access
           // You can customize this based on your requirements
           if (profile?.auth_config?.publicRead !== true) {
-            if (!authToken || !subnetHash) {
-              console.warn(`[RelayServer] Missing auth for REQ on protected relay`);
+            if (!authToken) {
+              console.warn(`[RelayServer] Missing auth token for REQ on protected relay`);
               updateMetrics(false);
               return {
                 statusCode: 403,
@@ -1262,7 +1262,7 @@ protocol.handle('/authorize', async (request) => {
                 ]))
               };
             }
-            
+
             // Verify auth for REQ
             const auth = authStore.verifyAuth(relayKey, authToken, subnetHash);
             if (!auth) {
@@ -1285,10 +1285,10 @@ protocol.handle('/authorize', async (request) => {
         if (nostrMessage[0] === 'EVENT') {
           const event = nostrMessage.length === 2 ? nostrMessage[1] : nostrMessage[2];
           
-          if (!authToken || !subnetHash) {
-            console.warn(`[RelayServer] Missing auth token or subnet hash for EVENT`);
+          if (!authToken) {
+            console.warn(`[RelayServer] Missing auth token for EVENT`);
             updateMetrics(false);
-            
+
             // Return proper NOSTR OK response with auth error
             const okResponse = ['OK', event?.id || '', false, 'error: authentication required'];
             return {
@@ -1301,7 +1301,7 @@ protocol.handle('/authorize', async (request) => {
           // Verify the auth
           const auth = authStore.verifyAuth(relayKey, authToken, subnetHash);
           if (!auth) {
-            console.warn(`[RelayServer] Invalid auth token or subnet`);
+            console.warn(`[RelayServer] Invalid auth token`);
             updateMetrics(false);
             
             const okResponse = ['OK', event?.id || '', false, 'error: invalid authentication'];
@@ -1454,8 +1454,8 @@ protocol.handle('/authorize', async (request) => {
           // This endpoint is implicitly for REQ messages (fetching events for a subscription)
           // Check if public read access is explicitly allowed
           if (profile?.auth_config?.publicRead !== true) {
-            if (!authToken || !subnetHash) {
-              console.warn(`[RelayServer] Missing auth for read access on protected relay`);
+            if (!authToken) {
+              console.warn(`[RelayServer] Missing auth token for read access on protected relay`);
               updateMetrics(false);
               return {
                 statusCode: 200, // Return 200 for valid NOSTR NOTICE response
