@@ -161,8 +161,8 @@ class NostrGroupClient {
         
         // Subscribe to group metadata for discovery
         this.relayManager.subscribeWithRouting('group-discovery', [
-            { kinds: [NostrEvents.KIND_GROUP_METADATA], "#i": ["hypertuna:relay"], limit: 1 },
-            { kinds: [NostrEvents.KIND_HYPERTUNA_RELAY], "#i": ["hypertuna:relay"], limit: 1 }
+            { kinds: [NostrEvents.KIND_GROUP_METADATA], "#i": ["hypertuna:relay"], limit: 5 },
+            { kinds: [NostrEvents.KIND_HYPERTUNA_RELAY], "#i": ["hypertuna:relay"], limit: 5 }
         ], (event) => {
             if (event.kind === NostrEvents.KIND_GROUP_METADATA) {
                 this._processGroupMetadataEvent(event);

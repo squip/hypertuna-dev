@@ -914,7 +914,8 @@ async testPublish() {
             }
             
             console.log(`Received event for subscription: ${originalSubId} (${shortSubId})`);
-            
+            const eventData = JSON.stringify(event);
+            console.log(`event data: ${eventData}`);
             // Get subscription data
             const subscription = this.globalSubscriptions.get(originalSubId);
             if (subscription) {
