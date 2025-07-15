@@ -66,6 +66,16 @@ class NostrGroupClient {
             });
         }
     }
+
+    _getBaseRelayUrl(url) {
+        try {
+            const u = new URL(url);
+            u.searchParams.delete('token');
+            return u.toString().replace(/\?$/, '');
+        } catch {
+            return url.split('?')[0];
+        }
+    }
     
     /**
      * Initialize the client
@@ -177,19 +187,19 @@ class NostrGroupClient {
      */
     async _connectToUserRelays() {
         if (!this.userRelayListEvent) return;
-        
+
         const relayUrls = new Set();
         const identifierMap = new Map(); // Map URL -> public identifier
-    
-        // Parse public relays from tags - KEEP THE FULL URL WITH TOKEN
+
+        // Parse public relays from tags - store base URLs without tokens
         this.userRelayListEvent.tags.forEach(tag => {
             if (tag[0] === 'group' && tag[4] === 'hypertuna:relay') {
                 const identifier = tag[1];
-                const url = tag[2]; // This should include ?token=... if present
+                const url = this._getBaseRelayUrl(tag[2]);
                 relayUrls.add(url);
                 identifierMap.set(url, identifier);
             } else if (tag[0] === 'r' && tag[1] && tag[2] === 'hypertuna:relay') {
-                const url = tag[1]; // This should include ?token=... if present
+                const url = this._getBaseRelayUrl(tag[1]);
                 relayUrls.add(url);
                 if (!identifierMap.has(url)) {
                     const parts = url.split('/').filter(Boolean);
@@ -210,15 +220,15 @@ class NostrGroupClient {
                     this.userRelayListEvent.content
                 );
                 const privateTags = JSON.parse(decrypted);
-    
+
                 privateTags.forEach(tag => {
                     if (Array.isArray(tag) && tag[0] === 'group' && tag[4] === 'hypertuna:relay') {
                         const identifier = tag[1];
-                        const url = tag[2]; // This should include ?token=... if present
+                        const url = this._getBaseRelayUrl(tag[2]);
                         relayUrls.add(url);
                         identifierMap.set(url, identifier);
                     } else if (Array.isArray(tag) && tag[0] === 'r' && tag[1] && tag[2] === 'hypertuna:relay') {
-                        const url = tag[1]; // This should include ?token=... if present
+                        const url = this._getBaseRelayUrl(tag[1]);
                         relayUrls.add(url);
                         if (!identifierMap.has(url)) {
                             const parts = url.split('/').filter(Boolean);
@@ -235,7 +245,7 @@ class NostrGroupClient {
         }
         
         console.log(`[NostrGroupClient] Found ${relayUrls.size} relay URLs to connect`);
-        console.log('[NostrGroupClient] Relay URLs with tokens:', Array.from(relayUrls));
+        console.log('[NostrGroupClient] Relay base URLs:', Array.from(relayUrls));
         
         // Queue all relay connections with their full authenticated URLs
         for (const relayUrl of relayUrls) {
@@ -255,7 +265,7 @@ class NostrGroupClient {
         if (!this.pendingRelayConnections.has(publicIdentifier)) {
             this.pendingRelayConnections.set(publicIdentifier, {
                 identifier: publicIdentifier,
-                relayUrl,  // This should already include the token
+                relayUrl,  // May be base URL; token appended once initialized
                 attempts: 0,
                 status: 'pending',
                 isInitialized: false,
@@ -1055,19 +1065,33 @@ async fetchMultipleProfiles(pubkeys) {
         }
     
         const groupName = (this.groups.get(publicIdentifier)?.name) || '';
-    
-        // IMPORTANT: Use the full gatewayUrl which should include the token
-        const groupTag = ['group', publicIdentifier, gatewayUrl, groupName, 'hypertuna:relay'];
-        const rTag = ['r', gatewayUrl, 'hypertuna:relay'];
+
+        const baseUrl = this._getBaseRelayUrl(gatewayUrl);
+
+        // Store only base URL in relay list
+        const groupTag = ['group', publicIdentifier, baseUrl, groupName, 'hypertuna:relay'];
+        const rTag = ['r', baseUrl, 'hypertuna:relay'];
     
         const remove = (arr, tag) => {
-            // When removing, match by identifier, not full URL
-            const idx = arr.findIndex(t => 
-                t[0] === tag[0] && 
-                t[1] === tag[1] && 
+            const byIdx = arr.findIndex(t =>
+                t[0] === tag[0] &&
+                t[1] === tag[1] &&
                 t[t.length - 1] === tag[tag.length - 1]
             );
-            if (idx > -1) arr.splice(idx, 1);
+            if (byIdx > -1) {
+                arr.splice(byIdx, 1);
+                return;
+            }
+            // Fallback: match by base URL for legacy entries with tokens
+            const idx2 = arr.findIndex(t => {
+                const urlIdx = tag[0] === 'r' ? 1 : 2;
+                return (
+                    t[0] === tag[0] &&
+                    this._getBaseRelayUrl(t[urlIdx]) === baseUrl &&
+                    t[t.length - 1] === tag[tag.length - 1]
+                );
+            });
+            if (idx2 > -1) arr.splice(idx2, 1);
         };
     
         if (add) {
@@ -2421,9 +2445,11 @@ async fetchMultipleProfiles(pubkeys) {
             }
         }
         
-        // Create authenticated relay tags
-        const groupTag = ['group', publicIdentifier, authenticatedUrl, groupName, 'hypertuna:relay'];
-        const rTag = ['r', authenticatedUrl, 'hypertuna:relay'];
+        const baseUrl = this._getBaseRelayUrl(authenticatedUrl);
+
+        // Store only base URL in relay list
+        const groupTag = ['group', publicIdentifier, baseUrl, groupName, 'hypertuna:relay'];
+        const rTag = ['r', baseUrl, 'hypertuna:relay'];
         
         // Add to appropriate list
         if (isPublic) {
@@ -2440,7 +2466,7 @@ async fetchMultipleProfiles(pubkeys) {
         const discoveryRelays = Array.from(this.relayManager.discoveryRelays);
         await this.relayManager.publishToRelays(newEvent, discoveryRelays);
         
-        console.log(`[NostrGroupClient] Updated relay list with authenticated URL:`, authenticatedUrl);
+        console.log(`[NostrGroupClient] Updated relay list with base URL:`, baseUrl);
         
         // Connect to the authenticated relay
         await this.connectToGroupRelay(publicIdentifier, authenticatedUrl);
