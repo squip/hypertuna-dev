@@ -1458,7 +1458,7 @@ App.syncHypertunaConfigToFile = async function() {
             const proxyServer = this.currentUser?.hypertunaConfig?.proxy_server_address || '';
 
             if (relayKey && relayKey.authToken) {
-                await this.showAuthSuccess(relayKey);
+                await this.showAuthSuccess(relayKey, isPublic);
             } else {
                 this.closeJoinAuthModal();
             }
@@ -1612,8 +1612,10 @@ App.syncHypertunaConfigToFile = async function() {
 
     /**
      * Show authentication success
+     * @param {Object} authResult - Result object from the worker
+     * @param {boolean|null} [isPublic] - Public flag for the relay if known
      */
-    App.showAuthSuccess = async function(authResult) {
+    App.showAuthSuccess = async function(authResult, isPublic = null) {
         // Update progress to complete
         this.updateAuthProgress('complete');
         
@@ -1653,7 +1655,8 @@ App.syncHypertunaConfigToFile = async function() {
             await this.nostr.client.updateUserRelayListWithAuth(
                 authResult.publicIdentifier,
                 authResult.relayUrl, // This should be the full authenticated URL
-                authResult.authToken
+                authResult.authToken,
+                isPublic
             );
         } else {
             console.error("Nostr client not available to update relay list.");
