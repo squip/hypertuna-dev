@@ -419,10 +419,13 @@ class AES256CBC {
     if (iv.length !== 16) throw new Error('IV must be 16 bytes');
     
     const expandedKey = this.expandKey(key);
-    const blocks = Math.ceil(plaintext.length / 16);
+    let blocks = Math.ceil(plaintext.length / 16);
+    if (plaintext.length % 16 === 0) {
+      blocks += 1;
+    }
     const padded = new Uint8Array(blocks * 16);
     padded.set(plaintext);
-    
+
     // PKCS#7 padding
     const paddingLength = padded.length - plaintext.length;
     for (let i = plaintext.length; i < padded.length; i++) {
