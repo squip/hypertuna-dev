@@ -25,8 +25,7 @@ function serializeEvent(event) {
 async function getEventHash(event) {
   logWithTimestamp("getEventHash: Generating hash for event", event);
   const serialized = JSON.stringify([0, event.pubkey, event.created_at, event.kind, event.tags, event.content]);
-  // Use Buffer instead of TextEncoder for Bare compatibility
-  const hashBytes = await nobleSecp256k1.utils.sha256(Buffer.from(serialized, 'utf8'));
+  const hashBytes = await nobleSecp256k1.utils.sha256(b4a.from(serialized, 'utf8'));
   const hash = NostrUtils.bytesToHex(hashBytes);
   logWithTimestamp("getEventHash: Generated hash", hash);
   return hash;
@@ -102,8 +101,7 @@ async function verifyEventSignature(event) {
   
   try {
     const serializedEvent = serializeEvent(event);
-    // Use Buffer instead of TextEncoder for Bare compatibility
-    const eventHashBytes = await nobleSecp256k1.utils.sha256(Buffer.from(serializedEvent, 'utf8'));
+    const eventHashBytes = await nobleSecp256k1.utils.sha256(b4a.from(serializedEvent, 'utf8'));
     const eventHashHex = NostrUtils.bytesToHex(eventHashBytes);
     
     logWithTimestamp('verifyEventSignature: Serialized event:', serializedEvent);

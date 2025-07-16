@@ -45,8 +45,7 @@ async function verifyEventSignature(event) {
       console.log('Serialized Event:', serialized);
       
       // Use sha256 which returns Uint8Array
-      // In Bare, use Buffer instead of TextEncoder
-      const hashBytes = await nobleSecp256k1.utils.sha256(Buffer.from(serialized, 'utf8'));
+      const hashBytes = await nobleSecp256k1.utils.sha256(b4a.from(serialized, 'utf8'));
       const hashHex = NostrUtils.bytesToHex(hashBytes);
       console.log('Event Hash:', hashHex);
       
@@ -76,8 +75,7 @@ function serializeEvent(event) {
 
 async function getEventHash(event) {
   const serialized = JSON.stringify([0, event.pubkey, event.created_at, event.kind, event.tags, event.content]);
-  // In Bare, use Buffer instead of TextEncoder
-  const hashBytes = await nobleSecp256k1.utils.sha256(Buffer.from(serialized, 'utf8'));
+  const hashBytes = await nobleSecp256k1.utils.sha256(b4a.from(serialized, 'utf8'));
   return NostrUtils.bytesToHex(hashBytes);
 }
 
@@ -306,8 +304,7 @@ export class RelayManager {
       };
       
       const serializedEvent = serializeEvent(event);
-      // In Bare, use Buffer instead of TextEncoder
-      const eventHashBytes = await nobleSecp256k1.utils.sha256(Buffer.from(serializedEvent, 'utf8'));
+      const eventHashBytes = await nobleSecp256k1.utils.sha256(b4a.from(serializedEvent, 'utf8'));
       event.id = NostrUtils.bytesToHex(eventHashBytes);
       
       // Sign the event - schnorr.sign returns Uint8Array

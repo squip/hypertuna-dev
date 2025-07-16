@@ -2,6 +2,7 @@
 import Protomux from 'protomux';
 import c from 'compact-encoding';
 import { EventEmitter } from 'bare-events';
+import b4a from 'b4a';
 
 const REQUEST_TIMEOUT = 30000; // 30 seconds
 
@@ -11,13 +12,13 @@ const httpMessageEncoding = {
     c.string.preencode(state, m.method || 'GET');
     c.string.preencode(state, m.path || '/');
     c.string.preencode(state, JSON.stringify(m.headers || {}));
-    c.buffer.preencode(state, m.body || Buffer.alloc(0));
+    c.buffer.preencode(state, m.body || b4a.alloc(0));
   },
   encode(state, m) {
     c.string.encode(state, m.method || 'GET');
     c.string.encode(state, m.path || '/');
     c.string.encode(state, JSON.stringify(m.headers || {}));
-    c.buffer.encode(state, m.body || Buffer.alloc(0));
+    c.buffer.encode(state, m.body || b4a.alloc(0));
   },
   decode(state) {
     return {
@@ -33,12 +34,12 @@ const httpResponseEncoding = {
   preencode(state, m) {
     c.uint.preencode(state, m.statusCode || 200);
     c.string.preencode(state, JSON.stringify(m.headers || {}));
-    c.buffer.preencode(state, m.body || Buffer.alloc(0));
+    c.buffer.preencode(state, m.body || b4a.alloc(0));
   },
   encode(state, m) {
     c.uint.encode(state, m.statusCode || 200);
     c.string.encode(state, JSON.stringify(m.headers || {}));
-    c.buffer.encode(state, m.body || Buffer.alloc(0));
+    c.buffer.encode(state, m.body || b4a.alloc(0));
   },
   decode(state) {
     return {
@@ -146,7 +147,7 @@ export class RelayProtocol extends EventEmitter {
       method: message.method,
       path: message.path,
       headers: message.headers || {},
-      body: message.body ? Buffer.from(message.body) : Buffer.alloc(0)
+      body: message.body ? b4a.from(message.body) : b4a.alloc(0)
     };
     
     // Check if we have a handler for this path pattern
@@ -207,7 +208,7 @@ export class RelayProtocol extends EventEmitter {
         id: request.id,
         statusCode: response.statusCode || 200,
         headers: response.headers || {},
-        body: response.body || Buffer.alloc(0)
+        body: response.body || b4a.alloc(0)
       });
     } catch (err) {
       console.error('[RelayProtocol] Handler error:', err);
@@ -215,7 +216,7 @@ export class RelayProtocol extends EventEmitter {
         id: request.id,
         statusCode: 500,
         headers: { 'content-type': 'application/json' },
-        body: Buffer.from(JSON.stringify({ error: err.message }))
+        body: b4a.from(JSON.stringify({ error: err.message }))
       });
     }
   }
@@ -230,7 +231,7 @@ export class RelayProtocol extends EventEmitter {
       const response = {
         statusCode: message.statusCode,
         headers: message.headers || {},
-        body: message.body ? Buffer.from(message.body) : Buffer.alloc(0)
+        body: message.body ? b4a.from(message.body) : b4a.alloc(0)
       };
       
       request.resolve(response);
