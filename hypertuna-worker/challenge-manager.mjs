@@ -171,13 +171,16 @@ export class ChallengeManager {
       console.log(`[ChallengeManager] Verifying challenge for ${pubkey.substring(0, 8)}...`);
       
       // Compute ECDH shared secret
-      const sharedSecret = await nobleSecp256k1.getSharedSecret(
+      let sharedSecret = await nobleSecp256k1.getSharedSecret(
         this.relayPrivateKey,
         '02' + pubkey, // Add compression prefix
         true
       );
-      
-      // Use the full shared secret as the AES key
+
+      // noble-secp256k1 may return a 33 byte buffer with a leading 0x00.
+      // Slice the first byte so the derived AES key matches the client's.
+      if (sharedSecret.length === 33) sharedSecret = sharedSecret.slice(1);
+
       const keyBuffer = b4a.from(sharedSecret);
       
       console.log(`[ChallengeManager] Shared key: ${keyBuffer.toString('hex').substring(0, 16)}...`);
