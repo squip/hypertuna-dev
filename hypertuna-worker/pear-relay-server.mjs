@@ -2072,7 +2072,8 @@ export async function startJoinAuthentication(options) {
       '02' + relayPubkey, // Add compression prefix for noble-secp256k1
       true
     );
-    const keyBuffer = b4a.from(sharedSecret.slice(1, 33)); // Derive 32-byte key
+    // Use the full shared secret as the AES key
+    const keyBuffer = b4a.from(sharedSecret);
     console.log(`[RelayServer] Shared key computed: ${keyBuffer.toString('hex').substring(0, 8)}...`);
 
     // Encrypt the challenge using AES-256-CBC
