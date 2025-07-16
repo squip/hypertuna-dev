@@ -1105,6 +1105,7 @@ app.post('/callback/verify-ownership/:identifier', async (req, res) => {
     // Get session info
     const sessionKey = `${pubkey}-${identifier}`;
     const session = global.joinSessions?.get(sessionKey);
+    console.log(`[${new Date().toISOString()}] Session key: ${sessionKey}`);
     
     if (!session) {
       console.error(`[${new Date().toISOString()}] No session found for ${sessionKey}`);
@@ -1112,8 +1113,9 @@ app.post('/callback/verify-ownership/:identifier', async (req, res) => {
         error: 'Session not found or expired'
       });
     }
-    
+
     console.log(`[${new Date().toISOString()}] Found session for peer: ${session.peerPublicKey.substring(0, 8)}...`);
+    console.log(`[${new Date().toISOString()}] Stored subnet: ${session.subnetHash.substring(0, 8)}...`);
     
     // Find the peer
     const peer = activePeers.find(p => p.publicKey === session.peerPublicKey);
@@ -1131,6 +1133,8 @@ app.post('/callback/verify-ownership/:identifier', async (req, res) => {
       { pubkey, ciphertext, iv },
       connectionPool
     );
+
+    console.log(`[${new Date().toISOString()}] Callback result:`, result);
     
     if (result.success) {
       // Update session with token

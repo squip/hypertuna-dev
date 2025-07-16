@@ -162,9 +162,10 @@ export class ChallengeManager {
       // Retrieve stored challenge
       const stored = this.store.retrieve(pubkey);
       if (!stored) {
-        return { 
-          success: false, 
-          error: 'Challenge not found or expired' 
+        console.warn(`[ChallengeManager] No challenge found for ${pubkey.substring(0, 8)}...`);
+        return {
+          success: false,
+          error: 'Challenge not found or expired'
         };
       }
       
@@ -198,12 +199,14 @@ export class ChallengeManager {
         // Generate auth token
         const token = this.generateAuthToken(pubkey);
         
+        console.log('[ChallengeManager] Challenge verified successfully');
         return {
           success: true,
           token,
           identifier: stored.identifier
         };
       } else {
+        console.error('[ChallengeManager] Challenge mismatch');
         return {
           success: false,
           error: 'Challenge verification failed'

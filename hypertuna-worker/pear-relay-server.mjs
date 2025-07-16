@@ -2056,6 +2056,10 @@ export async function startJoinAuthentication(options) {
     // Step 2.3: Handle challenge and verification callback
     const { challenge, relayPubkey, verifyUrl, finalUrl } = joinResponse;
 
+    console.log(`[RelayServer] Challenge: ${challenge.substring(0, 16)}...`);
+    console.log(`[RelayServer] verifyUrl: ${verifyUrl}`);
+    console.log(`[RelayServer] finalUrl: ${finalUrl}`);
+
     if (!challenge || !relayPubkey || !verifyUrl || !finalUrl) {
       throw new Error('Invalid challenge response from gateway. Missing required fields.');
     }
@@ -2087,6 +2091,8 @@ export async function startJoinAuthentication(options) {
     const ciphertext = b4a.from(encrypted).toString('base64');
     const ivBase64 = b4a.from(iv).toString('base64');
     console.log('[RelayServer] Challenge encrypted.');
+    console.log(`[RelayServer] Ciphertext length: ${ciphertext.length}`);
+    console.log(`[RelayServer] IV base64: ${ivBase64}`);
 
     // Send the encrypted challenge to the verification URL
     const verifyGatewayUrl = new URL(verifyUrl);
@@ -2137,6 +2143,9 @@ export async function startJoinAuthentication(options) {
     });
 
     console.log('[RelayServer] Received verification response from gateway:', verifyResponse);
+    if (verifyResponse && verifyResponse.success === false) {
+      console.log(`[RelayServer] Verification failed: ${verifyResponse.error}`);
+    }
 
     // Step 2.4: Finalization callback, token persistence, and success notification
     if (global.sendMessage) {
@@ -2187,6 +2196,7 @@ export async function startJoinAuthentication(options) {
     });
 
     console.log('[RelayServer] Received final response from gateway:', finalResponse);
+    console.log(`[RelayServer] Final authToken: ${finalResponse.authToken ? finalResponse.authToken.substring(0, 16) : 'none'}`);
 
     const { authToken, relayUrl } = finalResponse;
     if (!authToken || !relayUrl) {
