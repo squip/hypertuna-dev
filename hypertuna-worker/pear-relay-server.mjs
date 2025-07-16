@@ -1956,8 +1956,11 @@ async function createGroupJoinRequest(publicIdentifier, privateKey) {
 
 export async function startJoinAuthentication(options) {
   const { publicIdentifier } = options;
-  const userPubkey = config.nostr_pubkey_hex;
   const userNsec = config.nostr_nsec_hex;
+  const userPubkey = NostrUtils.getPublicKey(userNsec);
+  if (config.nostr_pubkey_hex && userPubkey !== config.nostr_pubkey_hex) {
+    console.warn('[RelayServer] Derived pubkey does not match configured pubkey');
+  }
 
   console.log(`[RelayServer] Starting join authentication for: ${publicIdentifier}`);
   console.log(`[RelayServer] Using user pubkey: ${userPubkey.substring(0, 8)}...`);
