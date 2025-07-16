@@ -4,6 +4,7 @@
  */
 
 import crypto from 'bare-crypto';
+import b4a from 'b4a';
 
 // secp256k1 curve parameters
 const CURVE = {
@@ -696,8 +697,8 @@ const nobleSecp256k1 = {
   aes: {
     encrypt: (plaintext, key, iv) => {
       const aes = new AES256CBC();
-      const plaintextBytes = typeof plaintext === 'string' 
-        ? new TextEncoder().encode(plaintext)
+      const plaintextBytes = typeof plaintext === 'string'
+        ? b4a.from(plaintext, 'utf8')
         : plaintext;
       const keyBytes = typeof key === 'string' 
         ? nobleSecp256k1.utils.hexToBytes(key)

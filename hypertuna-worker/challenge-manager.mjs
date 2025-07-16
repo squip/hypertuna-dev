@@ -1,6 +1,7 @@
 // challenge-manager.mjs - Challenge generation and verification for relay authentication
 
 import crypto from 'bare-crypto';
+import b4a from 'b4a';
 import { nobleSecp256k1 } from './pure-secp256k1-bare.js';
 
 /**
@@ -120,7 +121,7 @@ export class ChallengeManager {
   getPublicKeyFromPrivate(privateKeyHex) {
     const pubKeyBytes = nobleSecp256k1.getPublicKey(privateKeyHex, true);
     // Remove the compression prefix (first byte) for x-only pubkey
-    return Buffer.from(pubKeyBytes.slice(1)).toString('hex');
+    return b4a.toString(pubKeyBytes.slice(1), 'hex');
   }
   
   /**
@@ -177,7 +178,7 @@ export class ChallengeManager {
       );
       
       // Use the same key derivation as the demo - slice from index 1 to 33
-      const keyBuffer = Buffer.from(sharedSecret.slice(1, 33));
+      const keyBuffer = b4a.from(sharedSecret.slice(1, 33));
       
       console.log(`[ChallengeManager] Shared key: ${keyBuffer.toString('hex').substring(0, 16)}...`);
       
@@ -223,14 +224,14 @@ export class ChallengeManager {
    * @returns {string} - Decrypted text
    */
   aesDecrypt(keyBuffer, ciphertext, ivBase64) {
-    const iv = Buffer.from(ivBase64, 'base64');
-    const ciphertextBuffer = Buffer.from(ciphertext, 'base64');
+    const iv = b4a.from(ivBase64, 'base64');
+    const ciphertextBuffer = b4a.from(ciphertext, 'base64');
     
     // Use the AES implementation from pure-secp256k1-bare.js
     const decrypted = nobleSecp256k1.aes.decrypt(ciphertextBuffer, keyBuffer, iv);
     
     // Convert to string
-    return Buffer.from(decrypted).toString('utf8');
+    return b4a.toString(decrypted, 'utf8');
   }
   
   /**

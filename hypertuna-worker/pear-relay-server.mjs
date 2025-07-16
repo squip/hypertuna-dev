@@ -6,6 +6,7 @@ import { join } from 'bare-path';
 import crypto from 'hypercore-crypto';
 import { setTimeout, setInterval, clearInterval } from 'bare-timers';
 import https from 'bare-https';
+import b4a from 'b4a';
 import { URL } from 'bare-url';
 import { initializeChallengeManager, getChallengeManager } from './challenge-manager.mjs';
 import { getRelayAuthStore } from './relay-auth-store.mjs';
@@ -231,7 +232,7 @@ async function startHyperswarmServer() {
     console.log('[RelayServer] Starting Hyperswarm server...');
     
     // Create key pair from seed
-    const keyPair = crypto.keyPair(Buffer.from(config.proxy_seed, 'hex'));
+    const keyPair = crypto.keyPair(b4a.from(config.proxy_seed, 'hex'));
     config.swarmPublicKey = keyPair.publicKey.toString('hex');
     // Persist the generated public key so it can be read on next start
     await saveConfig(config);
@@ -267,7 +268,7 @@ async function startHyperswarmServer() {
     
     // Join the swarm with a well-known topic
     const topicString = 'hypertuna-relay-network';
-    const topic = crypto.hash(Buffer.from(topicString));
+    const topic = crypto.hash(b4a.from(topicString));
     console.log('[RelayServer] Joining swarm with topic:', topicString);
     console.log('[RelayServer] Topic hash:', topic.toString('hex'));
     
@@ -392,7 +393,7 @@ function handlePeerConnection(stream, peerInfo) {
         id: request.id,
         statusCode: 200,
         headers: { 'content-type': 'application/json' },
-        body: Buffer.from(JSON.stringify({ 
+        body: b4a.from(JSON.stringify({ 
           status: 'identified',
           relayPublicKey: config.swarmPublicKey,
           timestamp: new Date().toISOString()
@@ -533,7 +534,7 @@ function setupProtocolHandlers(protocol) {
     return {
         statusCode: 200,
         headers: { 'content-type': 'application/json' },
-        body: Buffer.from(JSON.stringify(healthResponse))
+        body: b4a.from(JSON.stringify(healthResponse))
     };
 });
   
@@ -568,7 +569,7 @@ function setupProtocolHandlers(protocol) {
         return {
             statusCode: 200,
             headers: { 'content-type': 'application/json' },
-            body: Buffer.from(JSON.stringify({
+            body: b4a.from(JSON.stringify({
                 relays: relayList,
                 count: relayList.length
             }))
@@ -579,7 +580,7 @@ function setupProtocolHandlers(protocol) {
         return {
             statusCode: 500,
             headers: { 'content-type': 'application/json' },
-            body: Buffer.from(JSON.stringify({ error: error.message }))
+            body: b4a.from(JSON.stringify({ error: error.message }))
         };
     }
 });
@@ -597,7 +598,7 @@ function setupProtocolHandlers(protocol) {
       return {
         statusCode: 400,
         headers: { 'content-type': 'application/json' },
-        body: Buffer.from(JSON.stringify({ error: 'Relay name is required' }))
+        body: b4a.from(JSON.stringify({ error: 'Relay name is required' }))
       };
     }
     
@@ -645,7 +646,7 @@ function setupProtocolHandlers(protocol) {
         return {
           statusCode: 200,
           headers: { 'content-type': 'application/json' },
-          body: Buffer.from(JSON.stringify(result))
+          body: b4a.from(JSON.stringify(result))
         };
       } else {
         console.error('[RelayServer] Failed to create relay:', result.error);
@@ -653,7 +654,7 @@ function setupProtocolHandlers(protocol) {
         return {
           statusCode: 500,
           headers: { 'content-type': 'application/json' },
-          body: Buffer.from(JSON.stringify({ error: result.error }))
+          body: b4a.from(JSON.stringify({ error: result.error }))
         };
       }
     } catch (error) {
@@ -662,7 +663,7 @@ function setupProtocolHandlers(protocol) {
       return {
         statusCode: 500,
         headers: { 'content-type': 'application/json' },
-        body: Buffer.from(JSON.stringify({ error: error.message }))
+        body: b4a.from(JSON.stringify({ error: error.message }))
       };
     }
   });
@@ -680,7 +681,7 @@ function setupProtocolHandlers(protocol) {
       return {
         statusCode: 400,
         headers: { 'content-type': 'application/json' },
-        body: Buffer.from(JSON.stringify({ error: 'Relay key is required' }))
+        body: b4a.from(JSON.stringify({ error: 'Relay key is required' }))
       };
     }
     
@@ -728,7 +729,7 @@ function setupProtocolHandlers(protocol) {
         return {
           statusCode: 200,
           headers: { 'content-type': 'application/json' },
-          body: Buffer.from(JSON.stringify(result))
+          body: b4a.from(JSON.stringify(result))
         };
       } else {
         console.error('[RelayServer] Failed to join relay:', result.error);
@@ -736,7 +737,7 @@ function setupProtocolHandlers(protocol) {
         return {
           statusCode: 500,
           headers: { 'content-type': 'application/json' },
-          body: Buffer.from(JSON.stringify({ error: result.error }))
+          body: b4a.from(JSON.stringify({ error: result.error }))
         };
       }
     } catch (error) {
@@ -745,7 +746,7 @@ function setupProtocolHandlers(protocol) {
       return {
         statusCode: 500,
         headers: { 'content-type': 'application/json' },
-        body: Buffer.from(JSON.stringify({ error: error.message }))
+        body: b4a.from(JSON.stringify({ error: error.message }))
       };
     }
   });
@@ -764,7 +765,7 @@ function setupProtocolHandlers(protocol) {
         return {
           statusCode: 400,
           headers: { 'content-type': 'application/json' },
-          body: Buffer.from(JSON.stringify({ error: 'Missing required fields' }))
+          body: b4a.from(JSON.stringify({ error: 'Missing required fields' }))
         };
       }
       
@@ -774,7 +775,7 @@ function setupProtocolHandlers(protocol) {
         return {
           statusCode: 400,
           headers: { 'content-type': 'application/json' },
-          body: Buffer.from(JSON.stringify({ error: 'Invalid event kind' }))
+          body: b4a.from(JSON.stringify({ error: 'Invalid event kind' }))
         };
       }
       
@@ -804,7 +805,7 @@ function setupProtocolHandlers(protocol) {
       return {
         statusCode: 200,
         headers: { 'content-type': 'application/json' },
-        body: Buffer.from(JSON.stringify(response))
+        body: b4a.from(JSON.stringify(response))
       };
       
     } catch (error) {
@@ -813,7 +814,7 @@ function setupProtocolHandlers(protocol) {
       return {
         statusCode: 500,
         headers: { 'content-type': 'application/json' },
-        body: Buffer.from(JSON.stringify({ error: error.message }))
+        body: b4a.from(JSON.stringify({ error: error.message }))
       };
     }
   });
@@ -833,7 +834,7 @@ function setupProtocolHandlers(protocol) {
         return {
           statusCode: 400,
           headers: { 'content-type': 'application/json' },
-          body: Buffer.from(JSON.stringify({ error: 'Missing required fields' }))
+          body: b4a.from(JSON.stringify({ error: 'Missing required fields' }))
         };
       }
       
@@ -851,7 +852,7 @@ function setupProtocolHandlers(protocol) {
         return {
           statusCode: 400,
           headers: { 'content-type': 'application/json' },
-          body: Buffer.from(JSON.stringify({ error: result.error }))
+          body: b4a.from(JSON.stringify({ error: result.error }))
         };
       }
       
@@ -864,7 +865,7 @@ function setupProtocolHandlers(protocol) {
       return {
         statusCode: 200,
         headers: { 'content-type': 'application/json' },
-        body: Buffer.from(JSON.stringify({
+        body: b4a.from(JSON.stringify({
           success: true,
           token: result.token,
           identifier: result.identifier
@@ -882,7 +883,7 @@ function setupProtocolHandlers(protocol) {
       return {
         statusCode: 500,
         headers: { 'content-type': 'application/json' },
-        body: Buffer.from(JSON.stringify({ error: error.message }))
+        body: b4a.from(JSON.stringify({ error: error.message }))
       };
     }
   });
@@ -915,7 +916,7 @@ function setupProtocolHandlers(protocol) {
         return {
           statusCode: 400,
           headers: { 'content-type': 'application/json' },
-          body: Buffer.from(JSON.stringify({ error: 'Missing required fields for finalization' }))
+          body: b4a.from(JSON.stringify({ error: 'Missing required fields for finalization' }))
         };
       }
       
@@ -977,7 +978,7 @@ function setupProtocolHandlers(protocol) {
       return {
         statusCode: 200,
         headers: { 'content-type': 'application/json' },
-        body: Buffer.from(JSON.stringify({
+        body: b4a.from(JSON.stringify({
           success: true,
           relayKey: identifier,
           authToken: token,
@@ -996,7 +997,7 @@ function setupProtocolHandlers(protocol) {
       return {
         statusCode: 500,
         headers: { 'content-type': 'application/json' },
-        body: Buffer.from(JSON.stringify({ error: error.message }))
+        body: b4a.from(JSON.stringify({ error: error.message }))
       };
     }
   });
@@ -1017,7 +1018,7 @@ protocol.handle('/authorize', async (request) => {
       return {
         statusCode: 400,
         headers: { 'content-type': 'application/json' },
-        body: Buffer.from(JSON.stringify({ error: 'Missing token' }))
+        body: b4a.from(JSON.stringify({ error: 'Missing token' }))
       };
     }
     
@@ -1057,7 +1058,7 @@ protocol.handle('/authorize', async (request) => {
       return {
         statusCode: 403,
         headers: { 'content-type': 'application/json' },
-        body: Buffer.from(JSON.stringify({ error: 'Invalid token' }))
+        body: b4a.from(JSON.stringify({ error: 'Invalid token' }))
       };
     }
     
@@ -1080,7 +1081,7 @@ protocol.handle('/authorize', async (request) => {
       return {
         statusCode: 200,
         headers: { 'content-type': 'application/json' },
-        body: Buffer.from(JSON.stringify({
+        body: b4a.from(JSON.stringify({
           success: true,
           message: 'Mobile device authorized'
         }))
@@ -1090,7 +1091,7 @@ protocol.handle('/authorize', async (request) => {
       return {
         statusCode: 400,
         headers: { 'content-type': 'application/json' },
-        body: Buffer.from(JSON.stringify({ error: 'Failed to add subnet' }))
+        body: b4a.from(JSON.stringify({ error: 'Failed to add subnet' }))
       };
     }
     
@@ -1104,7 +1105,7 @@ protocol.handle('/authorize', async (request) => {
     return {
       statusCode: 500,
       headers: { 'content-type': 'application/json' },
-      body: Buffer.from(JSON.stringify({ error: error.message }))
+      body: b4a.from(JSON.stringify({ error: error.message }))
     };
   }
 });
@@ -1125,7 +1126,7 @@ protocol.handle('/authorize', async (request) => {
                 return {
                     statusCode: 404,
                     headers: { 'content-type': 'application/json' },
-                    body: Buffer.from(JSON.stringify({ error: 'Relay not found' }))
+                    body: b4a.from(JSON.stringify({ error: 'Relay not found' }))
                 };
             }
             console.log(`[RelayServer] Resolved public identifier ${identifier} to relay key ${relayKey.substring(0, 8)}...`);
@@ -1156,7 +1157,7 @@ protocol.handle('/authorize', async (request) => {
             return {
                 statusCode: 200,
                 headers: { 'content-type': 'application/json' },
-                body: Buffer.from(JSON.stringify(result))
+                body: b4a.from(JSON.stringify(result))
             };
         } else {
             console.error('[RelayServer] Failed to disconnect relay:', result.error);
@@ -1164,7 +1165,7 @@ protocol.handle('/authorize', async (request) => {
             return {
                 statusCode: 404,
                 headers: { 'content-type': 'application/json' },
-                body: Buffer.from(JSON.stringify({ error: result.error }))
+                body: b4a.from(JSON.stringify({ error: result.error }))
             };
         }
     } catch (error) {
@@ -1173,7 +1174,7 @@ protocol.handle('/authorize', async (request) => {
         return {
             statusCode: 500,
             headers: { 'content-type': 'application/json' },
-            body: Buffer.from(JSON.stringify({ error: error.message }))
+            body: b4a.from(JSON.stringify({ error: error.message }))
         };
     }
 });
@@ -1202,7 +1203,7 @@ protocol.handle('/authorize', async (request) => {
           return {
             statusCode: 404,
             headers: { 'content-type': 'application/json' },
-            body: Buffer.from(JSON.stringify({ error: 'Relay not found' }))
+            body: b4a.from(JSON.stringify({ error: 'Relay not found' }))
           };
         }
         console.log(`[RelayServer] Resolved public identifier ${identifier} to relay key ${relayKey.substring(0, 8)}...`);
@@ -1211,7 +1212,7 @@ protocol.handle('/authorize', async (request) => {
       // Parse the message
       let nostrMessage;
       if (message && message.type === 'Buffer' && Array.isArray(message.data)) {
-        const messageStr = Buffer.from(message.data).toString('utf8');
+        const messageStr = b4a.from(message.data).toString('utf8');
         try {
           nostrMessage = JSON.parse(messageStr);
         } catch (parseError) {
@@ -1257,7 +1258,7 @@ protocol.handle('/authorize', async (request) => {
               return {
                 statusCode: 403,
                 headers: { 'content-type': 'application/json' },
-                body: Buffer.from(JSON.stringify([
+                body: b4a.from(JSON.stringify([
                   ['NOTICE', 'Authentication required for read access']
                 ]))
               };
@@ -1271,7 +1272,7 @@ protocol.handle('/authorize', async (request) => {
               return {
                 statusCode: 403,
                 headers: { 'content-type': 'application/json' },
-                body: Buffer.from(JSON.stringify([
+                body: b4a.from(JSON.stringify([
                   ['NOTICE', 'Invalid authentication']
                 ]))
               };
@@ -1294,7 +1295,7 @@ protocol.handle('/authorize', async (request) => {
             return {
               statusCode: 200, // Still 200 because it's a valid NOSTR response
               headers: { 'content-type': 'application/json' },
-              body: Buffer.from(JSON.stringify(okResponse))
+              body: b4a.from(JSON.stringify(okResponse))
             };
           }
           
@@ -1308,7 +1309,7 @@ protocol.handle('/authorize', async (request) => {
             return {
               statusCode: 200,
               headers: { 'content-type': 'application/json' },
-              body: Buffer.from(JSON.stringify(okResponse))
+              body: b4a.from(JSON.stringify(okResponse))
             };
           }
           
@@ -1321,7 +1322,7 @@ protocol.handle('/authorize', async (request) => {
             return {
               statusCode: 200,
               headers: { 'content-type': 'application/json' },
-              body: Buffer.from(JSON.stringify(okResponse))
+              body: b4a.from(JSON.stringify(okResponse))
             };
           }
           
@@ -1335,7 +1336,7 @@ protocol.handle('/authorize', async (request) => {
             return {
               statusCode: 200,
               headers: { 'content-type': 'application/json' },
-              body: Buffer.from(JSON.stringify(okResponse))
+              body: b4a.from(JSON.stringify(okResponse))
             };
           }
           
@@ -1359,7 +1360,7 @@ protocol.handle('/authorize', async (request) => {
             return {
               statusCode: 200,
               headers: { 'content-type': 'application/json' },
-              body: Buffer.from(JSON.stringify(okResponse))
+              body: b4a.from(JSON.stringify(okResponse))
             };
           }
         }
@@ -1386,7 +1387,7 @@ protocol.handle('/authorize', async (request) => {
       return {
         statusCode: 200,
         headers: { 'content-type': 'application/json' },
-        body: Buffer.from(responseBody)
+        body: b4a.from(responseBody)
       };
       
     } catch (error) {
@@ -1398,7 +1399,7 @@ protocol.handle('/authorize', async (request) => {
       return {
         statusCode: 200, // Still 200 for valid NOSTR error response
         headers: { 'content-type': 'application/json' },
-        body: Buffer.from(JSON.stringify([
+        body: b4a.from(JSON.stringify([
           ['NOTICE', `Error: ${error.message}`]
         ]))
       };
@@ -1426,7 +1427,7 @@ protocol.handle('/authorize', async (request) => {
                 return {
                     statusCode: 404,
                     headers: { 'content-type': 'application/json' },
-                    body: Buffer.from(JSON.stringify(['NOTICE', 'Relay not found']))
+                    body: b4a.from(JSON.stringify(['NOTICE', 'Relay not found']))
                 };
             }
             console.log(`[RelayServer] Resolved public identifier ${identifier} to relay key ${relayKey.substring(0, 8)}...`);
@@ -1460,7 +1461,7 @@ protocol.handle('/authorize', async (request) => {
               return {
                 statusCode: 200, // Return 200 for valid NOSTR NOTICE response
                 headers: { 'content-type': 'application/json' },
-                body: Buffer.from(JSON.stringify([
+                body: b4a.from(JSON.stringify([
                   ['NOTICE', 'Authentication required for read access']
                 ]))
               };
@@ -1474,7 +1475,7 @@ protocol.handle('/authorize', async (request) => {
               return {
                 statusCode: 200, // Return 200 for valid NOSTR NOTICE response
                 headers: { 'content-type': 'application/json' },
-                body: Buffer.from(JSON.stringify([
+                body: b4a.from(JSON.stringify([
                   ['NOTICE', 'Invalid authentication']
                 ]))
               };
@@ -1496,7 +1497,7 @@ protocol.handle('/authorize', async (request) => {
             return {
                 statusCode: 500,
                 headers: { 'content-type': 'application/json' },
-                body: Buffer.from(JSON.stringify(['NOTICE', 'Internal server error: Invalid response format']))
+                body: b4a.from(JSON.stringify(['NOTICE', 'Internal server error: Invalid response format']))
             };
         }
   
@@ -1517,7 +1518,7 @@ protocol.handle('/authorize', async (request) => {
         return {
             statusCode: 200,
             headers: { 'content-type': 'application/json' },
-            body: Buffer.from(JSON.stringify(events))
+            body: b4a.from(JSON.stringify(events))
         };
         
     } catch (error) {
@@ -1526,7 +1527,7 @@ protocol.handle('/authorize', async (request) => {
         return {
             statusCode: 500,
             headers: { 'content-type': 'application/json' },
-            body: Buffer.from(JSON.stringify(['NOTICE', `Error: ${error.message}`]))
+            body: b4a.from(JSON.stringify(['NOTICE', `Error: ${error.message}`]))
         };
     }
 });
@@ -1543,7 +1544,7 @@ protocol.handle('/authorize', async (request) => {
     return {
       statusCode: 200,
       headers: { 'content-type': 'application/json' },
-      body: Buffer.from(JSON.stringify({ 
+      body: b4a.from(JSON.stringify({ 
         status: 'acknowledged',
         timestamp: new Date().toISOString()
       }))
@@ -1787,7 +1788,7 @@ async function registerWithGateway(relayProfileInfo = null) {
           method: 'POST',
           headers: {
               'Content-Type': 'application/json',
-              'Content-Length': Buffer.byteLength(postData)
+              'Content-Length': b4a.byteLength(postData)
           },
           rejectUnauthorized: false // For self-signed certs
       };
@@ -2014,7 +2015,7 @@ export async function startJoinAuthentication(options) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Content-Length': Buffer.byteLength(postData)
+        'Content-Length': b4a.byteLength(postData)
       },
       rejectUnauthorized: false // For self-signed certs in dev
     };
@@ -2071,14 +2072,14 @@ export async function startJoinAuthentication(options) {
       '02' + relayPubkey, // Add compression prefix for noble-secp256k1
       true
     );
-    const keyBuffer = Buffer.from(sharedSecret.slice(1, 33)); // Derive 32-byte key
+    const keyBuffer = b4a.from(sharedSecret.slice(1, 33)); // Derive 32-byte key
     console.log(`[RelayServer] Shared key computed: ${keyBuffer.toString('hex').substring(0, 8)}...`);
 
     // Encrypt the challenge using AES-256-CBC
     const iv = crypto.randomBytes(16);
     const encrypted = nobleSecp256k1.aes.encrypt(challenge, keyBuffer, iv);
-    const ciphertext = Buffer.from(encrypted).toString('base64');
-    const ivBase64 = Buffer.from(iv).toString('base64');
+    const ciphertext = b4a.from(encrypted).toString('base64');
+    const ivBase64 = b4a.from(iv).toString('base64');
     console.log('[RelayServer] Challenge encrypted.');
 
     // Send the encrypted challenge to the verification URL
@@ -2096,7 +2097,7 @@ export async function startJoinAuthentication(options) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Content-Length': Buffer.byteLength(verifyPostData)
+        'Content-Length': b4a.byteLength(verifyPostData)
       },
       rejectUnauthorized: false // For self-signed certs in dev
     };
@@ -2151,7 +2152,7 @@ export async function startJoinAuthentication(options) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Content-Length': Buffer.byteLength(finalPostData)
+        'Content-Length': b4a.byteLength(finalPostData)
       },
       rejectUnauthorized: false // For self-signed certs in dev
     };

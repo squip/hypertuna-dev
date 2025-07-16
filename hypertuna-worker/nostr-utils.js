@@ -6,6 +6,7 @@
 
 // Import from local module if available, otherwise try window object
 import { nobleSecp256k1 } from './crypto-libraries.js';
+import b4a from 'b4a';
 
 export class NostrUtils {
     /**
@@ -91,7 +92,7 @@ export class NostrUtils {
         
         // Generate the event ID (sha256 returns Uint8Array)
         const hashBytes = await secp.utils.sha256(
-            Buffer.from(eventData, 'utf8')
+            b4a.from(eventData, 'utf8')
         );
         event.id = this.bytesToHex(hashBytes);
         
@@ -126,7 +127,7 @@ export class NostrUtils {
             ]);
             
             const hashBytes = await secp.utils.sha256(
-                Buffer.from(eventData, 'utf8')
+                b4a.from(eventData, 'utf8')
             );
             const id = this.bytesToHex(hashBytes);
             
