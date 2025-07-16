@@ -177,8 +177,8 @@ export class ChallengeManager {
         true
       );
       
-      // Use the same key derivation as the demo - slice from index 1 to 33
-      const keyBuffer = b4a.from(sharedSecret.slice(1, 33));
+      // Use the full shared secret as the AES key
+      const keyBuffer = b4a.from(sharedSecret);
       
       console.log(`[ChallengeManager] Shared key: ${keyBuffer.toString('hex').substring(0, 16)}...`);
       
