@@ -2417,13 +2417,17 @@ async fetchMultipleProfiles(pubkeys) {
 
     /**
      * Update user relay list with authentication token
+     * @param {string} publicIdentifier - Relay public identifier
+     * @param {string} authenticatedUrl - Full relay URL including auth token
+     * @param {string} authToken - Authentication token
+     * @param {boolean|null} [isPublicOverride] - Optional override for relay publicity
      * @private
      */
-    async updateUserRelayListWithAuth(publicIdentifier, authenticatedUrl, authToken) {
+    async updateUserRelayListWithAuth(publicIdentifier, authenticatedUrl, authToken, isPublicOverride = null) {
         // Get group metadata
         const group = this.groups.get(publicIdentifier);
         const groupName = group?.name || '';
-        const isPublic = group?.isPublic || false;
+        const isPublic = isPublicOverride !== null ? isPublicOverride : (group?.isPublic || false);
         
         // The authenticatedUrl is passed in directly from the worker's response,
         // which already includes the token.
