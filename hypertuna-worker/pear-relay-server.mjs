@@ -2070,12 +2070,14 @@ export async function startJoinAuthentication(options) {
 
     // Compute the shared secret using ECDH
     console.log('[RelayServer] Computing shared secret for ECDH...');
-    const sharedSecret = await nobleSecp256k1.getSharedSecret(
+    let sharedSecret = await nobleSecp256k1.getSharedSecret(
       userNsec,
       '02' + relayPubkey, // Add compression prefix for noble-secp256k1
       true
     );
-    // Use the full shared secret as the AES key
+    // noble-secp256k1 may return a 33 byte buffer with a leading 0x00.
+    // Trim it so both sides derive the same 32 byte AES key.
+    if (sharedSecret.length === 33) sharedSecret = sharedSecret.slice(1);
     const keyBuffer = b4a.from(sharedSecret);
     console.log(`[RelayServer] Shared key computed: ${keyBuffer.toString('hex').substring(0, 8)}...`);
 
