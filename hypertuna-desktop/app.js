@@ -20,6 +20,7 @@ let healthState = null
 let gatewayRegistered = false
 let relayCreateResolvers = []
 let initializedRelays = new Set() // Track which relays are ready
+let relayJoinResolvers = new Map();
 
 // Store worker messages that may arrive before AppIntegration sets up handlers
 let pendingRelayMessages = {
