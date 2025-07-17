@@ -205,18 +205,18 @@ async function addAuthInfoToRelays(relays) {
 global.workerPipe = workerPipe
 global.sendMessage = sendMessage
 
+// Track if the desktop app has already sent us configuration
+let configReceived = false
+let parentConfig = null
+
 if (workerPipe) {
   console.log('[Worker] Connected to parent via pipe')
-  
+
   // Test the pipe immediately
-  sendMessage({ 
-    type: 'status', 
-    message: 'Relay worker starting...' 
+  sendMessage({
+    type: 'status',
+    message: 'Relay worker starting...'
   })
-  
-  // Set up a flag to track config receipt
-  let configReceived = false;
-  let parentConfig = null;
   
   // Handle messages from parent
   let buffer = ''
@@ -545,42 +545,48 @@ async function main() {
       config = await loadOrCreateConfig()
       
       // Wait for config from parent if available
-      if (workerPipe) {
-        console.log('[Worker] Waiting for parent config...');
-        
-        const parentConfig = await new Promise((resolve) => {
-            const timeout = setTimeout(() => {
-            console.log('[Worker] Config timeout - using default config');
-            resolve(null);
-            }, 3000);
-            
-            // Temporary listener for config
-            const handleData = (data) => {
+      let parentConfigData = null
+
+      if (configReceived && parentConfig) {
+        console.log('[Worker] Using previously received config from parent')
+        parentConfigData = parentConfig
+      } else if (workerPipe) {
+        console.log('[Worker] Waiting for parent config...')
+
+        parentConfigData = await new Promise((resolve) => {
+          const timeout = setTimeout(() => {
+            console.log('[Worker] Config timeout - using default config')
+            resolve(null)
+          }, 3000)
+
+          // Temporary listener for config
+          const handleData = (data) => {
             try {
-                const lines = data.toString().split('\n');
-                for (const line of lines) {
+              const lines = data.toString().split('\n')
+              for (const line of lines) {
                 if (line.trim()) {
-                    const message = JSON.parse(line);
-                    if (message.type === 'config' && message.data) {
-                        console.log('[Worker] Received config from parent');
-                        clearTimeout(timeout);
-                        workerPipe.off('data', handleData); // Remove this listener
-                        resolve(message.data);
-                        return;
-                    }
+                  const message = JSON.parse(line)
+                  if (message.type === 'config' && message.data) {
+                    console.log('[Worker] Received config from parent')
+                    clearTimeout(timeout)
+                    workerPipe.off('data', handleData) // Remove this listener
+                    resolve(message.data)
+                    return
+                  }
                 }
+              }
+            } catch (err) {
+              console.error('[Worker] Error parsing config message:', err)
             }
-          } catch (err) {
-            console.error('[Worker] Error parsing config message:', err);
           }
-        };
-        
-        workerPipe.on('data', handleData);
-      });
-      
-      if (parentConfig) {
+
+          workerPipe.on('data', handleData)
+        })
+      }
+
+      if (parentConfigData) {
         // Get user key from parent config
-        const userKey = getUserKey(parentConfig);
+        const userKey = getUserKey(parentConfigData);
         console.log('[Worker] User key:', userKey);
         
         // Create user-specific storage path in worker's directory
@@ -593,7 +599,7 @@ async function main() {
         // Merge parent config with loaded config
         config = {
           ...config,
-          ...parentConfig,
+          ...parentConfigData,
           storage: userSpecificStorage,  // Use user-specific path in worker's storage
           userKey: userKey  // Store for reference
         };
