@@ -980,7 +980,8 @@ function setupProtocolHandlers(protocol) {
         headers: { 'content-type': 'application/json' },
         body: b4a.from(JSON.stringify({
           success: true,
-          relayKey: identifier,
+          relayKey: internalRelayKey,
+          publicIdentifier: identifier,
           authToken: token,
           relayUrl: relayUrl
         }))
@@ -2198,28 +2199,39 @@ export async function startJoinAuthentication(options) {
     console.log('[RelayServer] Received final response from gateway:', finalResponse);
     console.log(`[RelayServer] Final authToken: ${finalResponse.authToken ? finalResponse.authToken.substring(0, 16) : 'none'}`);
 
-    const { authToken, relayUrl } = finalResponse;
-    if (!authToken || !relayUrl) {
-      throw new Error('Final response from gateway missing authToken or relayUrl');
+    const { authToken, relayUrl, relayKey, publicIdentifier: returnedIdentifier } = finalResponse;
+    const finalIdentifier = returnedIdentifier || publicIdentifier;
+    if (!authToken || !relayUrl || !relayKey) {
+      throw new Error('Final response from gateway missing authToken, relayKey, or relayUrl');
+    }
+
+    // Join the relay locally so we have a profile and key mapping
+    await joinRelayManager({ relayKey, config });
+
+    // Ensure the joined relay profile has the public identifier recorded
+    let joinedProfile = await getRelayProfileByKey(relayKey);
+    if (joinedProfile && !joinedProfile.public_identifier) {
+      joinedProfile.public_identifier = finalIdentifier;
+      await saveRelayProfile(joinedProfile);
     }
 
     // Persist the auth token and subnet hash to the local relay profile
     console.log(`[RelayServer] Persisting auth token for ${userPubkey.substring(0, 8)}...`);
-    await updateRelayAuthToken(publicIdentifier, userPubkey, authToken, [requesterSubnetHash]);
+    await updateRelayAuthToken(relayKey, userPubkey, authToken, [requesterSubnetHash]);
 
     // Publish kind 9000 event to announce the new member
     console.log('[RelayServer] Publishing kind 9000 member add event...');
-    await publishMemberAddEvent(publicIdentifier, userPubkey, authToken, [requesterSubnetHash]);
+    await publishMemberAddEvent(finalIdentifier, userPubkey, authToken, [requesterSubnetHash]);
 
     // Notify the desktop UI of success
     if (global.sendMessage) {
       global.sendMessage({
         type: 'join-auth-success',
-        data: { publicIdentifier, authToken, relayUrl }
+        data: { publicIdentifier: finalIdentifier, relayKey, authToken, relayUrl }
       });
     }
 
-    console.log(`[RelayServer] Join flow for ${publicIdentifier} completed successfully.`);
+    console.log(`[RelayServer] Join flow for ${finalIdentifier} completed successfully.`);
 
   } catch (error) {
     console.error(`[RelayServer] Error during join authentication for ${publicIdentifier}:`, error);
