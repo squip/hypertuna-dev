@@ -75,22 +75,27 @@ function getUserKey(config) {
 async function loadOrCreateConfig() {
   const configDir = Pear.config.storage || __dirname
   await fs.mkdir(configDir, { recursive: true })
-  
+
   const configPath = join(configDir, 'relay-config.json')
-  
+
+  const defaultConfig = {
+    port: 1945,
+    gatewayUrl: 'https://hypertuna.com',
+    proxy_server_address: 'hypertuna.com',
+    registerWithGateway: true,
+    registerInterval: 300000,
+    relays: []
+  }
+
   try {
-    // Try to load existing config
     const configData = await fs.readFile(configPath, 'utf8')
     console.log('[Worker] Loaded existing config from:', configPath)
     return JSON.parse(configData)
   } catch (err) {
-    // Create new config
     console.log('[Worker] Creating new config at:', configPath)
-    // const config = generateDefaultConfig()
-    // Add storage path from Pear
-    // config.storage = configDir
-    // await fs.writeFile(configPath, JSON.stringify(config, null, 2))
-    // return config
+    defaultConfig.storage = configDir
+    await fs.writeFile(configPath, JSON.stringify(defaultConfig, null, 2))
+    return defaultConfig
   }
 }
 
