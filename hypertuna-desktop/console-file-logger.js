@@ -1,19 +1,33 @@
 import { promises as fs } from 'fs'
-import { join } from 'path'
+import { join, basename } from 'path'
 
 // Determine storage directory
 const storageDir = (typeof Pear !== 'undefined' && Pear.config && Pear.config.storage) ? Pear.config.storage : '.'
 const logFilePath = join(storageDir, 'desktop-console.log')
+
+function getCallingScript() {
+  const err = new Error()
+  const stack = err.stack ? err.stack.split('\n') : []
+  for (const line of stack) {
+    if (line.includes('console-file-logger')) continue
+    const match = line.match(/(?:\(|@)([^:\)]+\.js)/)
+    if (match) {
+      return basename(match[1])
+    }
+  }
+  return 'unknown'
+}
 
 function writeLog(level, args) {
   const message = args.map(arg => {
     try {
       return typeof arg === 'string' ? arg : JSON.stringify(arg)
     } catch {
-      return '[Unserializable]' 
+      return '[Unserializable]'
     }
   }).join(' ')
-  const line = `[${new Date().toISOString()}] [${level.toUpperCase()}] ${message}\n`
+  const script = getCallingScript()
+  const line = `[${new Date().toISOString()}] [${level.toUpperCase()}] [${script}] ${message}\n`
   fs.appendFile(logFilePath, line).catch(() => {})
 }
 
