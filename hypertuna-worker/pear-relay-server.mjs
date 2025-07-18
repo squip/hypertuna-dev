@@ -1647,6 +1647,22 @@ async function publishEventToRelay(identifier, event) {
   }
 }
 
+// Wait for a relay to become writable before attempting writes
+async function waitForRelayWritable(relayKey, timeout = 10000) {
+  const { activeRelays } = await import('./hypertuna-relay-manager-adapter.mjs');
+  const relayManager = activeRelays.get(relayKey);
+  if (!relayManager) return;
+
+  const start = Date.now();
+  while (!relayManager.relay?.writable) {
+    if (Date.now() - start > timeout) {
+      console.warn(`[RelayServer] Timeout waiting for relay ${relayKey} to become writable`);
+      break;
+    }
+    await new Promise(res => setTimeout(res, 200));
+  }
+}
+
 // Update health state
 async function updateHealthState() {
   const now = Date.now();
@@ -2218,6 +2234,9 @@ export async function startJoinAuthentication(options) {
     // Persist the auth token and subnet hash to the local relay profile
     console.log(`[RelayServer] Persisting auth token for ${userPubkey.substring(0, 8)}...`);
     await updateRelayAuthToken(relayKey, userPubkey, authToken, [requesterSubnetHash]);
+
+    // Wait for the relay to become writable before announcing membership
+    await waitForRelayWritable(relayKey);
 
     // Publish kind 9000 event to announce the new member
     console.log('[RelayServer] Publishing kind 9000 member add event...');
