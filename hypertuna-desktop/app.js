@@ -566,6 +566,23 @@ function handleWorkerMessage(message) {
       }
       break;
 
+    case 'members-updated':
+      // Relay membership list was updated in the worker
+      if (message.relayKey) {
+        addLog(`Members updated for ${message.relayKey}`, 'status');
+      } else {
+        addLog('Members updated', 'status');
+      }
+
+      // Refresh relay info so UI reflects latest members
+      fetchRelays();
+
+      // If currently viewing a group, refresh the member list
+      if (window.App && typeof window.App.loadGroupMembers === 'function') {
+        window.App.loadGroupMembers();
+      }
+      break;
+
     case 'health-update':
       updateHealthStatus(message.healthState)
       break
