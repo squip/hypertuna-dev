@@ -759,7 +759,7 @@ app.post('/register', async (req, res) => {
     setTimeout(async () => {
       try {
         // Check if we already have a connection from the peer
-        const existingConnection = connectedPeers.get(publicKey);
+        const existingConnection = connectionPool.connections.get(publicKey);
         if (existingConnection && existingConnection.protocol) {
           console.log(`[${new Date().toISOString()}] Peer already connected via incoming connection`);
           peer.status = 'connected';
