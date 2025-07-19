@@ -908,7 +908,7 @@ function setupProtocolHandlers(protocol) {
         }
       }
       
-      if (!pubkey || !token || !identifier || !subnetHash) {
+      if (!pubkey || !token || !identifier) {
         // This check should ideally happen earlier, but for now, it's fine here.
         // The `internalRelayKey` might still be the `identifier` if resolution failed.
         console.error(`[RelayServer] Missing required fields for finalization`);
@@ -922,7 +922,9 @@ function setupProtocolHandlers(protocol) {
       
       console.log(`[RelayServer] Finalizing for pubkey: ${pubkey.substring(0, 8)}...`);
       console.log(`[RelayServer] Identifier: ${identifier}`);
-      console.log(`[RelayServer] Subnet hash: ${subnetHash.substring(0, 8)}...`);
+      if (subnetHash) {
+        console.log(`[RelayServer] Subnet hash: ${subnetHash.substring(0, 8)}...`);
+      }
       
       // Get auth store
       const authStore = getRelayAuthStore();
@@ -1035,7 +1037,7 @@ protocol.handle('/authorize', async (request) => {
     
     if (relayKey) {
       // Check specific relay
-      const auth = authStore.verifyAuth(relayKey, token, subnetHash);
+      const auth = authStore.verifyAuth(relayKey, token);
       if (auth) {
         foundAuth = auth;
         foundRelay = relayKey;
@@ -1188,11 +1190,10 @@ protocol.handle('/authorize', async (request) => {
     console.log(`[RelayServer] Relay message for identifier: ${identifier}, connectionKey: ${connectionKey}`);
     
     try {
-      // Extract auth token and subnet hash from request headers
+      // Extract auth token from request headers
       const authToken = request.headers['x-auth-token'];
-      const subnetHash = request.headers['x-subnet-hash'];
-      
-      console.log(`[RelayServer] Auth token present: ${!!authToken}, Subnet hash present: ${!!subnetHash}`);
+
+      console.log(`[RelayServer] Auth token present: ${!!authToken}`);
       
       // Check if identifier is a public identifier or relay key
       let relayKey = identifier;
@@ -1266,7 +1267,7 @@ protocol.handle('/authorize', async (request) => {
             }
 
             // Verify auth for REQ
-            const auth = authStore.verifyAuth(relayKey, authToken, subnetHash);
+            const auth = authStore.verifyAuth(relayKey, authToken);
             if (!auth) {
               console.warn(`[RelayServer] Invalid auth for REQ`);
               updateMetrics(false);
@@ -1301,7 +1302,7 @@ protocol.handle('/authorize', async (request) => {
           }
           
           // Verify the auth
-          const auth = authStore.verifyAuth(relayKey, authToken, subnetHash);
+          const auth = authStore.verifyAuth(relayKey, authToken);
           if (!auth) {
             console.warn(`[RelayServer] Invalid auth token`);
             updateMetrics(false);
@@ -1410,9 +1411,8 @@ protocol.handle('/authorize', async (request) => {
   // Handle relay subscriptions (from gateway)
   protocol.handle('/get/relay/:identifier/:connectionKey', async (request) => {
     const identifier = request.params.identifier;
-    // Extract auth token and subnet hash from request headers
+    // Extract auth token from request headers
     const authToken = request.headers['x-auth-token'];
-    const subnetHash = request.headers['x-subnet-hash'];
     const connectionKey = request.params.connectionKey;
     
     console.log(`[RelayServer] Checking subscriptions for identifier: ${identifier}, connectionKey: ${connectionKey}`);
@@ -1469,7 +1469,7 @@ protocol.handle('/authorize', async (request) => {
             }
 
             // Verify auth
-            const auth = authStore.verifyAuth(relayKey, authToken, subnetHash);
+            const auth = authStore.verifyAuth(relayKey, authToken);
             if (!auth) {
               console.warn(`[RelayServer] Invalid auth for read access`);
               updateMetrics(false);
