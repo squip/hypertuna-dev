@@ -424,7 +424,7 @@ export default class NostrRelay extends Autobee {
     logWithTimestamp(`queryEvents: Starting query with filter:`, JSON.stringify(filter, null, 2));
     logWithTimestamp(`queryEvents: Last returned event timestamp:`, last_returned_event_timestamp);
     const queries = this.constructQueries(filter, last_returned_event_timestamp);
-    logWithTimestamp(`queryEvents: Constructed queries:`, JSON.stringify(queries, null, 2));
+    logWithTimestamp(`queryEvents: Constructed query groups:`, JSON.stringify(queries, null, 2));
     
     const results = await this.executeQueries(queries);
     logWithTimestamp(`queryEvents: Raw query results count:`, results.length);
@@ -438,59 +438,80 @@ export default class NostrRelay extends Autobee {
   }
   
   constructQueries(filter, last_returned_event_timestamp) {
-    logWithTimestamp(`constructQueries: Constructing queries for filter:`, JSON.stringify(filter, null, 2));
-    logWithTimestamp(`constructQueries: Using timestamp:`, last_returned_event_timestamp ? 
-        `last_returned_event_timestamp: ${last_returned_event_timestamp}` : 
-        `filter.since: ${filter.since || 0}`);
-    
-    const queries = [];
-  
+    logWithTimestamp(
+      `constructQueries: Constructing queries for filter:`,
+      JSON.stringify(filter, null, 2)
+    );
+    logWithTimestamp(
+      `constructQueries: Using timestamp:`,
+      last_returned_event_timestamp
+        ? `last_returned_event_timestamp: ${last_returned_event_timestamp}`
+        : `filter.since: ${filter.since || 0}`
+    );
+
+    const groups = [];
+
     // Determine time range parameters - prioritize last_returned_event_timestamp over filter.since
-    const since = last_returned_event_timestamp ? 
-                 last_returned_event_timestamp + 1 : // Add 1 to exclude previously returned events
-                 (filter.since || 0);
+    const since = last_returned_event_timestamp
+      ? last_returned_event_timestamp + 1 // Add 1 to exclude previously returned events
+      : filter.since || 0;
     const until = filter.until || 9999999999;
-    
-    logWithTimestamp(`constructQueries: Using time range - since: ${since}, until: ${until}`);
-  
+
+    logWithTimestamp(
+      `constructQueries: Using time range - since: ${since}, until: ${until}`
+    );
+
     // Case 1: Only time-based query (no other filters)
-    if ((!filter.kinds || filter.kinds.length === 0) && 
-        (!filter.authors || filter.authors.length === 0) && 
-        !this.hasTagFilters(filter)) {
-        const query = this.constructor.constructTimeRangeQuery(since, until);
-        logWithTimestamp(`constructQueries: Constructed time-based query:`, query);
-        queries.push(query);
-        return queries;
+    if (
+      (!filter.kinds || filter.kinds.length === 0) &&
+      (!filter.authors || filter.authors.length === 0) &&
+      !this.hasTagFilters(filter)
+    ) {
+      const query = this.constructor.constructTimeRangeQuery(since, until);
+      logWithTimestamp(`constructQueries: Constructed time-based query:`, query);
+      groups.push([query]);
+      return groups;
     }
-  
-    // Case 2: Kinds-based queries
+
+    // Case 2: Kinds-based queries (union within kinds)
     if (filter.kinds && filter.kinds.length > 0) {
-        for (const kind of filter.kinds) {
-            const query = this.constructor.constructKindRangeQuery(kind, since, until);
-            logWithTimestamp(`constructQueries: Constructed kind query for ${kind}:`, query);
-            queries.push(query);
-        }
+      const kindGroup = [];
+      for (const kind of filter.kinds) {
+        const query = this.constructor.constructKindRangeQuery(kind, since, until);
+        logWithTimestamp(`constructQueries: Constructed kind query for ${kind}:`, query);
+        kindGroup.push(query);
+      }
+      groups.push(kindGroup);
     }
-  
-    // Case 3: Authors-based queries
+
+    // Case 3: Authors-based queries (union within authors)
     if (filter.authors && filter.authors.length > 0) {
-        for (const author of filter.authors) {
-            const query = this.constructor.constructAuthorRangeQuery(author, since, until);
-            logWithTimestamp(`constructQueries: Constructed author query for ${author}:`, query);
-            queries.push(query);
-        }
+      const authorGroup = [];
+      for (const author of filter.authors) {
+        const query = this.constructor.constructAuthorRangeQuery(author, since, until);
+        logWithTimestamp(
+          `constructQueries: Constructed author query for ${author}:`,
+          query
+        );
+        authorGroup.push(query);
+      }
+      groups.push(authorGroup);
     }
-  
-    // Case 4: Tag-based queries
-    const tagQueries = this.constructTagQueries(filter, since, until);
-    if (tagQueries.length > 0) {
-        logWithTimestamp(`constructQueries: Adding ${tagQueries.length} tag-based queries`);
-        queries.push(...tagQueries);
+
+    // Case 4: Tag-based queries (union within each tag key)
+    const tagGroups = this.constructTagQueries(filter, since, until);
+    if (tagGroups.length > 0) {
+      logWithTimestamp(
+        `constructQueries: Adding ${tagGroups.length} tag-based query groups`
+      );
+      groups.push(...tagGroups);
     }
-  
-    logWithTimestamp(`constructQueries: Constructed ${queries.length} total queries`);
-    return queries;
-}
+
+    logWithTimestamp(
+      `constructQueries: Constructed ${groups.length} query groups`
+    );
+    return groups;
+  }
   
   // Helper method to check if filter has tag-based filters
   hasTagFilters(filter) {
@@ -519,22 +540,34 @@ export default class NostrRelay extends Autobee {
   }
   
   constructTagQueries(filter, since, until) {
-    const queries = [];
-    
+    const tagGroups = [];
+
     for (const [key, values] of Object.entries(filter)) {
-        if (key.startsWith('#') && key.length === 2) {
-            const tagName = key.slice(1);
-            for (const tagValue of values) {
-                const query = this.constructor.constructTagRangeQuery(tagName, tagValue, since, until);
-                logWithTimestamp(`constructTagQueries: Constructed query for tag ${tagName}=${tagValue}:`, query);
-                queries.push(query);
-            }
+      if (key.startsWith('#') && key.length === 2) {
+        const group = [];
+        const tagName = key.slice(1);
+        for (const tagValue of values) {
+          const query = this.constructor.constructTagRangeQuery(
+            tagName,
+            tagValue,
+            since,
+            until
+          );
+          logWithTimestamp(
+            `constructTagQueries: Constructed query for tag ${tagName}=${tagValue}:`,
+            query
+          );
+          group.push(query);
         }
+        tagGroups.push(group);
+      }
     }
-    
-    logWithTimestamp(`constructTagQueries: Constructed ${queries.length} tag queries`);
-    return queries;
-}
+
+    logWithTimestamp(
+      `constructTagQueries: Constructed ${tagGroups.reduce((a, g) => a + g.length, 0)} tag queries in ${tagGroups.length} groups`
+    );
+    return tagGroups;
+  }
 
   static constructTagRangeQuery(tagName, tagValue, since, until) {
     const gte = b4a.from(
@@ -549,94 +582,91 @@ export default class NostrRelay extends Autobee {
   }
 
 
-async executeQueries(queries) {
-    logWithTimestamp(`executeQueries: Starting execution of ${queries.length} queries`);
-    
-    if (!queries || queries.length === 0) {
+async executeQueries(queryGroups) {
+    logWithTimestamp(`executeQueries: Starting execution of ${queryGroups.length} query groups`);
+
+    if (!queryGroups || queryGroups.length === 0) {
         logWithTimestamp('executeQueries: No queries to execute');
         return [];
     }
-    
-    const queryResultIds = [];
-    
+
+    const groupResultSets = [];
+
     try {
-        for (let i = 0; i < queries.length; i++) {
-            const query = queries[i];
-            logWithTimestamp(`executeQueries: Processing query ${i + 1}/${queries.length}`);
-            
-            const currentQueryIds = new Set();
-            for await (const entry of this.view.createReadStream(query)) {
-                if (!entry || !entry.value) continue;
-                
-                // The value should be the direct event ID
-                const eventId = entry.value;
-                currentQueryIds.add(eventId);
-                logWithTimestamp(`executeQueries: Found ID: ${eventId}`);
+        for (let i = 0; i < queryGroups.length; i++) {
+            const group = queryGroups[i];
+            logWithTimestamp(`executeQueries: Processing group ${i + 1}/${queryGroups.length}`);
+
+            const unionIds = new Set();
+            for (let j = 0; j < group.length; j++) {
+                const query = group[j];
+                logWithTimestamp(`executeQueries:  Query ${j + 1}/${group.length} in group ${i + 1}`);
+                for await (const entry of this.view.createReadStream(query)) {
+                    if (!entry || !entry.value) continue;
+                    const eventId = entry.value; // direct event ID
+                    unionIds.add(eventId);
+                }
             }
-            
-            queryResultIds.push(Array.from(currentQueryIds));
-            logWithTimestamp(`executeQueries: Query ${i + 1} returned ${currentQueryIds.size} unique IDs`);
+            logWithTimestamp(`executeQueries: Group ${i + 1} produced ${unionIds.size} unique IDs`);
+            groupResultSets.push(unionIds);
         }
-        
-        const commonIds = this.findCommonIds(queryResultIds);
-        logWithTimestamp(`executeQueries: Found ${commonIds.size} common IDs across all queries`);
-        
+
+        const commonIds = this.findCommonIds(groupResultSets);
+        logWithTimestamp(`executeQueries: Found ${commonIds.size} common IDs across all groups`);
+
         const results = [];
         for (const id of commonIds) {
             try {
                 const event = await this.getEvent(id);
                 if (event) {
                     results.push(event);
-                    logWithTimestamp(`executeQueries: Retrieved event for ID ${id}`);
                 }
             } catch (error) {
                 logWithTimestamp(`executeQueries: Error fetching event for ID ${id}:`, error.message);
             }
         }
-        
+
         logWithTimestamp(`executeQueries: Successfully retrieved ${results.length} full events`);
         return results;
-        
+
     } catch (error) {
         logWithTimestamp('executeQueries: Error during query execution:', error.message);
         throw error;
     }
 }
 
-findCommonIds(queryResults) {
-    logWithTimestamp(`findCommonIds: Starting to process ${queryResults.length} query results`);
-    
-    if (!queryResults || !queryResults.length) {
-        logWithTimestamp('findCommonIds: No query results to process');
+findCommonIds(resultSets) {
+    logWithTimestamp(`findCommonIds: Starting to process ${resultSets.length} result sets`);
+
+    if (!resultSets || resultSets.length === 0) {
+        logWithTimestamp('findCommonIds: No result sets to process');
         return new Set();
     }
-    
-    logWithTimestamp(`findCommonIds: Initial result set size: ${queryResults[0].length}`);
-    const commonIds = new Set(queryResults[0]);
-    
-    if (!commonIds.size) {
+
+    const commonIds = new Set(resultSets[0]);
+    if (commonIds.size === 0) {
         logWithTimestamp('findCommonIds: No IDs in first result set');
         return commonIds;
     }
-    
-    for (let i = 1; i < queryResults.length; i++) {
+
+    for (let i = 1; i < resultSets.length; i++) {
         if (commonIds.size === 0) {
             logWithTimestamp('findCommonIds: No common IDs remain, exiting early');
             return commonIds;
         }
-        
-        const currentSet = new Set(queryResults[i]);
+
+        const currentSet = resultSets[i];
         logWithTimestamp(`findCommonIds: Processing result set ${i + 1}, size: ${currentSet.size}`);
-        
-        const initialCommonSize = commonIds.size;
-        for (const id of commonIds) {
+
+        const initialSize = commonIds.size;
+        for (const id of Array.from(commonIds)) {
             if (!currentSet.has(id)) {
                 commonIds.delete(id);
             }
         }
-        logWithTimestamp(`findCommonIds: After intersection with set ${i + 1}: reduced from ${initialCommonSize} to ${commonIds.size} common IDs`);
+        logWithTimestamp(`findCommonIds: After intersection with set ${i + 1}: reduced from ${initialSize} to ${commonIds.size} common IDs`);
     }
-    
+
     logWithTimestamp(`findCommonIds: Final common ID count: ${commonIds.size}`);
     return commonIds;
 }
