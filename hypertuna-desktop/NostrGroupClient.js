@@ -1760,8 +1760,8 @@ async fetchMultipleProfiles(pubkeys) {
                 addMap.set(pubkey, { ts: event.created_at, roles: actualRoles });
                 this.relevantPubkeys.add(pubkey);
 
-                // If token and subnetHash are present, send to worker for auth data update
-                if (token && subnetHash && window.workerPipe) {
+                // If token is present, send to worker for auth data update
+                if (token && window.workerPipe) {
                     const relayKey = this.publicToInternalMap.get(groupId) || null;
                     const msg = {
                         type: 'update-auth-data',
