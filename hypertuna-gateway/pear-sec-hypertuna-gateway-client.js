@@ -2,7 +2,7 @@
 const Hyperswarm = require('hyperswarm');
 const crypto = require('hypercore-crypto');
 const c = require('compact-encoding');
-const RelayProtocol = require('./pear-hypertuna-gateway-protocol.js');
+const RelayProtocol = require('./pear-sec-hypertuna-gateway-protocol.js');
 
 class HyperswarmConnection {
   constructor(publicKey, swarm, pool) {
