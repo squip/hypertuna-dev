@@ -7,6 +7,22 @@ import { join, dirname } from 'bare-path';
 // Constants
 const RELAY_PROFILES_FILE = 'relay-profiles.json';
 
+// Serializes write operations to avoid concurrent file corruption
+let writeQueue = Promise.resolve();
+
+async function writeQueued(filePath, data) {
+    writeQueue = writeQueue
+        .then(async () => {
+            const tmpPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
+            await fs.writeFile(tmpPath, data);
+            await fs.rename(tmpPath, filePath);
+        })
+        .catch(error => {
+            console.error(`[ProfileManager] Error writing ${filePath}:`, error);
+        });
+    return writeQueue;
+}
+
 // Get storage directory from Pear config or use default
 function getStorageDir(userKey = null) {
     const baseDir = global.Pear?.config.storage || './data';
@@ -45,7 +61,7 @@ export async function initRelayProfilesStorage(userKey = null) {
             // File exists, no need to create
         } catch {
             // File doesn't exist, create it with an empty array
-            await fs.writeFile(profilesPath, JSON.stringify({ relays: [] }, null, 2));
+            await writeQueued(profilesPath, JSON.stringify({ relays: [] }, null, 2));
             console.log(`[ProfileManager] Created relay profiles storage file at ${profilesPath}`);
         }
     } catch (error) {
@@ -140,7 +156,7 @@ export async function saveRelayProfile(relayProfile) {
         // Write updated profiles back to file
         const profilesPath = getRelayProfilesPath();
         console.log(`[ProfileManager] Writing ${profiles.length} profiles to ${profilesPath}`);
-        await fs.writeFile(profilesPath, JSON.stringify({ relays: profiles }, null, 2));
+        await writeQueued(profilesPath, JSON.stringify({ relays: profiles }, null, 2));
         console.log(`[ProfileManager] Successfully saved relay profile for ${relayProfile.relay_key}`);
         
         return true;
@@ -166,7 +182,7 @@ export async function removeRelayProfile(relayKey) {
         
         // Write updated profiles back to file
         const profilesPath = getRelayProfilesPath();
-        await fs.writeFile(profilesPath, JSON.stringify({ relays: newProfiles }, null, 2));
+        await writeQueued(profilesPath, JSON.stringify({ relays: newProfiles }, null, 2));
         
         return true;
     } catch (error) {
