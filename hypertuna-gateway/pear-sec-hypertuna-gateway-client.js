@@ -308,6 +308,7 @@ class EnhancedHyperswarmPool {
     this.initialized = false;
     this.swarmKeyPair = null;
     this.topicDiscovery = null;
+    this.peerDiscoveries = new Map();
   }
   
   async initialize() {
@@ -365,6 +366,24 @@ class EnhancedHyperswarmPool {
       console.log(`[HyperswarmPool] Topic joined and flushed`);
     }
   }
+
+  _ensurePeerJoined(publicKey) {
+    if (this.peerDiscoveries.has(publicKey)) return;
+    try {
+      const discovery = this.swarm.joinPeer(Buffer.from(publicKey, 'hex'));
+      this.peerDiscoveries.set(publicKey, discovery);
+    } catch (err) {
+      console.error(`[HyperswarmPool] Failed to join peer ${publicKey.substring(0,8)}:`, err.message);
+    }
+  }
+
+  _leavePeer(publicKey) {
+    const discovery = this.peerDiscoveries.get(publicKey);
+    if (discovery) {
+      discovery.destroy().catch(() => {});
+      this.peerDiscoveries.delete(publicKey);
+    }
+  }
   
   async getConnection(publicKey) {
     if (!this.initialized) {
@@ -373,12 +392,14 @@ class EnhancedHyperswarmPool {
     }
     
     let connection = this.connections.get(publicKey);
-    
+
     if (!connection) {
       console.log(`[HyperswarmPool] Creating new connection for peer ${publicKey.substring(0, 8)}...`);
       connection = new HyperswarmConnection(publicKey, this.swarm, this);
       this.connections.set(publicKey, connection);
     }
+
+    this._ensurePeerJoined(publicKey);
     
     // Check if connection is stale
     const now = Date.now();
@@ -405,19 +426,24 @@ class EnhancedHyperswarmPool {
       connection.destroy();
       this.connections.delete(publicKey);
     }
+    this._leavePeer(publicKey);
   }
   
   async destroy() {
     console.log(`[HyperswarmPool] ========================================`);
     console.log(`[HyperswarmPool] DESTROYING CONNECTION POOL`);
     console.log(`[HyperswarmPool] Active connections: ${this.connections.size}`);
-    
+
     for (const [key, connection] of this.connections) {
       console.log(`[HyperswarmPool] Destroying connection: ${key.substring(0, 8)}...`);
       connection.destroy();
     }
     this.connections.clear();
-    
+
+    for (const key of this.peerDiscoveries.keys()) {
+      this._leavePeer(key);
+    }
+
     if (this.swarm) {
       console.log(`[HyperswarmPool] Destroying Hyperswarm instance...`);
       await this.swarm.destroy();
