@@ -280,31 +280,36 @@ export async function initRelayProfilesStorage(userKey = null) {
  * Load all relay profiles from the storage file
  * @returns {Promise<Array>} - Array of relay profiles
  */
-export async function getAllRelayProfiles(userKey = null) {
-    return withProfileLock(async () => {
+// Internal helper that loads all profiles without acquiring the mutex. This
+// allows functions already holding the lock to read the profiles without
+// deadlocking.
+async function _getAllRelayProfiles(userKey = null) {
+    try {
+        await initRelayProfilesStorage(userKey);
+
+        const profilesPath = getRelayProfilesPath(userKey);
+
+        const data = await fs.readFile(profilesPath, 'utf8');
+        let profiles;
         try {
-            await initRelayProfilesStorage(userKey);
-
-            const profilesPath = getRelayProfilesPath(userKey);
-
-            const data = await fs.readFile(profilesPath, 'utf8');
-            let profiles;
-            try {
-                profiles = JSON.parse(data);
-            } catch (parseErr) {
-                console.error(`[ProfileManager] Error parsing relay profiles: ${parseErr.message}`);
-                const tmp = profilesPath + '.tmp';
-                await fs.writeFile(tmp, JSON.stringify({ relays: [] }, null, 2));
-                await fs.rename(tmp, profilesPath);
-                return [];
-            }
-            const relays = Array.isArray(profiles.relays) ? profiles.relays : [];
-            return relays.map(p => ensureProfileSchema(p));
-        } catch (error) {
-            console.error(`[ProfileManager] Error loading relay profiles: ${error.message}`);
+            profiles = JSON.parse(data);
+        } catch (parseErr) {
+            console.error(`[ProfileManager] Error parsing relay profiles: ${parseErr.message}`);
+            const tmp = profilesPath + '.tmp';
+            await fs.writeFile(tmp, JSON.stringify({ relays: [] }, null, 2));
+            await fs.rename(tmp, profilesPath);
             return [];
         }
-    });
+        const relays = Array.isArray(profiles.relays) ? profiles.relays : [];
+        return relays.map(p => ensureProfileSchema(p));
+    } catch (error) {
+        console.error(`[ProfileManager] Error loading relay profiles: ${error.message}`);
+        return [];
+    }
+}
+
+export async function getAllRelayProfiles(userKey = null) {
+    return withProfileLock(() => _getAllRelayProfiles(userKey));
 }
 
 /**
@@ -376,7 +381,7 @@ export async function saveRelayProfile(relayProfile) {
         }
         
         // Load existing profiles
-        let profiles = await getAllRelayProfiles();
+        let profiles = await _getAllRelayProfiles();
         console.log(`[ProfileManager] Loaded ${profiles.length} existing profiles`);
         
         // Check if profile already exists
@@ -440,7 +445,7 @@ export async function removeRelayProfile(relayKey) {
     return withProfileLock(async () => {
     try {
         // Load existing profiles
-        let profiles = await getAllRelayProfiles();
+        let profiles = await _getAllRelayProfiles();
         
         // Filter out the profile to remove
         const newProfiles = profiles.filter(profile => profile.relay_key !== relayKey);
