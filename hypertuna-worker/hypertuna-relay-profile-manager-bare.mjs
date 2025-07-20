@@ -7,6 +7,22 @@ import { join, dirname } from 'bare-path';
 // Constants
 const RELAY_PROFILES_FILE = 'relay-profiles.json';
 
+// Simple mutex to serialize file access
+let profileLock = Promise.resolve();
+async function withProfileLock(fn) {
+    let release;
+    const wait = profileLock;
+    profileLock = new Promise(res => {
+        release = res;
+    });
+    await wait;
+    try {
+        return await fn();
+    } finally {
+        release();
+    }
+}
+
 // Get storage directory from Pear config or use default
 function getStorageDir(userKey = null) {
     const baseDir = global.Pear?.config.storage || './data';
@@ -265,28 +281,30 @@ export async function initRelayProfilesStorage(userKey = null) {
  * @returns {Promise<Array>} - Array of relay profiles
  */
 export async function getAllRelayProfiles(userKey = null) {
-    try {
-        await initRelayProfilesStorage(userKey);
-
-        const profilesPath = getRelayProfilesPath(userKey);
-
-        const data = await fs.readFile(profilesPath, 'utf8');
-        let profiles;
+    return withProfileLock(async () => {
         try {
-            profiles = JSON.parse(data);
-        } catch (parseErr) {
-            console.error(`[ProfileManager] Error parsing relay profiles: ${parseErr.message}`);
-            const tmp = profilesPath + '.tmp';
-            await fs.writeFile(tmp, JSON.stringify({ relays: [] }, null, 2));
-            await fs.rename(tmp, profilesPath);
+            await initRelayProfilesStorage(userKey);
+
+            const profilesPath = getRelayProfilesPath(userKey);
+
+            const data = await fs.readFile(profilesPath, 'utf8');
+            let profiles;
+            try {
+                profiles = JSON.parse(data);
+            } catch (parseErr) {
+                console.error(`[ProfileManager] Error parsing relay profiles: ${parseErr.message}`);
+                const tmp = profilesPath + '.tmp';
+                await fs.writeFile(tmp, JSON.stringify({ relays: [] }, null, 2));
+                await fs.rename(tmp, profilesPath);
+                return [];
+            }
+            const relays = Array.isArray(profiles.relays) ? profiles.relays : [];
+            return relays.map(p => ensureProfileSchema(p));
+        } catch (error) {
+            console.error(`[ProfileManager] Error loading relay profiles: ${error.message}`);
             return [];
         }
-        const relays = Array.isArray(profiles.relays) ? profiles.relays : [];
-        return relays.map(p => ensureProfileSchema(p));
-    } catch (error) {
-        console.error(`[ProfileManager] Error loading relay profiles: ${error.message}`);
-        return [];
-    }
+    });
 }
 
 /**
@@ -327,6 +345,7 @@ export async function getRelayProfileByPublicIdentifier(publicIdentifier) {
  * @returns {Promise<boolean>} - True if successful, false otherwise
  */
 export async function saveRelayProfile(relayProfile) {
+    return withProfileLock(async () => {
     try {
         if (!relayProfile || !relayProfile.relay_key) {
             console.error('[ProfileManager] Invalid relay profile data:', relayProfile);
@@ -409,6 +428,7 @@ export async function saveRelayProfile(relayProfile) {
         console.error(error.stack);
         return false;
     }
+    });
 }
 
 /**
@@ -417,6 +437,7 @@ export async function saveRelayProfile(relayProfile) {
  * @returns {Promise<boolean>} - True if successful, false otherwise
  */
 export async function removeRelayProfile(relayKey) {
+    return withProfileLock(async () => {
     try {
         // Load existing profiles
         let profiles = await getAllRelayProfiles();
@@ -443,6 +464,7 @@ export async function removeRelayProfile(relayKey) {
         console.error(`[ProfileManager] Error removing relay profile: ${error.message}`);
         return false;
     }
+    });
 }
 
 /**
