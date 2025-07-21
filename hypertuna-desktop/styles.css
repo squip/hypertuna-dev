@@ -1173,6 +1173,21 @@ members-list,.member-list {
     border-bottom: none;
 }
 
+.join-requests {
+    margin-top: var(--space-md);
+}
+
+.join-request-list .join-request-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: var(--space-sm) 0;
+    border-bottom: 1px solid var(--border-color);
+}
+.join-request-list .join-request-item:last-child {
+    border-bottom: none;
+}
+
 .auth-status {
     display: flex;
     align-items: center;

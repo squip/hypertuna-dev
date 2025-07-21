@@ -239,6 +239,13 @@ class NostrIntegration {
                 this.app.updateInviteSummary(invites);
             }
         });
+
+        // Join request updates
+        this.client.on('joinrequests:update', ({ groupId, requests }) => {
+            if (typeof this.app.updateJoinRequests === 'function') {
+                this.app.updateJoinRequests(groupId, requests);
+            }
+        });
     }
     
     /**
@@ -527,6 +534,14 @@ class NostrIntegration {
      */
     async removeGroupMember(groupId, pubkey) {
         return await this.client.removeGroupMember(groupId, pubkey);
+    }
+
+    async approveJoinRequest(groupId, pubkey) {
+        return await this.client.approveJoinRequest(groupId, pubkey);
+    }
+
+    rejectJoinRequest(groupId, pubkey) {
+        this.client.rejectJoinRequest(groupId, pubkey);
     }
     
     /**
