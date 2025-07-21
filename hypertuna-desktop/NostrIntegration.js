@@ -469,8 +469,8 @@ class NostrIntegration {
      * @param {string} inviteCode - Optional invite code for closed groups
      * @returns {Promise<Object>} - Join request event
      */
-    async joinGroup(groupId, inviteCode = null) {
-        return await this.client.joinGroup(groupId, inviteCode);
+    async joinGroup(groupId, inviteCode = null, options = {}) {
+        return await this.client.joinGroup(groupId, inviteCode, options);
     }
     
     /**
