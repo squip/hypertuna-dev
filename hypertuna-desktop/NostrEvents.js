@@ -440,11 +440,24 @@ class NostrEvents {
      * @param {string} privateKey - Private key for signing
      * @returns {Promise<Object>} - Signed event
      */
-    static async createGroupInviteEvent(publicIdentifier, privateKey) {
+    static async createGroupInviteEvent(publicIdentifier, privateKey, metadata = {}) {
+        const tags = [
+            ['h', publicIdentifier],
+            ['i', 'hypertuna']
+        ];
+
+        if (metadata.name) {
+            tags.push(['name', metadata.name]);
+        }
+
+        if (metadata.about) {
+            tags.push(['about', metadata.about]);
+        }
+
         return this.createEvent(
             this.KIND_GROUP_INVITE_CREATE,
             'Creating invite code',
-            [['h', publicIdentifier]], // Use public identifier
+            tags,
             privateKey
         );
     }
