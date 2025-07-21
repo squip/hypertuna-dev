@@ -2395,22 +2395,26 @@ async fetchMultipleProfiles(pubkeys) {
      * @param {string} inviteCode - Optional invite code for closed groups
      * @returns {Promise<Object>} - Join request event
      */
-    async joinGroup(publicIdentifier, inviteCode = null) {
+    async joinGroup(publicIdentifier, inviteCode = null, options = {}) {
         if (!this.user || !this.user.privateKey) {
             throw new Error('User not logged in');
         }
-        
+
+        const { publish = true } = options;
+
         // This method is now only used for closed groups with an invite code.
         // The worker-driven flow handles open, authenticated joins.
-        // We simply create and publish the join request event.
+        // We simply create the join request event.
         const event = await NostrEvents.createGroupJoinRequest(
             publicIdentifier,
             inviteCode,
             this.user.privateKey
         );
 
-        // Publish the event directly to the relays
-        await this.relayManager.publish(event);
+        if (publish) {
+            // Publish the event directly to the relays
+            await this.relayManager.publish(event);
+        }
 
         return event;
     }

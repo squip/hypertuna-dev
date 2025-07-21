@@ -1757,16 +1757,44 @@ App.syncHypertunaConfigToFile = async function() {
      */
     App.sendJoinRequest = async function(inviteCode = null) {
         if (!this.currentUser || !this.currentGroupId) return;
-        
+
+        const statusEl = document.getElementById('join-request-status');
+        if (statusEl) {
+            statusEl.classList.add('hidden');
+        }
+
         try {
-            await this.nostr.joinGroup(this.currentGroupId, inviteCode);
+            // Build the join request event without publishing
+            const event = await this.nostr.joinGroup(
+                this.currentGroupId,
+                inviteCode,
+                { publish: false }
+            );
+
+            // Send the event to the gateway
+            const gatewayUrl = this.currentUser.hypertunaConfig?.gatewayUrl || HypertunaUtils.DEFAULT_GATEWAY_URL;
+            const response = await fetch(`${gatewayUrl}/post/join/${this.currentGroupId}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ event })
+            });
+
+            if (response.ok) {
+                if (statusEl) {
+                    statusEl.textContent = 'join request received – pending admin approval';
+                    statusEl.classList.remove('hidden');
+                }
+            } else {
+                const text = await response.text();
+                throw new Error(`Gateway error: ${response.status} ${text}`);
+            }
 
             // Reload group details and groups list to reflect membership changes
             setTimeout(() => {
                 this.loadGroupDetails();
                 this.loadGroups();
             }, 1000);
-            
+
         } catch (e) {
             console.error('Error sending join request:', e);
             alert('Error joining group: ' + e.message);
@@ -2772,7 +2800,7 @@ App.setupFollowingModalListeners = function() {
         
         try {
             await this.sendJoinRequest(inviteCode);
-            this.closeJoinModal();
+            // Modal remains open to display status message
         } catch (e) {
             console.error('Error joining group with invite code:', e);
             // Don't close the modal in case of error, so the user can try again
