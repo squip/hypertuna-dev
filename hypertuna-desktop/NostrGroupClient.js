@@ -2642,9 +2642,11 @@ async fetchMultipleProfiles(pubkeys) {
             throw new Error('You must be an admin to create invite codes');
         }
         
+        const group = this.groups.get(groupId) || {};
         const event = await NostrEvents.createGroupInviteEvent(
             groupId,
-            this.user.privateKey
+            this.user.privateKey,
+            group
         );
         
         // Publish the event
@@ -2986,10 +2988,20 @@ async fetchMultipleProfiles(pubkeys) {
         const isPublic = this.groups.get(groupId)?.isPublic || false;
         const payload = { relayUrl, token, relayKey, isPublic };
         const encrypted = NostrUtils.encrypt(this.user.privateKey, pubkey, JSON.stringify(payload));
+
+        const group = this.groups.get(groupId) || {};
+        const tags = [
+            ['h', groupId],
+            ['p', pubkey],
+            ['i', 'hypertuna'],
+            ['name', group.name || ''],
+            ['about', group.about || '']
+        ];
+
         const event = await NostrEvents.createEvent(
             NostrEvents.KIND_GROUP_INVITE_CREATE,
             encrypted,
-            [['h', groupId], ['p', pubkey]],
+            tags,
             this.user.privateKey
         );
         const discoveryRelays = Array.from(this.relayManager.discoveryRelays);
