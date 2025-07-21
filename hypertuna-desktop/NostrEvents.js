@@ -60,6 +60,7 @@ class NostrEvents {
 
     // User relay list event
     static KIND_USER_RELAY_LIST = 10009;
+
     
     /**
      * Create and sign a generic event with enhanced logging
@@ -549,7 +550,7 @@ class NostrEvents {
             privateKey
         );
     }
-    
+
     /**
      * Parse group metadata from event
      * @param {Object} event - Group metadata event (kind 39000)
