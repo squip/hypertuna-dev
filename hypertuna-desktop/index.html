@@ -433,8 +433,8 @@
                 <button class="modal-close" id="close-join-modal">&times;</button>
             </div>
             <div class="modal-body">
-                <p>This relay requires an invite code to join.</p>
-                <div class="form-group">
+                <p id="join-modal-message">This relay requires an invite code to join.</p>
+                <div id="invite-code-group" class="form-group">
                     <label for="invite-code-input">Invite Code</label>
                     <input type="text" id="invite-code-input" class="form-input" placeholder="Enter invite code">
                 </div>
@@ -1147,10 +1147,24 @@
           },
           
           // Modal methods
-          showJoinModal() {
-              document.getElementById('join-group-modal').classList.add('show');
-              document.getElementById('invite-code-input').value = '';
-              document.getElementById('invite-code-input').focus();
+          showJoinModal(requireInvite = true) {
+              const modal = document.getElementById('join-group-modal');
+              modal.classList.add('show');
+              const inviteGroup = document.getElementById('invite-code-group');
+              const confirmBtn = document.getElementById('btn-confirm-join');
+              const messageEl = document.getElementById('join-modal-message');
+
+              if (requireInvite) {
+                  if (inviteGroup) inviteGroup.classList.remove('hidden');
+                  if (confirmBtn) confirmBtn.classList.remove('hidden');
+                  if (messageEl) messageEl.textContent = 'This relay requires an invite code to join.';
+                  document.getElementById('invite-code-input').value = '';
+                  document.getElementById('invite-code-input').focus();
+              } else {
+                  if (inviteGroup) inviteGroup.classList.add('hidden');
+                  if (confirmBtn) confirmBtn.classList.add('hidden');
+                  if (messageEl) messageEl.textContent = 'Sending join request...';
+              }
           },
           
           closeJoinModal() {

@@ -1531,8 +1531,9 @@ App.syncHypertunaConfigToFile = async function() {
                 // For open groups, show authentication modal
                 await this.showJoinAuthModal();
             } else {
-                // For closed groups, show invite code modal first
-                this.showJoinModal();
+                // For closed groups, immediately send join request and display status
+                this.showJoinModal(false);
+                await this.sendJoinRequest();
             }
         } catch (e) {
             console.error('Error joining group:', e);
@@ -1798,6 +1799,10 @@ App.syncHypertunaConfigToFile = async function() {
                 if (statusEl) {
                     statusEl.textContent = 'join request received – pending admin approval';
                     statusEl.classList.remove('hidden');
+                }
+                const messageEl = document.getElementById('join-modal-message');
+                if (messageEl) {
+                    messageEl.textContent = 'Join request submitted.';
                 }
             } else {
                 const text = await response.text();
