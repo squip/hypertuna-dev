@@ -755,7 +755,7 @@ function setupProtocolHandlers(protocol) {
   protocol.handle('/post/join/:identifier', async (request) => {
     const identifier = request.params.identifier;
     console.log(`[RelayServer] Join request for relay: ${identifier}`);
-    
+
     try {
       const body = JSON.parse(request.body.toString());
       const { event, requesterSubnetHash, callbackUrls } = body;
@@ -778,13 +778,33 @@ function setupProtocolHandlers(protocol) {
           body: b4a.from(JSON.stringify({ error: 'Invalid event kind' }))
         };
       }
-      
+
+      // Load relay profile using the public identifier
+      const profile = await getRelayProfileByPublicIdentifier(identifier);
+      if (!profile) {
+        updateMetrics(false);
+        return {
+          statusCode: 404,
+          headers: { 'content-type': 'application/json' },
+          body: b4a.from(JSON.stringify({ error: 'Relay not found' }))
+        };
+      }
+
       try {
         await publishEventToRelay(identifier, event);
         console.log(`[RelayServer] Published kind 9021 join request event`);
       } catch (publishError) {
         console.error(`[RelayServer] Failed to publish join request:`, publishError);
         // Continue anyway - the auth process can still work
+      }
+
+      if (profile.isOpen === false) {
+        updateMetrics(true);
+        return {
+          statusCode: 200,
+          headers: { 'content-type': 'application/json' },
+          body: b4a.from(JSON.stringify({ status: 'pending' }))
+        };
       }
 
       // Generate challenge
