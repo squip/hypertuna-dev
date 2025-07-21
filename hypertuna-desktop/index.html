@@ -202,6 +202,10 @@
                                         <button id="btn-add-member" class="btn btn-secondary btn-small">Add Member</button>
                                         <button id="btn-create-invite" class="btn btn-secondary btn-small">Create Invite</button>
                                     </div>
+                                    <div id="join-requests-section" class="join-requests hidden">
+                                        <h4>Pending Join Requests (<span id="join-request-count">0</span>)</h4>
+                                        <div id="join-request-list" class="join-request-list"></div>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -1208,6 +1212,51 @@
               }
           },
 
+          updateJoinRequests(groupId, requests) {
+              const section = document.getElementById('join-requests-section');
+              const countEl = document.getElementById('join-request-count');
+              const list = document.getElementById('join-request-list');
+              if (!section || !countEl || !list) return;
+              if (!requests || requests.length === 0) {
+                  section.classList.add('hidden');
+                  countEl.textContent = '0';
+                  list.innerHTML = '';
+                  return;
+              }
+
+              countEl.textContent = requests.length;
+              list.innerHTML = '';
+              requests.forEach(req => {
+                  const profile = this.nostr.client.cachedProfiles.get(req.pubkey) || { name: req.pubkey };
+                  const item = document.createElement('div');
+                  item.className = 'join-request-item';
+                  const display = req.pubkey.substring(0,8) + '...';
+                  item.innerHTML = `
+                      <div class="request-info">
+                        <div class="request-name">${profile.name}</div>
+                        <div class="request-pubkey">${display}</div>
+                      </div>
+                      <div class="request-actions">
+                        <button class="btn btn-primary btn-small" data-action="approve" data-pub="${req.pubkey}">Approve</button>
+                        <button class="btn btn-danger btn-small" data-action="reject" data-pub="${req.pubkey}">Reject</button>
+                      </div>`;
+                  list.appendChild(item);
+              });
+
+              list.querySelectorAll('button[data-action="approve"]').forEach(btn => {
+                  btn.addEventListener('click', () => {
+                      this.approveJoinRequest(btn.dataset.pub);
+                  });
+              });
+              list.querySelectorAll('button[data-action="reject"]').forEach(btn => {
+                  btn.addEventListener('click', () => {
+                      this.rejectJoinRequest(btn.dataset.pub);
+                  });
+              });
+
+              section.classList.remove('hidden');
+          },
+
           showInvitesModal() {
               const modal = document.getElementById('invites-modal');
               const list = document.getElementById('invite-list');
@@ -1280,6 +1329,7 @@
           loadGroupMembers() {
               // This will be replaced by the integration
           },
+          loadJoinRequests() {},
           createGroup() {},
           joinGroup() {},
           sendJoinRequest() {},
@@ -1290,6 +1340,8 @@
           addMember() {},
           updateMemberRole() {},
           removeMember() {},
+          approveJoinRequest() {},
+          rejectJoinRequest() {},
           saveGroupSettings() {},
           deleteGroup() {},
           updateProfile() {},

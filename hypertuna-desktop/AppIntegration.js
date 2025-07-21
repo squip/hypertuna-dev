@@ -27,9 +27,9 @@ function integrateNostrRelays(App) {
     // Define a list of methods to potentially save
     const methodsToSave = [
         'connectRelay', 'loadGroups', 'loadGroupDetails', 'loadGroupMessages',
-        'loadGroupMembers', 'createGroup', 'joinGroup', 'leaveGroup',
+        'loadGroupMembers', 'loadJoinRequests', 'createGroup', 'joinGroup', 'leaveGroup',
         'sendMessage', 'createInvite', 'addMember', 'updateMemberRole',
-        'removeMember', 'saveGroupSettings', 'deleteGroup', 'updateProfile',
+        'removeMember', 'approveJoinRequest', 'rejectJoinRequest', 'saveGroupSettings', 'deleteGroup', 'updateProfile',
         'login', 'generatePrivateKey', 'saveUserToLocalStorage', 
         'loadUserFromLocalStorage', 'updateProfileDisplay'
     ];
@@ -1108,6 +1108,13 @@ App.syncHypertunaConfigToFile = async function() {
             if (adminPanel) {
                 adminPanel.classList.toggle('hidden', !isAdmin);
             }
+
+            if (isAdmin) {
+                this.loadJoinRequests();
+            } else {
+                const jrSection = document.getElementById('join-requests-section');
+                if (jrSection) jrSection.classList.add('hidden');
+            }
             
             // Update settings form
             const settingsForm = document.getElementById('group-settings-form');
@@ -1412,6 +1419,14 @@ App.syncHypertunaConfigToFile = async function() {
         
         // Otherwise show full date
         return date.toLocaleDateString();
+    };
+
+    App.loadJoinRequests = function() {
+        if (!this.currentUser || !this.currentGroupId) return;
+        const requests = this.nostr.client.getJoinRequests(this.currentGroupId);
+        if (typeof this.updateJoinRequests === 'function') {
+            this.updateJoinRequests(this.currentGroupId, requests);
+        }
     };
     
     /**
@@ -1965,6 +1980,26 @@ App.syncHypertunaConfigToFile = async function() {
             console.error('Error removing member:', e);
             alert('Error removing member: ' + e.message);
         }
+    };
+
+    App.approveJoinRequest = async function(pubkey) {
+        if (!this.currentUser || !this.currentGroupId) return;
+        try {
+            await this.nostr.approveJoinRequest(this.currentGroupId, pubkey);
+            setTimeout(() => {
+                this.loadJoinRequests();
+                this.loadGroupMembers();
+            }, 500);
+        } catch (e) {
+            console.error('Error approving join request:', e);
+            alert('Error approving join request: ' + e.message);
+        }
+    };
+
+    App.rejectJoinRequest = function(pubkey) {
+        if (!this.currentUser || !this.currentGroupId) return;
+        this.nostr.rejectJoinRequest(this.currentGroupId, pubkey);
+        this.loadJoinRequests();
     };
     
     /**

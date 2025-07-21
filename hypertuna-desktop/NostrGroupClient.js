@@ -50,6 +50,7 @@ class NostrGroupClient {
         this.subscriptionsByFilter = new Map(); // Map of filter hash -> subscription IDs
         this.groupSubscriptions = new Map(); // Map of groupId -> Set of subscription IDs
         this.invites = new Map(); // Map of inviteId -> invite data
+        this.joinRequests = new Map(); // Map of groupId -> Map of pubkey -> event
 
         // Setup default event handlers
         this._setupEventHandlers();
@@ -1327,7 +1328,8 @@ async fetchMultipleProfiles(pubkeys) {
             {
                 kinds: [
                     NostrEvents.KIND_GROUP_PUT_USER,
-                    NostrEvents.KIND_GROUP_REMOVE_USER
+                    NostrEvents.KIND_GROUP_REMOVE_USER,
+                    NostrEvents.KIND_GROUP_JOIN_REQUEST
                 ],
                 "#h": [publicIdentifier]
             }
@@ -1374,6 +1376,9 @@ async fetchMultipleProfiles(pubkeys) {
                     break;
                 case NostrEvents.KIND_GROUP_REMOVE_USER:
                     this._processGroupRemoveUserEvent(event);
+                    break;
+                case NostrEvents.KIND_GROUP_JOIN_REQUEST:
+                    this._processJoinRequestEvent(event);
                     break;
             }
         });
@@ -1664,6 +1669,29 @@ async fetchMultipleProfiles(pubkeys) {
             console.error('Failed to decrypt invite', e);
         }
     }
+
+    /**
+     * Process a join request event
+     * @param {Object} event - Join request event (kind 9021)
+     * @private
+     */
+    _processJoinRequestEvent(event) {
+        const groupId = NostrEvents._getTagValue(event, 'h');
+        if (!groupId) return;
+
+        // Ignore if user already a member
+        const members = this.getGroupMembers(groupId);
+        if (members.some(m => m.pubkey === event.pubkey)) return;
+
+        if (!this.joinRequests.has(groupId)) {
+            this.joinRequests.set(groupId, new Map());
+        }
+
+        this.joinRequests.get(groupId).set(event.pubkey, event);
+
+        this.fetchUserProfile(event.pubkey).catch(() => {});
+        this.emit('joinrequests:update', { groupId, requests: this.getJoinRequests(groupId) });
+    }
     
     /**
      * Process a group member list event
@@ -1800,6 +1828,9 @@ async fetchMultipleProfiles(pubkeys) {
 
                 addMap.set(pubkey, { ts: event.created_at, roles: actualRoles });
                 this.relevantPubkeys.add(pubkey);
+
+                // Remove any pending join request for this user
+                this.removeJoinRequest(groupId, pubkey);
 
                 // If token is present, send to worker for auth data update
                 if (token && window.workerPipe) {
@@ -2916,6 +2947,65 @@ async fetchMultipleProfiles(pubkeys) {
         this.emit('invites:update', { invites: this.getInvites() });
 
         return invite;
+    }
+
+    /**
+     * Get pending join requests for a group
+     * @param {string} groupId
+     * @returns {Array<Object>}
+     */
+    getJoinRequests(groupId) {
+        const map = this.joinRequests.get(groupId) || new Map();
+        return Array.from(map.values());
+    }
+
+    /**
+     * Remove a join request
+     * @param {string} groupId
+     * @param {string} pubkey
+     */
+    removeJoinRequest(groupId, pubkey) {
+        const map = this.joinRequests.get(groupId);
+        if (!map) return;
+        map.delete(pubkey);
+        if (map.size === 0) this.joinRequests.delete(groupId);
+        this.emit('joinrequests:update', { groupId, requests: this.getJoinRequests(groupId) });
+    }
+
+    /**
+     * Approve a join request
+     * @param {string} groupId
+     * @param {string} pubkey
+     */
+    async approveJoinRequest(groupId, pubkey) {
+        const token = NostrUtils.generateInviteCode();
+        await this.addGroupMember(groupId, pubkey, ['member', token]);
+
+        const relayUrl = this.groupRelayUrls.get(groupId) || '';
+        const relayKey = this.publicToInternalMap.get(groupId) || null;
+        const isPublic = this.groups.get(groupId)?.isPublic || false;
+        const payload = { relayUrl, token, relayKey, isPublic };
+        const encrypted = NostrUtils.encrypt(this.user.privateKey, pubkey, JSON.stringify(payload));
+        const event = await NostrEvents.createEvent(
+            NostrEvents.KIND_GROUP_INVITE_CREATE,
+            encrypted,
+            [['h', groupId], ['p', pubkey]],
+            this.user.privateKey
+        );
+        const discoveryRelays = Array.from(this.relayManager.discoveryRelays);
+        await this.relayManager.publishToRelays(event, discoveryRelays);
+
+        this.removeJoinRequest(groupId, pubkey);
+        return event;
+    }
+
+    /**
+     * Reject a join request
+     * @param {string} groupId
+     * @param {string} pubkey
+     */
+    rejectJoinRequest(groupId, pubkey) {
+        this.removeJoinRequest(groupId, pubkey);
     }
 
     _notifyMemberUpdate(publicIdentifier, members = null) {
