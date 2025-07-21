@@ -1151,6 +1151,28 @@ members-list,.member-list {
     max-width: 500px;
 }
 
+/* Invite summary banner */
+.invite-summary {
+    background: var(--surface);
+    padding: var(--space-sm);
+    margin-bottom: var(--space-sm);
+    border-radius: var(--radius-md);
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+}
+
+.invite-list .invite-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: var(--space-sm) 0;
+    border-bottom: 1px solid var(--border-color);
+}
+.invite-list .invite-item:last-child {
+    border-bottom: none;
+}
+
 .auth-status {
     display: flex;
     align-items: center;

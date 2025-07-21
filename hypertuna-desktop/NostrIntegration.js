@@ -232,6 +232,13 @@ class NostrIntegration {
                 this.app.loadGroups();
             }
         });
+
+        // Invite updates
+        this.client.on('invites:update', ({ invites }) => {
+            if (typeof this.app.updateInviteSummary === 'function') {
+                this.app.updateInviteSummary(invites);
+            }
+        });
     }
     
     /**

@@ -114,7 +114,12 @@
                             Following
                         </button>
                     </div>
-                    
+
+                    <div id="invite-summary" class="invite-summary hidden">
+                        <span id="invite-count">0</span> invite(s) pending
+                        <button id="btn-view-invites" class="btn btn-secondary btn-small">View</button>
+                    </div>
+
                     <div id="groups-list" class="groups-list">
                         <!-- Your relays will be populated here -->
                     </div>
@@ -533,6 +538,19 @@
         </div>
     </div>
 
+    <!-- Invites Modal -->
+    <div id="invites-modal" class="modal">
+        <div class="modal-content modal-wide">
+            <div class="modal-header">
+                <h3>Relay Invites</h3>
+                <button class="modal-close" id="close-invites-modal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div id="invite-list" class="invite-list"></div>
+            </div>
+        </div>
+    </div>
+
     <!-- Join Authentication Modal -->
     <div id="join-auth-modal" class="modal">
         <div class="modal-content modal-auth">
@@ -758,6 +776,13 @@
               document.getElementById('btn-create-invite').addEventListener('click', () => {
                   this.createInvite();
               });
+
+              const viewInvites = document.getElementById('btn-view-invites');
+              if (viewInvites) {
+                  viewInvites.addEventListener('click', () => {
+                      this.showInvitesModal();
+                  });
+              }
               
               document.getElementById('btn-save-group-settings').addEventListener('click', () => {
                   this.saveGroupSettings();
@@ -888,6 +913,13 @@
               document.getElementById('btn-close-invite-code').addEventListener('click', () => {
                   this.closeInviteCodeModal();
               });
+
+              const closeInvites = document.getElementById('close-invites-modal');
+              if (closeInvites) {
+                  closeInvites.addEventListener('click', () => {
+                      this.closeInvitesModal();
+                  });
+              }
               
               // Relay type selector
               document.getElementById('relay-connection-type').addEventListener('change', (e) => {
@@ -902,6 +934,7 @@
                       else if (e.target.id === 'confirmation-modal') this.closeConfirmationModal();
                       else if (e.target.id === 'add-member-modal') this.closeAddMemberModal();
                       else if (e.target.id === 'invite-code-modal') this.closeInviteCodeModal();
+                      else if (e.target.id === 'invites-modal') this.closeInvitesModal();
                   }
               });
             // Setup list toggle for discover relays
@@ -1161,6 +1194,72 @@
           
           closeInviteCodeModal() {
               document.getElementById('invite-code-modal').classList.remove('show');
+          },
+
+          updateInviteSummary(invites) {
+              const summary = document.getElementById('invite-summary');
+              const countEl = document.getElementById('invite-count');
+              if (!summary || !countEl) return;
+              if (invites && invites.length > 0) {
+                  countEl.textContent = invites.length;
+                  summary.classList.remove('hidden');
+              } else {
+                  summary.classList.add('hidden');
+              }
+          },
+
+          showInvitesModal() {
+              const modal = document.getElementById('invites-modal');
+              const list = document.getElementById('invite-list');
+              if (!modal || !list || !this.nostr) return;
+              list.innerHTML = '';
+              const invites = this.nostr.client.getInvites();
+              invites.forEach(inv => {
+                  const profile = this.nostr.client.cachedProfiles.get(inv.inviter) || { name: inv.inviter };
+                  const group = this.nostr.getGroupById(inv.groupId) || {};
+                  const item = document.createElement('div');
+                  item.className = 'invite-item';
+                  item.innerHTML = `
+                      <div class="invite-info">
+                        <div class="invite-relay">${group.name || inv.groupId}</div>
+                        <div class="invite-inviter">from ${profile.name}</div>
+                      </div>
+                      <div class="invite-actions">
+                        <button class="btn btn-primary btn-small" data-id="${inv.id}" data-action="accept">Accept</button>
+                        <button class="btn btn-secondary btn-small" data-id="${inv.id}" data-action="decline">Decline</button>
+                      </div>`;
+                  list.appendChild(item);
+              });
+
+              list.querySelectorAll('button[data-action="accept"]').forEach(btn => {
+                  btn.addEventListener('click', async () => {
+                      await this.acceptInvite(btn.dataset.id);
+                  });
+              });
+              list.querySelectorAll('button[data-action="decline"]').forEach(btn => {
+                  btn.addEventListener('click', () => {
+                      this.nostr.client.removeInvite(btn.dataset.id);
+                  });
+              });
+
+              modal.classList.add('show');
+          },
+
+          closeInvitesModal() {
+              document.getElementById('invites-modal').classList.remove('show');
+          },
+
+          async acceptInvite(inviteId) {
+              try {
+                  const invite = await this.nostr.client.acceptInvite(inviteId);
+                  if (window.joinRelayInstance) {
+                      await window.joinRelayInstance(invite.relayKey);
+                  }
+                  this.closeInvitesModal();
+              } catch (e) {
+                  console.error('Error accepting invite:', e);
+                  alert('Error accepting invite: ' + e.message);
+              }
           },
           
           // Placeholder methods that will be replaced by integration

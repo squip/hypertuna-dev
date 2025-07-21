@@ -49,6 +49,7 @@ class NostrGroupClient {
         this._pendingMemberUpdates = new Map(); // Track pending updates
         this.subscriptionsByFilter = new Map(); // Map of filter hash -> subscription IDs
         this.groupSubscriptions = new Map(); // Map of groupId -> Set of subscription IDs
+        this.invites = new Map(); // Map of inviteId -> invite data
 
         // Setup default event handlers
         this._setupEventHandlers();
@@ -179,6 +180,13 @@ class NostrGroupClient {
             } else if (event.kind === NostrEvents.KIND_HYPERTUNA_RELAY) {
                 this._processHypertunaRelayEvent(event);
             }
+        }, { targetRelays: discoveryRelays });
+
+        // Subscribe to invites addressed to this user
+        this.relayManager.subscribeWithRouting('relay-invites', [
+            { kinds: [NostrEvents.KIND_GROUP_INVITE_CREATE], '#p': [this.user.pubkey], '#i': ['hypertuna'] }
+        ], (event) => {
+            this._processInviteEvent(event);
         }, { targetRelays: discoveryRelays });
     }
 
@@ -1623,6 +1631,39 @@ async fetchMultipleProfiles(pubkeys) {
         const existingGroups = this.getGroups();
         console.log(`After processing relay event - Current groups: ${existingGroups.length}`);
     }
+
+    /**
+     * Process an incoming invite event
+     * @param {Object} event - Invite event (kind 9009)
+     * @private
+     */
+    _processInviteEvent(event) {
+        const groupId = NostrEvents._getTagValue(event, 'h');
+        if (!groupId) return;
+
+        try {
+            const dec = NostrUtils.decrypt(this.user.privateKey, event.pubkey, event.content);
+            const data = JSON.parse(dec);
+            const invite = {
+                id: event.id,
+                groupId,
+                inviter: event.pubkey,
+                relayUrl: data.relayUrl,
+                token: data.token,
+                relayKey: data.relayKey,
+                isPublic: data.isPublic !== false
+            };
+
+            this.invites.set(event.id, invite);
+
+            // Preload inviter profile
+            this.fetchUserProfile(event.pubkey).catch(() => {});
+
+            this.emit('invites:update', { invites: this.getInvites() });
+        } catch (e) {
+            console.error('Failed to decrypt invite', e);
+        }
+    }
     
     /**
      * Process a group member list event
@@ -2479,6 +2520,7 @@ async fetchMultipleProfiles(pubkeys) {
         // Connect to the authenticated relay
         await this.connectToGroupRelay(publicIdentifier, authenticatedUrl);
     }
+
     
     /**
      * Leave a group
@@ -2841,6 +2883,41 @@ async fetchMultipleProfiles(pubkeys) {
         }
     }
 
+    /**
+     * Get all pending invites
+     * @returns {Array<Object>}
+     */
+    getInvites() {
+        return Array.from(this.invites.values());
+    }
+
+    /**
+     * Remove an invite from the list
+     * @param {string} inviteId
+     */
+    removeInvite(inviteId) {
+        this.invites.delete(inviteId);
+        this.emit('invites:update', { invites: this.getInvites() });
+    }
+
+    /**
+     * Accept an invite and connect to the relay
+     * @param {string} inviteId
+     */
+    async acceptInvite(inviteId) {
+        const invite = this.invites.get(inviteId);
+        if (!invite) throw new Error('Invite not found');
+
+        const urlWithToken = invite.relayUrl.includes('token=') ? invite.relayUrl : `${invite.relayUrl}?token=${invite.token}`;
+
+        await this.updateUserRelayListWithAuth(invite.relayKey, urlWithToken, invite.token, invite.isPublic);
+
+        this.invites.delete(inviteId);
+        this.emit('invites:update', { invites: this.getInvites() });
+
+        return invite;
+    }
+
     _notifyMemberUpdate(publicIdentifier, members = null) {
         if (!window.workerPipe) return;
         const relayKey = this.publicToInternalMap.get(publicIdentifier) || null;
@@ -2881,6 +2958,7 @@ async fetchMultipleProfiles(pubkeys) {
         this.groupAdmins.clear();
         this.groupMessages.clear();
         this.groupInvites.clear();
+        this.invites.clear();
         this.cachedProfiles.clear();
         this.follows.clear();
         this.relevantPubkeys.clear();
