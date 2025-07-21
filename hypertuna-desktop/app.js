@@ -869,6 +869,29 @@ async function joinRelayInstance(publicIdentifier) {
   });
 }
 
+// Join a relay using data from an invite event
+async function joinRelayFromInvite(relayKey, name = '', description = '', publicIdentifier = '') {
+  return new Promise((resolve, reject) => {
+    if (!workerPipe) {
+      addLog('Worker not running', 'error');
+      return reject(new Error('Worker not running'));
+    }
+
+    try {
+      workerPipe.write(
+        JSON.stringify({
+          type: 'join-relay',
+          data: { relayKey, name, description, publicIdentifier }
+        }) + '\n'
+      );
+      resolve();
+    } catch (err) {
+      addLog(`Failed to join relay from invite: ${err.message}`, 'error');
+      reject(err);
+    }
+  });
+}
+
 // Join an existing relay
 async function joinRelay() {
   const keyInput = document.getElementById('join-relay-key')
@@ -1143,6 +1166,7 @@ window.startWorker = startWorker;
 window.stopWorker = stopWorker;
 window.createRelayInstance = createRelayInstance;
 window.joinRelayInstance = joinRelayInstance;
+window.joinRelayFromInvite = joinRelayFromInvite;
 window.disconnectRelayInstance = disconnectRelay;
 window.debugButtonState = debugButtonState;
 

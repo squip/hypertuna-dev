@@ -1652,11 +1652,14 @@ async fetchMultipleProfiles(pubkeys) {
             const invite = {
                 id: event.id,
                 groupId,
+                publicIdentifier: groupId,
                 inviter: event.pubkey,
                 relayUrl: data.relayUrl,
                 token: data.token,
                 relayKey: data.relayKey,
-                isPublic: data.isPublic !== false
+                isPublic: data.isPublic !== false,
+                name: NostrEvents._getTagValue(event, 'name') || '',
+                about: NostrEvents._getTagValue(event, 'about') || ''
             };
 
             this.invites.set(event.id, invite);
@@ -2943,7 +2946,7 @@ async fetchMultipleProfiles(pubkeys) {
 
         const urlWithToken = invite.relayUrl.includes('token=') ? invite.relayUrl : `${invite.relayUrl}?token=${invite.token}`;
 
-        await this.updateUserRelayListWithAuth(invite.relayKey, urlWithToken, invite.token, invite.isPublic);
+        await this.updateUserRelayListWithAuth(invite.publicIdentifier || invite.groupId, urlWithToken, invite.token, invite.isPublic);
 
         this.invites.delete(inviteId);
         this.emit('invites:update', { invites: this.getInvites() });
