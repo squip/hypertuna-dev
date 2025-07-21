@@ -258,7 +258,7 @@ function generatePublicIdentifier(npub, relayName) {
  * @returns {Promise<Object>} - Result object with relay information
  */
 export async function joinRelay(options = {}) {
-    const { relayKey, name, description, storageDir, config, fromAutoConnect = false } = options;
+    const { relayKey, name, description, publicIdentifier, storageDir, config, fromAutoConnect = false } = options;
     
     // Store config globally if provided
     if (config) {
@@ -345,12 +345,13 @@ export async function joinRelay(options = {}) {
                 member_removes: [],
                 relay_nostr_id: null,
                 relay_key: relayKey,
+                public_identifier: publicIdentifier || null,
                 relay_storage: defaultStorageDir,
                 joined_at: new Date().toISOString(),
                 auto_connect: true,
                 is_active: true
             };
-            
+
             await saveRelayProfile(profileInfo);
         } else {
             // Update existing profile
@@ -359,7 +360,10 @@ export async function joinRelay(options = {}) {
             profileInfo.is_active = true;
             if (name) profileInfo.name = name;
             if (description) profileInfo.description = description;
-            
+            if (publicIdentifier && !profileInfo.public_identifier) {
+                profileInfo.public_identifier = publicIdentifier;
+            }
+
             await saveRelayProfile(profileInfo);
         }
 
@@ -373,11 +377,13 @@ export async function joinRelay(options = {}) {
         
         // Send relay initialized message for joined relay ONLY if not from auto-connect
         if (!fromAutoConnect && global.sendMessage) {
-            const gw = `wss://${config.proxy_server_address}/${relayKey}`;
+            const identifierPath = profileInfo.public_identifier ? profileInfo.public_identifier.replace(':', '/') : relayKey;
+            const gw = `wss://${config.proxy_server_address}/${identifierPath}`;
             console.log(`[RelayAdapter] [3] joinRelay -> Sending relay-initialized for ${relayKey} with URL ${gw}`);
             global.sendMessage({
                 type: 'relay-initialized',
                 relayKey: relayKey,
+                publicIdentifier: profileInfo.public_identifier,
                 gatewayUrl: gw,
                 name: profileInfo.name,
                 connectionUrl: gw,
@@ -386,10 +392,12 @@ export async function joinRelay(options = {}) {
             });
         }
         
+        const identifierPathReturn = profileInfo.public_identifier ? profileInfo.public_identifier.replace(':', '/') : relayKey;
         return {
             success: true,
             relayKey,
-            connectionUrl: `wss://${config.proxy_server_address}/${relayKey}`,
+            publicIdentifier: profileInfo.public_identifier || null,
+            connectionUrl: `wss://${config.proxy_server_address}/${identifierPathReturn}`,
             profile: profileInfo,
             storageDir: defaultStorageDir
         };
