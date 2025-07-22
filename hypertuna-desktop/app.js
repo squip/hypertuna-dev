@@ -870,7 +870,7 @@ async function joinRelayInstance(publicIdentifier) {
 }
 
 // Join a relay using data from an invite event
-async function joinRelayFromInvite(relayKey, name = '', description = '', publicIdentifier = '') {
+async function joinRelayFromInvite(relayKey, name = '', description = '', publicIdentifier = '', authToken = '') {
   return new Promise((resolve, reject) => {
     if (!workerPipe) {
       addLog('Worker not running', 'error');
@@ -881,7 +881,7 @@ async function joinRelayFromInvite(relayKey, name = '', description = '', public
       workerPipe.write(
         JSON.stringify({
           type: 'join-relay',
-          data: { relayKey, name, description, publicIdentifier }
+          data: { relayKey, name, description, publicIdentifier, authToken }
         }) + '\n'
       );
       resolve();
