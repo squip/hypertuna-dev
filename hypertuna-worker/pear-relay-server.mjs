@@ -13,6 +13,7 @@ import { getRelayAuthStore } from './relay-auth-store.mjs';
 import { nobleSecp256k1 } from './pure-secp256k1-bare.js';
 import { NostrUtils } from './nostr-utils.js';
 import { updateRelayAuthToken } from './hypertuna-relay-profile-manager-bare.mjs';
+import { applyPendingAuthUpdates } from './pending-auth.mjs';
 import {
   createRelay as createRelayManager,
   joinRelay as joinRelayManager,
@@ -2243,6 +2244,7 @@ export async function startJoinAuthentication(options) {
 
     // Join the relay locally so we have a profile and key mapping
     await joinRelayManager({ relayKey, config });
+    await applyPendingAuthUpdates(updateRelayAuthToken, relayKey, finalIdentifier);
 
     // Ensure the joined relay profile has the public identifier recorded
     let joinedProfile = await getRelayProfileByKey(relayKey);
