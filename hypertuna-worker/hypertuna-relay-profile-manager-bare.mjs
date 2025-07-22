@@ -393,7 +393,20 @@ export async function saveRelayProfile(relayProfile) {
             }
             
             console.log(`[ProfileManager] Updating existing profile at index ${existingIndex} for ${relayProfile.relay_key}`);
-            profiles[existingIndex] = {...profiles[existingIndex], ...relayProfile};
+            let mergedProfile = { ...profiles[existingIndex], ...relayProfile };
+            if (profiles[existingIndex].auth_config && relayProfile.auth_config) {
+                mergedProfile.auth_config = {
+                    ...profiles[existingIndex].auth_config,
+                    ...relayProfile.auth_config
+                };
+            }
+            if (profiles[existingIndex].auth_tokens && relayProfile.auth_tokens) {
+                mergedProfile.auth_tokens = {
+                    ...profiles[existingIndex].auth_tokens,
+                    ...relayProfile.auth_tokens
+                };
+            }
+            profiles[existingIndex] = mergedProfile;
         } else {
             // Add new profile
             console.log(`[ProfileManager] Adding new profile for ${relayProfile.relay_key}`);
