@@ -263,6 +263,7 @@ if (workerPipe) {
                   // Call the relay server's create relay function
                   const result = await relayServer.createRelay(message.data);
                   relayMembers.set(result.relayKey, result.profile?.members || [])
+                  await applyPendingAuthUpdates(updateRelayAuthToken, result.relayKey, result.profile?.public_identifier);
 
                   sendMessage({
                     type: 'relay-created',
@@ -300,6 +301,7 @@ if (workerPipe) {
                   // Call the relay server's join relay function
                   const result = await relayServer.joinRelay(message.data)
                   relayMembers.set(result.relayKey, result.profile?.members || [])
+                  await applyPendingAuthUpdates(updateRelayAuthToken, result.relayKey, result.profile?.public_identifier);
 
                   sendMessage({
                     type: 'relay-joined',
@@ -418,7 +420,11 @@ if (workerPipe) {
                     throw new Error('No identifier provided for auth data update');
                   }
                   const hashes = Array.isArray(subnetHashes) ? subnetHashes : (subnetHashes ? [subnetHashes] : []);
-                  await updateRelayAuthToken(identifier, pubkey, token, hashes);
+                  const updated = await updateRelayAuthToken(identifier, pubkey, token, hashes);
+                  if (!updated) {
+                    queuePendingAuthUpdate(identifier, pubkey, token, hashes);
+                    console.log(`[Worker] Queued pending auth update for ${identifier}`);
+                  }
                   sendMessage({
                     type: 'auth-data-updated',
                     identifier: identifier,
