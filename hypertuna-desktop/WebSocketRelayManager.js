@@ -285,9 +285,23 @@ class WebSocketRelayManager {
         // Check if already connected
         if (this.relays.has(normalizedUrl)) {
             const existing = this.relays.get(normalizedUrl);
-            if (existing.status === 'open' || existing.status === 'connecting') {
+
+            // If the token has changed, close the existing connection
+            if (token && existing.authToken && token !== existing.authToken) {
+                console.log(`Relay ${normalizedUrl} token updated, reconnecting`);
+                existing.preventReconnect = true; // avoid automatic reconnect with old token
+                try {
+                    existing.conn.close();
+                } catch (e) {
+                    console.warn(`Failed to close existing connection for ${normalizedUrl}`, e);
+                }
+                this.relays.delete(normalizedUrl);
+            } else if (existing.status === 'open' || existing.status === 'connecting') {
                 console.log(`Relay ${normalizedUrl} already connected or connecting`);
                 return Promise.resolve();
+            } else {
+                // Remove stale entry to allow reconnection
+                this.relays.delete(normalizedUrl);
             }
         }
     
