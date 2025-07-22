@@ -258,7 +258,7 @@ function generatePublicIdentifier(npub, relayName) {
  * @returns {Promise<Object>} - Result object with relay information
  */
 export async function joinRelay(options = {}) {
-    const { relayKey, name, description, publicIdentifier, storageDir, config, fromAutoConnect = false } = options;
+    const { relayKey, name, description, publicIdentifier, authToken = null, storageDir, config, fromAutoConnect = false } = options;
     
     // Store config globally if provided
     if (config) {
@@ -288,6 +288,10 @@ export async function joinRelay(options = {}) {
                     u => u.pubkey === config.nostr_pubkey_hex
                 );
                 userAuthToken = userAuth?.token || null;
+            }
+
+            if (authToken) {
+                userAuthToken = authToken;
             }
 
             const identifierPath = profileInfo?.public_identifier ?
@@ -378,7 +382,8 @@ export async function joinRelay(options = {}) {
         // Send relay initialized message for joined relay ONLY if not from auto-connect
         if (!fromAutoConnect && global.sendMessage) {
             const identifierPath = profileInfo.public_identifier ? profileInfo.public_identifier.replace(':', '/') : relayKey;
-            const gw = `wss://${config.proxy_server_address}/${identifierPath}`;
+            const baseGw = `wss://${config.proxy_server_address}/${identifierPath}`;
+            const gw = authToken ? `${baseGw}?token=${authToken}` : baseGw;
             console.log(`[RelayAdapter] [3] joinRelay -> Sending relay-initialized for ${relayKey} with URL ${gw}`);
             global.sendMessage({
                 type: 'relay-initialized',
@@ -393,11 +398,12 @@ export async function joinRelay(options = {}) {
         }
         
         const identifierPathReturn = profileInfo.public_identifier ? profileInfo.public_identifier.replace(':', '/') : relayKey;
+        const returnBase = `wss://${config.proxy_server_address}/${identifierPathReturn}`;
         return {
             success: true,
             relayKey,
             publicIdentifier: profileInfo.public_identifier || null,
-            connectionUrl: `wss://${config.proxy_server_address}/${identifierPathReturn}`,
+            connectionUrl: authToken ? `${returnBase}?token=${authToken}` : returnBase,
             profile: profileInfo,
             storageDir: defaultStorageDir
         };
