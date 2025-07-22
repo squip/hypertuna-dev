@@ -179,17 +179,15 @@ export async function updateRelayAuthToken(identifier, pubkey, token, newSubnetH
             try {
                 const { getRelayAuthStore } = await import('./relay-auth-store.mjs');
                 const store = getRelayAuthStore();
-                const firstSubnet = newSubnetHashes[0] || null;
-                if (firstSubnet) {
-                    store.addAuth(profile.relay_key, pubkey, token, firstSubnet);
+                const firstSubnet = newSubnetHashes[0] || '';
+                store.addAuth(profile.relay_key, pubkey, token, firstSubnet);
+                if (profile.public_identifier) {
+                    store.addAuth(profile.public_identifier, pubkey, token, firstSubnet);
+                }
+                for (const sub of newSubnetHashes.slice(1)) {
+                    store.addSubnet(profile.relay_key, pubkey, sub);
                     if (profile.public_identifier) {
-                        store.addAuth(profile.public_identifier, pubkey, token, firstSubnet);
-                    }
-                    for (const sub of newSubnetHashes.slice(1)) {
-                        store.addSubnet(profile.relay_key, pubkey, sub);
-                        if (profile.public_identifier) {
-                            store.addSubnet(profile.public_identifier, pubkey, sub);
-                        }
+                        store.addSubnet(profile.public_identifier, pubkey, sub);
                     }
                 }
             } catch (err) {
