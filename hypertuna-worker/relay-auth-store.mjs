@@ -38,7 +38,7 @@ getAuthByToken(relayKey, token) {
    * @param {string} token - Authentication token
    * @param {string} subnetHash - Initial subnet hash
    */
-  addAuth(relayKey, pubkey, token, subnetHash) {
+  addAuth(relayKey, pubkey, token, subnetHash = '') {
     if (!this.relayAuths.has(relayKey)) {
       this.relayAuths.set(relayKey, new Map());
     }
@@ -46,7 +46,7 @@ getAuthByToken(relayKey, token) {
     const relayAuth = this.relayAuths.get(relayKey);
     relayAuth.set(pubkey, {
       token,
-      allowedSubnets: [subnetHash],
+      allowedSubnets: subnetHash ? [subnetHash] : [],
       createdAt: Date.now(),
       lastUsed: Date.now()
     });
