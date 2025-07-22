@@ -2991,7 +2991,8 @@ async fetchMultipleProfiles(pubkeys) {
         const token = NostrUtils.generateInviteCode();
         await this.addGroupMember(groupId, pubkey, ['member', token]);
 
-        const relayUrl = this.groupRelayUrls.get(groupId) || '';
+        const storedUrl = this.groupRelayUrls.get(groupId) || '';
+        const relayUrl = this._getBaseRelayUrl(storedUrl);
         const relayKey = this.publicToInternalMap.get(groupId) || null;
         const isPublic = this.groups.get(groupId)?.isPublic || false;
         const payload = { relayUrl, token, relayKey, isPublic };
