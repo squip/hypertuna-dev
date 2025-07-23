@@ -199,8 +199,7 @@
                                 <div id="admin-panel" class="admin-panel hidden">
                                     <h3>Admin Actions</h3>
                                     <div class="admin-actions">
-                                        <button id="btn-add-member" class="btn btn-secondary btn-small">Add Member</button>
-                                        <button id="btn-create-invite" class="btn btn-secondary btn-small">Create Invite</button>
+                                        <button id="btn-invite-members" class="btn btn-secondary btn-small">Invite Members</button>
                                     </div>
                                     <div id="join-requests-section" class="join-requests hidden">
                                         <h4>Pending Join Requests (<span id="join-request-count">0</span>)</h4>
@@ -769,17 +768,12 @@
               });
               
               // Admin panel
-              document.getElementById('btn-add-member').addEventListener('click', () => {
-                  this.showAddMemberModal();
-              });
-              
-              document.getElementById('btn-confirm-add-member').addEventListener('click', () => {
-                  this.addMember();
-              });
-              
-              document.getElementById('btn-create-invite').addEventListener('click', () => {
-                  this.createInvite();
-              });
+              const inviteMembers = document.getElementById('btn-invite-members');
+              if (inviteMembers) {
+                  inviteMembers.addEventListener('click', () => {
+                      this.createInvite();
+                  });
+              }
 
               const viewInvites = document.getElementById('btn-view-invites');
               if (viewInvites) {
@@ -902,14 +896,6 @@
                   this.closeConfirmationModal();
               });
               
-              document.getElementById('close-add-member-modal').addEventListener('click', () => {
-                  this.closeAddMemberModal();
-              });
-              
-              document.getElementById('btn-cancel-add-member').addEventListener('click', () => {
-                  this.closeAddMemberModal();
-              });
-              
               document.getElementById('close-invite-code-modal').addEventListener('click', () => {
                   this.closeInviteCodeModal();
               });
@@ -936,8 +922,7 @@
                   if (e.target.classList.contains('modal')) {
                       if (e.target.id === 'join-group-modal') this.closeJoinModal();
                       else if (e.target.id === 'confirmation-modal') this.closeConfirmationModal();
-                      else if (e.target.id === 'add-member-modal') this.closeAddMemberModal();
-                      else if (e.target.id === 'invite-code-modal') this.closeInviteCodeModal();
+                        else if (e.target.id === 'invite-code-modal') this.closeInviteCodeModal();
                       else if (e.target.id === 'invites-modal') this.closeInvitesModal();
                   }
               });
