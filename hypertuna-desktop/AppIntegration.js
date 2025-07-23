@@ -114,6 +114,16 @@ function integrateNostrRelays(App) {
                 this.showGroupListSpinner();
                 await this.nostr.init(this.currentUser);
                 console.log('Nostr integration initialized');
+
+                // Fetch the latest profile metadata so avatar images load
+                try {
+                    const profile = await this.nostr.client.fetchUserProfile(this.currentUser.pubkey);
+                    Object.assign(this.currentUser, profile);
+                    this.saveUserToLocalStorage();
+                    this.updateProfileDisplay();
+                } catch (err) {
+                    console.error('Failed to fetch user profile after init:', err);
+                }
                 if (window.startWorker) {
                     try {
                         const key = await window.startWorker();
@@ -382,6 +392,16 @@ function integrateNostrRelays(App) {
                     this.showGroupListSpinner();
                     await this.nostr.init(this.currentUser);
                     console.log('Nostr integration initialized for existing user');
+
+                    // Ensure local profile cache is populated so avatars display
+                    try {
+                        const profile = await this.nostr.client.fetchUserProfile(this.currentUser.pubkey);
+                        Object.assign(this.currentUser, profile);
+                        this.saveUserToLocalStorage();
+                        this.updateProfileDisplay();
+                    } catch (err) {
+                        console.error('Failed to fetch user profile after init:', err);
+                    }
                 } catch (e) {
                     console.error('Error initializing nostr integration for existing user:', e);
                 }
@@ -2993,7 +3013,17 @@ App.setupFollowingModalListeners = function() {
         App.nostr.init(App.currentUser)
             .then(async () => {
                 console.log('Nostr integration initialized with discovery relays');
-                
+
+                // Populate profile cache for the logged in user
+                try {
+                    const profile = await App.nostr.client.fetchUserProfile(App.currentUser.pubkey);
+                    Object.assign(App.currentUser, profile);
+                    App.saveUserToLocalStorage();
+                    App.updateProfileDisplay();
+                } catch (err) {
+                    console.error('Failed to fetch user profile after init:', err);
+                }
+
                 // Wait for relays to be ready before loading groups
                 await App.nostr.waitForRelaysAndLoadGroups();
                 
