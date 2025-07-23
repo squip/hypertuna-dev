@@ -1115,6 +1115,14 @@ App.syncHypertunaConfigToFile = async function() {
                 const jrSection = document.getElementById('join-requests-section');
                 if (jrSection) jrSection.classList.add('hidden');
             }
+
+            const memberPanel = document.getElementById('member-actions');
+            if (memberPanel) {
+                memberPanel.classList.toggle(
+                    'hidden',
+                    !(isMember && !isAdmin && group.isOpen)
+                );
+            }
             
             // Update settings form
             const settingsForm = document.getElementById('group-settings-form');

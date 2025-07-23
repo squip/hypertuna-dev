@@ -206,6 +206,12 @@
                                         <div id="join-request-list" class="join-request-list"></div>
                                     </div>
                                 </div>
+                                <div id="member-actions" class="member-panel hidden">
+                                    <h3>Member Actions</h3>
+                                    <div class="member-actions">
+                                        <button id="btn-member-invite" class="btn btn-secondary btn-small">Invite Members</button>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                         
@@ -771,6 +777,13 @@
               const inviteMembers = document.getElementById('btn-invite-members');
               if (inviteMembers) {
                   inviteMembers.addEventListener('click', () => {
+                      this.createInvite();
+                  });
+              }
+
+              const memberInvite = document.getElementById('btn-member-invite');
+              if (memberInvite) {
+                  memberInvite.addEventListener('click', () => {
                       this.createInvite();
                   });
               }
