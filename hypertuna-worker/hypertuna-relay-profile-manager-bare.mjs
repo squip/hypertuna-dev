@@ -461,7 +461,6 @@ async function _saveRelayProfile(relayProfile) {
         return false;
     }
 }
-}
 
 /**
  * Remove a relay profile from the storage file
