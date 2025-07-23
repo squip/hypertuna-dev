@@ -60,3 +60,31 @@ test('concurrent updates merge nested fields', async t => {
   t.alike(authPubs, ['admin', 'invitee'])
   await fs.rm(tmp, { recursive: true, force: true })
 })
+
+test('concurrent auth token updates do not lose updates', async t => {
+  const tmp = await setupProfile()
+
+  await Promise.all([
+    updateRelayAuthToken('relay1', 'user1', 'tok1'),
+    updateRelayAuthToken('relay1', 'user2', 'tok2')
+  ])
+
+  const profiles = await getAllRelayProfiles()
+  const pubs = profiles[0].auth_config.authorizedUsers.map(a => a.pubkey).sort()
+  t.alike(pubs, ['user1', 'user2'])
+  await fs.rm(tmp, { recursive: true, force: true })
+})
+
+test('concurrent member set updates do not lose updates', async t => {
+  const tmp = await setupProfile()
+
+  await Promise.all([
+    updateRelayMemberSets('relay1', [{ pubkey: 'alice', ts: 1 }], []),
+    updateRelayMemberSets('relay1', [{ pubkey: 'bob', ts: 2 }], [])
+  ])
+
+  const profiles = await getAllRelayProfiles()
+  const members = profiles[0].members.sort()
+  t.alike(members, ['alice', 'bob'])
+  await fs.rm(tmp, { recursive: true, force: true })
+})
