@@ -128,10 +128,18 @@ class NostrEvents {
      * @returns {Promise<Object>} - Signed event
      */
     static async createTextNote(content, tags, privateKey) {
+        const eventTags = Array.isArray(tags) ? tags : [];
+        const urls = NostrUtils.extractUrls(content);
+        for (const url of urls) {
+            if (!eventTags.some(t => t[0] === 'r' && t[1] === url)) {
+                eventTags.push(['r', url]);
+            }
+        }
+
         return this.createEvent(
             this.KIND_TEXT_NOTE,
             content,
-            tags,
+            eventTags,
             privateKey
         );
     }
