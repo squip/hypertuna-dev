@@ -263,6 +263,18 @@ export class NostrUtils {
         }
         return result;
     }
+
+    /**
+     * Extract all HTTP/HTTPS URLs from a string
+     * @param {string} text - Text to search
+     * @returns {Array<string>} - Array of URLs
+     */
+    static extractUrls(text) {
+        if (!text) return [];
+        const regex = /https?:\/\/[^\s]+/g;
+        const matches = text.match(regex);
+        return matches ? Array.from(new Set(matches)) : [];
+    }
     
     /**
      * Get previous event references for timeline threading
