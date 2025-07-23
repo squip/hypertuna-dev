@@ -3027,6 +3027,22 @@ async fetchMultipleProfiles(pubkeys) {
      * @returns {Promise<Array<Object>>} - Array of invite events
      */
     async inviteMembers(groupId, pubkeys = []) {
+        if (!this.user || !this.user.privateKey) {
+            throw new Error('User not logged in');
+        }
+
+        const group = this.groups.get(groupId);
+        if (!group) {
+            throw new Error('Group not found');
+        }
+
+        const isAdmin = this.isGroupAdmin(groupId, this.user.pubkey);
+        const isMember = this.isGroupMember(groupId, this.user.pubkey);
+
+        if (!isAdmin && !(group.isOpen && isMember)) {
+            throw new Error('You do not have permission to invite members');
+        }
+
         const inviteEvents = [];
         const groupRelayUrl = this.groupRelayUrls.get(groupId);
 
