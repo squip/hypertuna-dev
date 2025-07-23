@@ -2344,6 +2344,9 @@ App.pendingFollowChanges = {
     toRemove: new Set()
 };
 App.originalFollows = new Set();
+// properties for invite members management
+App.inviteMembersModalOpen = false;
+App.pendingInvites = new Set();
 
 /**
  * Show the following modal
@@ -2656,6 +2659,126 @@ App.saveFollowingChanges = async function() {
         const saveBtn = document.getElementById('btn-save-following');
         saveBtn.textContent = 'Save Changes';
         saveBtn.disabled = false;
+    }
+};
+
+/**
+ * Show the invite members modal
+ */
+App.showInviteMembersModal = async function() {
+    this.inviteMembersModalOpen = true;
+    document.getElementById('invite-members-modal').classList.add('show');
+
+    // Reset any pending invites
+    this.pendingInvites.clear();
+
+    // Load followed users to invite
+    const list = document.getElementById('invite-members-list');
+    list.innerHTML = '<div class="following-loading">Loading...</div>';
+
+    try {
+        const follows = this.nostr.client.follows;
+
+        if (follows.size === 0) {
+            list.innerHTML = `
+                <div class="following-empty">
+                    <p>You're not following anyone yet</p>
+                </div>
+            `;
+            return;
+        }
+
+        const followsArray = Array.from(follows);
+        const profiles = await this.nostr.client.fetchMultipleProfiles(followsArray);
+
+        list.innerHTML = '';
+
+        followsArray.forEach(pubkey => {
+            const profile = profiles.get(pubkey) || { name: `User_${NostrUtils.truncatePubkey(pubkey)}` };
+            const npub = NostrUtils.hexToNpub(pubkey);
+            const displayPub = NostrUtils.truncateNpub(npub);
+
+            const item = document.createElement('div');
+            item.className = 'invite-member-item';
+            item.dataset.pubkey = pubkey;
+            item.innerHTML = `
+                <label>
+                    <input type="checkbox" data-pubkey="${pubkey}">
+                    <div class="invite-member-info">
+                        <div class="name">${profile.name}</div>
+                        <div class="pubkey">${displayPub}</div>
+                    </div>
+                </label>`;
+
+            const checkbox = item.querySelector('input');
+            checkbox.addEventListener('change', () => {
+                if (checkbox.checked) this.pendingInvites.add(pubkey); else this.pendingInvites.delete(pubkey);
+            });
+
+            list.appendChild(item);
+        });
+    } catch (e) {
+        console.error('Error loading invite members list:', e);
+        list.innerHTML = `
+            <div class="following-empty">
+                <p>Error loading list</p>
+            </div>
+        `;
+    }
+
+    document.getElementById('invite-member-pubkey').value = '';
+};
+
+/**
+ * Close the invite members modal
+ */
+App.closeInviteMembersModal = function() {
+    this.inviteMembersModalOpen = false;
+    document.getElementById('invite-members-modal').classList.remove('show');
+
+    this.pendingInvites.clear();
+    document.getElementById('invite-members-list').innerHTML = '';
+    document.getElementById('invite-member-pubkey').value = '';
+};
+
+/**
+ * Send invites to selected members
+ */
+App.saveInviteMembers = async function() {
+    const additionalInput = document.getElementById('invite-member-pubkey').value.trim();
+    if (additionalInput) {
+        const normalized = NostrUtils.normalizePublicKey(additionalInput);
+        if (!normalized || !/^[a-fA-F0-9]{64}$/.test(normalized)) {
+            alert('Invalid public key format.');
+            return;
+        }
+        this.pendingInvites.add(normalized);
+    }
+
+    if (this.pendingInvites.size === 0) {
+        this.closeInviteMembersModal();
+        return;
+    }
+
+    const btn = document.getElementById('btn-send-invites');
+    const originalText = btn.textContent;
+    btn.textContent = 'Sending...';
+    btn.disabled = true;
+
+    try {
+        for (const pubkey of this.pendingInvites) {
+            await this.nostr.approveJoinRequest(this.currentGroupId, pubkey);
+        }
+
+        alert('Invites sent successfully!');
+        this.closeInviteMembersModal();
+    } catch (e) {
+        console.error('Error sending invites:', e);
+        alert('Error sending invites. Please try again.');
+    } finally {
+        btn.textContent = originalText;
+        btn.disabled = false;
+        this.pendingInvites.clear();
     }
 };
 

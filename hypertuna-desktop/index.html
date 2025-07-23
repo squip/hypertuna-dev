@@ -807,14 +807,14 @@
               const inviteMembers = document.getElementById('btn-invite-members');
               if (inviteMembers) {
                   inviteMembers.addEventListener('click', () => {
-                      this.createInvite();
+                      this.showInviteMembersModal();
                   });
               }
 
               const memberInvite = document.getElementById('btn-member-invite');
               if (memberInvite) {
                   memberInvite.addEventListener('click', () => {
-                      this.createInvite();
+                      this.showInviteMembersModal();
                   });
               }
 
@@ -942,10 +942,67 @@
               document.getElementById('close-invite-code-modal').addEventListener('click', () => {
                   this.closeInviteCodeModal();
               });
-              
+
               document.getElementById('btn-close-invite-code').addEventListener('click', () => {
                   this.closeInviteCodeModal();
               });
+
+              const closeInviteMembers = document.getElementById('close-invite-members-modal');
+              if (closeInviteMembers) {
+                  closeInviteMembers.addEventListener('click', () => {
+                      this.closeInviteMembersModal();
+                  });
+              }
+
+              const cancelInviteMembers = document.getElementById('btn-cancel-invite-members');
+              if (cancelInviteMembers) {
+                  cancelInviteMembers.addEventListener('click', () => {
+                      this.closeInviteMembersModal();
+                  });
+              }
+
+              const sendInvites = document.getElementById('btn-send-invites');
+              if (sendInvites) {
+                  sendInvites.addEventListener('click', () => {
+                      this.saveInviteMembers();
+                  });
+              }
+
+              const addInviteMember = document.getElementById('btn-add-invite-member');
+              if (addInviteMember) {
+                  addInviteMember.addEventListener('click', () => {
+                      const input = document.getElementById('invite-member-pubkey');
+                      const value = input.value.trim();
+                      if (!value) return;
+                      input.value = '';
+                      const pubkey = NostrUtils.normalizePublicKey(value);
+                      if (!pubkey || !/^[a-fA-F0-9]{64}$/.test(pubkey)) {
+                          alert('Invalid public key format.');
+                          return;
+                      }
+                      if (document.querySelector(`#invite-members-list [data-pubkey="${pubkey}"]`)) return;
+                      const name = `User_${NostrUtils.truncatePubkey(pubkey)}`;
+                      const npub = NostrUtils.hexToNpub(pubkey);
+                      const displayPub = NostrUtils.truncateNpub(npub);
+                      const item = document.createElement('div');
+                      item.className = 'invite-member-item';
+                      item.dataset.pubkey = pubkey;
+                      item.innerHTML = `
+                        <label>
+                          <input type="checkbox" data-pubkey="${pubkey}" checked>
+                          <div class="invite-member-info">
+                            <div class="name">${name}</div>
+                            <div class="pubkey">${displayPub}</div>
+                          </div>
+                        </label>`;
+                      const checkbox = item.querySelector('input');
+                      checkbox.addEventListener('change', () => {
+                          if (checkbox.checked) this.pendingInvites.add(pubkey); else this.pendingInvites.delete(pubkey);
+                      });
+                      this.pendingInvites.add(pubkey);
+                      document.getElementById('invite-members-list').prepend(item);
+                  });
+              }
 
               const closeInvites = document.getElementById('close-invites-modal');
               if (closeInvites) {
@@ -965,8 +1022,9 @@
                   if (e.target.classList.contains('modal')) {
                       if (e.target.id === 'join-group-modal') this.closeJoinModal();
                       else if (e.target.id === 'confirmation-modal') this.closeConfirmationModal();
-                        else if (e.target.id === 'invite-code-modal') this.closeInviteCodeModal();
+                      else if (e.target.id === 'invite-code-modal') this.closeInviteCodeModal();
                       else if (e.target.id === 'invites-modal') this.closeInvitesModal();
+                      else if (e.target.id === 'invite-members-modal') this.closeInviteMembersModal();
                   }
               });
             // Setup list toggle for discover relays
