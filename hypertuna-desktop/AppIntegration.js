@@ -1123,6 +1123,12 @@ App.syncHypertunaConfigToFile = async function() {
                     !(isMember && !isAdmin && group.isOpen)
                 );
             }
+
+            const adminInviteBtn = document.getElementById('btn-invite-members');
+            if (adminInviteBtn) adminInviteBtn.disabled = !isAdmin;
+
+            const memberInviteBtn = document.getElementById('btn-member-invite');
+            if (memberInviteBtn) memberInviteBtn.disabled = !(isMember && group.isOpen);
             
             // Update settings form
             const settingsForm = document.getElementById('group-settings-form');
