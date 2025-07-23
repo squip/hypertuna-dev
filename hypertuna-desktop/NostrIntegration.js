@@ -540,6 +540,10 @@ class NostrIntegration {
         return await this.client.approveJoinRequest(groupId, pubkey);
     }
 
+    async inviteMembers(groupId, pubkeys = []) {
+        return await this.client.inviteMembers(groupId, pubkeys);
+    }
+
     rejectJoinRequest(groupId, pubkey) {
         this.client.rejectJoinRequest(groupId, pubkey);
     }
