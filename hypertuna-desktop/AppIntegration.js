@@ -2766,9 +2766,8 @@ App.saveInviteMembers = async function() {
     btn.disabled = true;
 
     try {
-        for (const pubkey of this.pendingInvites) {
-            await this.nostr.approveJoinRequest(this.currentGroupId, pubkey);
-        }
+        const pubkeys = Array.from(this.pendingInvites);
+        await this.nostr.inviteMembers(this.currentGroupId, pubkeys);
 
         alert('Invites sent successfully!');
         this.closeInviteMembersModal();
