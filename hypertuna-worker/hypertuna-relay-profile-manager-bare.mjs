@@ -129,53 +129,52 @@ export function calculateAuthorizedUsers(auth_adds = [], auth_removes = []) {
 // Add a function to update auth token for a user
 export async function updateRelayAuthToken(identifier, pubkey, token, newSubnetHashes = []) {
     try {
-        let profile = await getRelayProfileByKey(identifier);
-        if (!profile) {
-            profile = await getRelayProfileByPublicIdentifier(identifier);
-        }
+        const profile = await withProfileLock(async () => {
+            let p = await getRelayProfileByKeyUnlocked(identifier);
+            if (!p) {
+                p = await getRelayProfileByPublicIdentifierUnlocked(identifier);
+            }
+            if (!p) return null;
+
+            // Ensure schema
+            p = ensureProfileSchema(p);
+
+            // NEW: Update auth_adds array
+            const existingAuthAddIndex = p.auth_config.auth_adds.findIndex(a => a.pubkey === pubkey);
+            const newAuthEntry = { pubkey, token, subnets: newSubnetHashes, ts: Date.now() };
+
+            if (existingAuthAddIndex !== -1) {
+                const existingAuth = p.auth_config.auth_adds[existingAuthAddIndex];
+                existingAuth.token = token;
+                newSubnetHashes.forEach(newHash => {
+                    if (!existingAuth.subnets.includes(newHash)) {
+                        existingAuth.subnets.push(newHash);
+                    }
+                });
+                existingAuth.subnets = [...new Set(existingAuth.subnets)];
+                existingAuth.ts = newAuthEntry.ts;
+            } else {
+                p.auth_config.auth_adds.push(newAuthEntry);
+            }
+
+            // NEW: Remove from auth_removes if it exists there (re-adding a removed user)
+            p.auth_config.auth_removes = p.auth_config.auth_removes.filter(r => r.pubkey !== pubkey);
+
+            // Update auth config
+            p.auth_config.requiresAuth = true;
+            p.auth_config.tokenProtected = true;
+
+            // Recalculate authorizedUsers based on the updated auth_adds and auth_removes
+            p.auth_config.authorizedUsers = calculateAuthorizedUsers(p.auth_config.auth_adds, p.auth_config.auth_removes);
+
+            p.updated_at = new Date().toISOString();
+            const saved = await _saveRelayProfile(p);
+            return saved ? p : null;
+        });
+
         if (!profile) return null;
-        
-        // Ensure schema
-        profile = ensureProfileSchema(profile);
-        
-        // NEW: Update auth_adds array
-        const existingAuthAddIndex = profile.auth_config.auth_adds.findIndex(a => a.pubkey === pubkey);
-        const newAuthEntry = { pubkey, token, subnets: newSubnetHashes, ts: Date.now() };
 
-        if (existingAuthAddIndex !== -1) {
-            // Update existing entry
-            const existingAuth = profile.auth_config.auth_adds[existingAuthAddIndex];
-            existingAuth.token = token; // Always update token
-            // Merge new subnets with existing ones
-            newSubnetHashes.forEach(newHash => {
-                if (!existingAuth.subnets.includes(newHash)) {
-                    existingAuth.subnets.push(newHash);
-                }
-            });
-            // Ensure subnets array is unique
-            existingAuth.subnets = [...new Set(existingAuth.subnets)];
-
-            // Update timestamp
-            existingAuth.ts = newAuthEntry.ts;
-        } else {
-            // Add new entry
-            profile.auth_config.auth_adds.push(newAuthEntry);
-        }
-
-        // NEW: Remove from auth_removes if it exists there (re-adding a removed user)
-        profile.auth_config.auth_removes = profile.auth_config.auth_removes.filter(r => r.pubkey !== pubkey);
-        
-        // Update auth config
-        profile.auth_config.requiresAuth = true;
-        profile.auth_config.tokenProtected = true;
-        
-        // Recalculate authorizedUsers based on the updated auth_adds and auth_removes
-        profile.auth_config.authorizedUsers = calculateAuthorizedUsers(profile.auth_config.auth_adds, profile.auth_config.auth_removes);
-        
-        profile.updated_at = new Date().toISOString();
-        const saved = await saveRelayProfile(profile);
-
-        if (saved) {
+        if (profile) {
             try {
                 const { getRelayAuthStore } = await import('./relay-auth-store.mjs');
                 const store = getRelayAuthStore();
@@ -195,7 +194,7 @@ export async function updateRelayAuthToken(identifier, pubkey, token, newSubnetH
             }
         }
 
-        return saved ? profile : null;
+        return profile;
     } catch (error) {
         console.error(`[ProfileManager] Error updating auth token for ${identifier}:`, error);
         return null;
@@ -310,6 +309,19 @@ export async function getAllRelayProfiles(userKey = null) {
     return withProfileLock(() => _getAllRelayProfiles(userKey));
 }
 
+// Internal unlocked helpers used when a caller already holds the profile lock
+async function getRelayProfileByKeyUnlocked(relayKey) {
+    const profiles = await _getAllRelayProfiles();
+    const profile = profiles.find(p => p.relay_key === relayKey) || null;
+    return ensureProfileSchema(profile);
+}
+
+async function getRelayProfileByPublicIdentifierUnlocked(identifier) {
+    const profiles = await _getAllRelayProfiles();
+    const profile = profiles.find(p => p.public_identifier === identifier) || null;
+    return ensureProfileSchema(profile);
+}
+
 /**
  * Get a relay profile by its key
  * @param {string} relayKey - The relay key to look for
@@ -348,7 +360,11 @@ export async function getRelayProfileByPublicIdentifier(publicIdentifier) {
  * @returns {Promise<boolean>} - True if successful, false otherwise
  */
 export async function saveRelayProfile(relayProfile) {
-    return withProfileLock(async () => {
+    return withProfileLock(() => _saveRelayProfile(relayProfile));
+}
+
+// Internal version of saveRelayProfile that assumes the caller holds the lock
+async function _saveRelayProfile(relayProfile) {
     try {
         if (!relayProfile || !relayProfile.relay_key) {
             console.error('[ProfileManager] Invalid relay profile data:', relayProfile);
@@ -444,7 +460,7 @@ export async function saveRelayProfile(relayProfile) {
         console.error(error.stack);
         return false;
     }
-    });
+}
 }
 
 /**
@@ -609,15 +625,19 @@ export async function getAutoConnectSettings() {
  */
 export async function updateRelayMembers(identifier, members = []) {
     try {
-        let profile = await getRelayProfileByKey(identifier);
-        if (!profile) {
-            profile = await getRelayProfileByPublicIdentifier(identifier);
-        }
-        if (!profile) return null;
-        profile.members = members;
-        profile.updated_at = new Date().toISOString();
-        const saved = await saveRelayProfile(profile);
-        return saved ? profile : null;
+        const profile = await withProfileLock(async () => {
+            let p = await getRelayProfileByKeyUnlocked(identifier);
+            if (!p) {
+                p = await getRelayProfileByPublicIdentifierUnlocked(identifier);
+            }
+            if (!p) return null;
+            p.members = members;
+            p.updated_at = new Date().toISOString();
+            const saved = await _saveRelayProfile(p);
+            return saved ? p : null;
+        });
+
+        return profile;
     } catch (error) {
         console.error(`[ProfileManager] Error updating members for ${identifier}:`, error);
         return null;
@@ -639,17 +659,40 @@ export function calculateMembers(adds = [], removes = []) {
 
 export async function updateRelayMemberSets(identifier, adds = [], removes = []) {
     try {
-        let profile = await getRelayProfileByKey(identifier);
-        if (!profile) {
-            profile = await getRelayProfileByPublicIdentifier(identifier);
-        }
-        if (!profile) return null;
-        profile.member_adds = adds;
-        profile.member_removes = removes;
-        profile.members = calculateMembers(adds, removes);
-        profile.updated_at = new Date().toISOString();
-        const saved = await saveRelayProfile(profile);
-        return saved ? profile : null;
+        const profile = await withProfileLock(async () => {
+            let p = await getRelayProfileByKeyUnlocked(identifier);
+            if (!p) {
+                p = await getRelayProfileByPublicIdentifierUnlocked(identifier);
+            }
+            if (!p) return null;
+
+            // Merge adds
+            for (const add of adds) {
+                const idx = p.member_adds.findIndex(a => a.pubkey === add.pubkey);
+                if (idx >= 0) {
+                    if (p.member_adds[idx].ts < add.ts) p.member_adds[idx] = add;
+                } else {
+                    p.member_adds.push(add);
+                }
+            }
+
+            // Merge removes
+            for (const rem of removes) {
+                const idx = p.member_removes.findIndex(r => r.pubkey === rem.pubkey);
+                if (idx >= 0) {
+                    if (p.member_removes[idx].ts < rem.ts) p.member_removes[idx] = rem;
+                } else {
+                    p.member_removes.push(rem);
+                }
+            }
+
+            p.members = calculateMembers(p.member_adds, p.member_removes);
+            p.updated_at = new Date().toISOString();
+            const saved = await _saveRelayProfile(p);
+            return saved ? p : null;
+        });
+
+        return profile;
     } catch (error) {
         console.error(`[ProfileManager] Error updating member sets for ${identifier}:`, error);
         return null;
