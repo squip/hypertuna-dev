@@ -38,6 +38,10 @@ const relayMemberAdds = new Map()
 const relayMemberRemoves = new Map()
 let config = null
 
+// Store configuration received from the parent process
+let configReceived = false
+let storedParentConfig = null
+
 
 function getUserKey(config) {
     // If storage path contains /users/, extract the key
@@ -201,9 +205,7 @@ if (workerPipe) {
     message: 'Relay worker starting...' 
   })
   
-  // Set up a flag to track config receipt
-  let configReceived = false;
-  let parentConfig = null;
+  // Configuration may have been sent before initialization
   
   // Handle messages from parent
   let buffer = ''
@@ -221,8 +223,8 @@ if (workerPipe) {
           // Handle config message specially
           if (message.type === 'config' && !configReceived) {
             configReceived = true;
-            parentConfig = message.data;
-            console.log('[Worker] Stored parent config:', parentConfig);
+            storedParentConfig = message.data;
+            console.log('[Worker] Stored parent config:', storedParentConfig);
             continue; // Don't process other messages yet
           }
           
@@ -539,10 +541,11 @@ async function main() {
       config = await loadOrCreateConfig()
       
       // Wait for config from parent if available
-      if (workerPipe) {
+      let parentConfig = storedParentConfig
+      if (!parentConfig && workerPipe) {
         console.log('[Worker] Waiting for parent config...');
-        
-        const parentConfig = await new Promise((resolve) => {
+
+        parentConfig = await new Promise((resolve) => {
             const timeout = setTimeout(() => {
             console.log('[Worker] Config timeout - using default config');
             resolve(null);
@@ -571,8 +574,13 @@ async function main() {
         
         workerPipe.on('data', handleData);
       });
-      
+      } else if (parentConfig) {
+        console.log('[Worker] Using previously received parent config');
+      }
+
       if (parentConfig) {
+        storedParentConfig = parentConfig;
+        configReceived = true;
         // Get user key from parent config
         const userKey = getUserKey(parentConfig);
         console.log('[Worker] User key:', userKey);
