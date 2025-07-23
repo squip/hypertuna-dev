@@ -1860,6 +1860,73 @@ members-list,.member-list {
     color: var(--text-secondary);
 }
 
+/* Invite Members Modal */
+.invite-members-add-section {
+    margin-top: var(--space-xl);
+    border-top: 1px solid var(--border-color);
+    padding-top: var(--space-xl);
+}
+
+.invite-members-add-section .input-with-action {
+    display: flex;
+    gap: var(--space-sm);
+    align-items: flex-start;
+}
+
+.invite-members-add-section .form-input {
+    flex: 1;
+}
+
+.invite-members-list-section h4 {
+    margin-bottom: var(--space-md);
+    color: var(--text-secondary);
+    font-size: 0.875rem;
+    font-weight: 500;
+}
+
+.invite-members-list {
+    max-height: 400px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-sm);
+}
+
+.invite-member-item {
+    display: flex;
+    align-items: center;
+    padding: var(--space-md);
+    background-color: var(--surface-hover);
+    border-radius: var(--radius-lg);
+    transition: all var(--transition-fast);
+}
+
+.invite-member-item:hover {
+    background-color: var(--border-color);
+}
+
+.invite-member-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.invite-member-info .name {
+    font-weight: 500;
+    margin-bottom: 0.125rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.invite-member-info .pubkey {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 .key-format-toggle {
     display: inline-block;
     margin-left: 10px;

@@ -547,6 +547,36 @@
         </div>
     </div>
 
+    <div id="invite-members-modal" class="modal">
+        <div class="modal-content modal-wide">
+            <div class="modal-header">
+                <h3>Invite Members</h3>
+                <button class="modal-close" id="close-invite-members-modal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="invite-members-list-section">
+                    <h4>Followed Users</h4>
+                    <div id="invite-members-list" class="invite-members-list">
+                        <!-- Followed users will be listed here -->
+                    </div>
+                </div>
+                <div class="invite-members-add-section">
+                    <div class="form-group">
+                        <label for="invite-member-pubkey">Add pubkey</label>
+                        <div class="input-with-action">
+                            <input type="text" id="invite-member-pubkey" class="form-input" placeholder="Enter public key (npub or hex)">
+                            <button id="btn-add-invite-member" class="btn btn-primary btn-small">Add</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button id="btn-send-invites" class="btn btn-primary">Send Invites</button>
+                <button id="btn-cancel-invite-members" class="btn btn-secondary">Cancel</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Invites Modal -->
     <div id="invites-modal" class="modal">
         <div class="modal-content modal-wide">
