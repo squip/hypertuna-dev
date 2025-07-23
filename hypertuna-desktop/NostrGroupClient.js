@@ -3021,6 +3021,72 @@ async fetchMultipleProfiles(pubkeys) {
     }
 
     /**
+     * Invite multiple members to a group
+     * @param {string} groupId - Group ID
+     * @param {Array<string>} pubkeys - Array of pubkeys to invite
+     * @returns {Promise<Array<Object>>} - Array of invite events
+     */
+    async inviteMembers(groupId, pubkeys = []) {
+        const inviteEvents = [];
+        const groupRelayUrl = this.groupRelayUrls.get(groupId);
+
+        for (const pubkey of pubkeys) {
+            const token = NostrUtils.generateInviteCode();
+
+            // ----- kind 9000: add user -----
+            const putUserEvent = await NostrEvents.createPutUserEvent(
+                groupId,
+                pubkey,
+                ['member', token],
+                this.user.privateKey
+            );
+
+            if (groupRelayUrl) {
+                await this.relayManager.publishToRelays(putUserEvent, [groupRelayUrl]);
+            } else {
+                await this.relayManager.publish(putUserEvent);
+            }
+
+            // Update local membership state
+            this._processGroupAddUserEvent(putUserEvent);
+
+            // ----- kind 9009: invite -----
+            const storedUrl = this.groupRelayUrls.get(groupId) || '';
+            const relayUrl = this._getBaseRelayUrl(storedUrl);
+            const relayKey = this.publicToInternalMap.get(groupId) || null;
+            const isPublic = this.groups.get(groupId)?.isPublic || false;
+            const payload = { relayUrl, token, relayKey, isPublic };
+            const encrypted = NostrUtils.encrypt(
+                this.user.privateKey,
+                pubkey,
+                JSON.stringify(payload)
+            );
+
+            const group = this.groups.get(groupId) || {};
+            const tags = [
+                ['h', groupId],
+                ['p', pubkey],
+                ['i', 'hypertuna'],
+                ['name', group.name || ''],
+                ['about', group.about || '']
+            ];
+
+            const inviteEvent = await NostrEvents.createEvent(
+                NostrEvents.KIND_GROUP_INVITE_CREATE,
+                encrypted,
+                tags,
+                this.user.privateKey
+            );
+            const discoveryRelays = Array.from(this.relayManager.discoveryRelays);
+            await this.relayManager.publishToRelays(inviteEvent, discoveryRelays);
+
+            inviteEvents.push(inviteEvent);
+        }
+
+        return inviteEvents;
+    }
+
+    /**
      * Reject a join request
      * @param {string} groupId
      * @param {string} pubkey
