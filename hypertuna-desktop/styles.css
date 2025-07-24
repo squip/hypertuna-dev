@@ -676,6 +676,51 @@ body {
     white-space: pre-wrap;
 }
 
+/* Inline media within messages */
+.media-image,
+.media-video {
+    max-width: 100%;
+    margin-top: var(--space-sm);
+    border-radius: var(--radius-md);
+}
+
+.media-video {
+    max-height: 15rem;
+}
+
+.link-preview {
+    display: flex;
+    align-items: center;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    margin-top: var(--space-sm);
+    text-decoration: none;
+    color: inherit;
+    overflow: hidden;
+}
+
+.preview-thumb {
+    width: 4rem;
+    height: 4rem;
+    object-fit: cover;
+}
+
+.preview-info {
+    padding: var(--space-xs) var(--space-sm);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+}
+
+.preview-title {
+    font-weight: bold;
+}
+
+.preview-desc {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+}
+
 /* Message Input */
 .message-input-container {
     padding: var(--space-md);

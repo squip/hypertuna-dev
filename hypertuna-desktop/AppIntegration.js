@@ -1246,18 +1246,20 @@ App.syncHypertunaConfigToFile = async function() {
             }
             
             // Display messages
-            messages.forEach(message => {
+            for (const message of messages) {
                 const author = profiles[message.pubkey] || { name: 'User_' + NostrUtils.truncatePubkey(message.pubkey) };
                 const isCurrentUser = message.pubkey === this.currentUser.pubkey;
                 const npub = NostrUtils.hexToNpub(message.pubkey);
                 const displayPub = NostrUtils.truncateNpub(npub);
-                
+
                 const messageElement = document.createElement('div');
                 messageElement.className = `message ${isCurrentUser ? 'own' : ''}`;
-                
+
+                const contentHtml = await this.renderMessageContent(message);
+
                 messageElement.innerHTML = `
                     <div class="message-bubble">
-                        <div class="message-content">${this.escapeHtml(message.content)}</div>
+                        <div class="message-content">${contentHtml}</div>
                     </div>
                     <div class="message-meta">
                         <span>${author.name || 'Unknown'}</span>
@@ -1265,9 +1267,9 @@ App.syncHypertunaConfigToFile = async function() {
                         <span>${this.formatTime(message.created_at)}</span>
                     </div>
                 `;
-                
+
                 messageList.appendChild(messageElement);
-            });
+            }
             
             // Scroll to bottom
             messageList.scrollTop = messageList.scrollHeight;
@@ -1453,6 +1455,79 @@ App.syncHypertunaConfigToFile = async function() {
         
         // Otherwise show full date
         return date.toLocaleDateString();
+    };
+
+    App.isMediaUrl = function(url) {
+        return /\.(png|jpe?g|gif|webp|bmp|svg|mp4|webm|ogg|mov)$/i.test(url);
+    };
+
+    App.fetchPreview = async function(url) {
+        try {
+            const oembed = `https://noembed.com/embed?url=${encodeURIComponent(url)}`;
+            const res = await fetch(oembed);
+            if (res.ok) {
+                const data = await res.json();
+                return {
+                    title: data.title || '',
+                    description: data.description || '',
+                    thumbnail: data.thumbnail_url || '',
+                    url
+                };
+            }
+        } catch (e) {
+            // ignore oEmbed errors
+        }
+        try {
+            const res = await fetch(url);
+            const text = await res.text();
+            const doc = new DOMParser().parseFromString(text, 'text/html');
+            const title = doc.querySelector('meta[property="og:title"]')?.getAttribute('content') || doc.title || '';
+            const description = doc.querySelector('meta[property="og:description"]')?.getAttribute('content') || '';
+            const thumbnail = doc.querySelector('meta[property="og:image"]')?.getAttribute('content') || '';
+            return { title, description, thumbnail, url };
+        } catch (e) {
+            console.error('fetchPreview failed', e);
+        }
+        return null;
+    };
+
+    App.renderMessageContent = async function(message) {
+        const urlRegex = /(https?:\/\/[^\s]+)/g;
+        const parts = [];
+        let lastIndex = 0;
+        const text = this.escapeHtml(message.content);
+        for (const match of text.matchAll(urlRegex)) {
+            const url = match[0];
+            parts.push(text.slice(lastIndex, match.index));
+            let replacement = `<a href="${url}" target="_blank" rel="noopener">${url}</a>`;
+            if (this.isMediaUrl(url)) {
+                if (/\.(mp4|webm|ogg|mov)$/i.test(url)) {
+                    replacement = `<video controls class="media-video"><source src="${url}"></video>`;
+                } else {
+                    replacement = `<img src="${url}" class="media-image"/>`;
+                }
+            } else {
+                const preview = await this.fetchPreview(url);
+                if (preview) {
+                    replacement = `<a href="${url}" target="_blank" rel="noopener" class="link-preview">`;
+                    if (preview.thumbnail) {
+                        replacement += `<img src="${preview.thumbnail}" class="preview-thumb">`;
+                    }
+                    replacement += `<div class="preview-info">`;
+                    if (preview.title) {
+                        replacement += `<div class="preview-title">${this.escapeHtml(preview.title)}</div>`;
+                    }
+                    if (preview.description) {
+                        replacement += `<div class="preview-desc">${this.escapeHtml(preview.description)}</div>`;
+                    }
+                    replacement += `</div></a>`;
+                }
+            }
+            parts.push(replacement);
+            lastIndex = match.index + url.length;
+        }
+        parts.push(text.slice(lastIndex));
+        return parts.join('');
     };
 
     App.loadJoinRequests = function() {
