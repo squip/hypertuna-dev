@@ -1,0 +1,58 @@
+{
+  "name": "easybase",
+  "version": "0.2.4",
+  "description": "A simple wrapper around Autobase that makes pairing and sharing easy, with configurable actions for handling custom operations",
+  "main": "build/index.js",
+  "module": "build/index.js",
+  "types": "build/index.d.ts",
+  "type": "module",
+  "license": "Apache-2.0",
+  "files": [
+    "build",
+    "README.md"
+  ],
+  "exports": {
+    ".": {
+      "types": "./build/index.d.ts",
+      "import": "./build/index.js",
+      "default": "./build/index.js"
+    }
+  },
+  "scripts": {
+    "dev": "pear run -d .",
+    "build": "bun build index.ts --outdir build --packages=external",
+    "build:types": "tsc -p tsconfig.build.json",
+    "prepublishOnly": "bun run build && bun run build:types",
+    "test": "brittle test/*.test.js",
+    "clean": "rm -rf build"
+  },
+  "keywords": [
+    "autobase",
+    "hyperswarm",
+    "p2p",
+    "distributed",
+    "database",
+    "pairing"
+  ],
+  "devDependencies": {
+    "@types/bun": "latest",
+    "brittle": "^3.16.3",
+    "typescript": "^5"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "autobase": "^7.13.3",
+    "b4a": "^1.6.7",
+    "blind-pairing": "^2.3.1",
+    "corestore": "^7.4.5",
+    "holepunch-types": "github:Drache93/holepunch-types#v0.1.10",
+    "hyperbee": "^2.24.2",
+    "hyperblobs": "^2.8.0",
+    "hyperdrive": "^13.0.1",
+    "hyperswarm": "^4.11.7",
+    "ready-resource": "^1.1.2",
+    "z32": "^1.1.0"
+  }
+}
