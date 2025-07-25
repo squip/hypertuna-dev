@@ -218,7 +218,10 @@ export class RelayManager {
         
         const mux = new Protomux(connection);
         console.log('Initialized Protomux on the connection');
-        
+
+        const replicationStream = this.store.replicate(connection);
+        console.log('[RelayManager] Corestore replication stream established');
+
         const addWriterProtocol = mux.createChannel({
           protocol: 'add-writer',
           onopen: () => {
@@ -258,7 +261,7 @@ export class RelayManager {
         const writerKey = b4a.toString(this.relay.local.key, 'hex');
         addWriterMessage.send(writerKey);
         console.log('Sent writer key:', writerKey);
-        
+
         console.log('[RelayManager] Replicating Autobase with peer');
         this.relay.replicate(connection);
         if (this.drive) {
