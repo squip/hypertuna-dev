@@ -827,9 +827,17 @@ export async function updateRelaySubscriptions(relayKey, connectionKey, activeSu
     if (!relayManager) {
       throw new Error(`Relay not found: ${relayKey}`);
     }
-    
+
     return relayManager.updateSubscriptions(connectionKey, activeSubscriptionsUpdated);
   }
+
+export async function writeFile(relayKey, localPath, fileId) {
+    const relayManager = activeRelays.get(relayKey);
+    if (!relayManager) {
+        throw new Error(`Relay not found: ${relayKey}`);
+    }
+    return relayManager.writeFile(localPath, fileId);
+}
 
 /**
  * Get the members list for a relay
