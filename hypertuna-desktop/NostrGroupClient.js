@@ -2599,7 +2599,7 @@ async fetchMultipleProfiles(pubkeys) {
      * @param {string} content - Message content
      * @returns {Promise<Object>} - Message event
      */
-    async sendGroupMessage(groupId, content) {
+    async sendGroupMessage(groupId, content, filePath = '') {
         if (!this.user || !this.user.privateKey) {
             throw new Error('User not logged in');
         }
@@ -2621,7 +2621,8 @@ async fetchMultipleProfiles(pubkeys) {
             groupId,
             content,
             previousRefs,
-            this.user.privateKey
+            this.user.privateKey,
+            filePath
         );
         
         // Publish only to the group's relay

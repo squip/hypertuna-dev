@@ -1987,10 +1987,11 @@ App.syncHypertunaConfigToFile = async function() {
             fileInput.disabled = true;
             sendButton.disabled = true;
             
-            await this.nostr.sendGroupMessage(this.currentGroupId, {
-                text: messageText,
+            await this.nostr.sendGroupMessage(
+                this.currentGroupId,
+                messageText,
                 filePath
-            });
+            );
             
             // Clear inputs
             messageInput.value = '';
