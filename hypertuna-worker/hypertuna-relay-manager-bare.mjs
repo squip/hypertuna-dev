@@ -102,9 +102,11 @@ function validateEvent(event) {
 }
 
 export class RelayManager {
-    constructor(storageDir, bootstrap) {
+    constructor(storageDir, bootstrap, driveKey = null, driveDiscoveryKey = null) {
       this.storageDir = storageDir;
       this.bootstrap = bootstrap;
+      this.driveKey = driveKey;
+      this.driveDiscoveryKey = driveDiscoveryKey;
       this.store = null;  // Initialize in the initialize method
       this.relay = null;
       this.drive = null;
@@ -128,7 +130,11 @@ export class RelayManager {
         // ==============================
         this.relay = new NostrRelay(this.store, this.bootstrap, {
           open: (viewStore) => {
-            this.drive = this._createHyperdriveView(viewStore);
+            this.drive = this._createHyperdriveView(
+              viewStore,
+              this.driveKey,
+              this.driveDiscoveryKey
+            );
             return this.drive;
           },
           apply: async (batch, view, base) => {
@@ -491,7 +497,7 @@ export class RelayManager {
       }
     }
 
-    _createHyperdriveView(viewStore, driveKey) {
+    _createHyperdriveView(viewStore, driveKey, driveDiscoveryKey) {
       const db = new Hyperbee(viewStore.get({ name: 'drive-db' }), {
         keyEncoding: 'utf-8',
         valueEncoding: 'json',
@@ -500,9 +506,11 @@ export class RelayManager {
       });
       const blobs = new Hyperblobs(viewStore.get({ name: 'drive-blobs' }));
 
-      const drive = driveKey
-        ? new Hyperdrive(viewStore, driveKey, { _db: db })
-        : new Hyperdrive(viewStore, { _db: db });
+      const opts = { _db: db };
+      if (driveKey) opts.key = typeof driveKey === 'string' ? b4a.from(driveKey, 'hex') : driveKey;
+      if (driveDiscoveryKey) opts.discoveryKey = typeof driveDiscoveryKey === 'string' ? b4a.from(driveDiscoveryKey, 'hex') : driveDiscoveryKey;
+
+      const drive = new Hyperdrive(viewStore, opts);
 
       drive.blobs = blobs;
       return drive;

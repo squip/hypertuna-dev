@@ -330,22 +330,30 @@ export async function joinRelay(options = {}) {
         
         // Set default storage directory
         const defaultStorageDir = storageDir || join(config.storage || './data', 'relays', relayKey);
-        
+
         // Ensure storage directory exists
         await fs.mkdir(defaultStorageDir, { recursive: true });
-        
+
+        // Load profile to get stored drive keys if available
+        let profileInfo = await getRelayProfileByKey(relayKey);
+        const savedDriveKey = profileInfo?.drive_key || null;
+        const savedDriveDiscoveryKey = profileInfo?.drive_discovery_key || null;
+
         // Create relay manager instance
-        const relayManager = new RelayManager(defaultStorageDir, relayKey);
+        const relayManager = new RelayManager(
+            defaultStorageDir,
+            relayKey,
+            savedDriveKey,
+            savedDriveDiscoveryKey
+        );
         await relayManager.initialize();
 
         const driveKey = b4a.toString(relayManager.drive.key, 'hex');
         const driveDiscoveryKey = b4a.toString(relayManager.drive.discoveryKey, 'hex');
-        
+
         activeRelays.set(relayKey, relayManager);
-        
+
         // Check if profile already exists
-        let profileInfo = await getRelayProfileByKey(relayKey);
-        
         if (!profileInfo) {
             // Create new profile
             profileInfo = {
