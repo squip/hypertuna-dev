@@ -291,12 +291,26 @@ export class RelayManager {
       if (!this.drive) {
         throw new Error('Hyperdrive not initialized');
       }
+
       console.log(`[RelayManager] writeFile called with ${localPath} -> ${fileId}`);
+
       const data = await fs.readFile(localPath);
       console.log(`[RelayManager] Read ${data.length} bytes from ${localPath}`);
+
+      // Ensure the key used for storage matches the HTTP retrieval key.
+      // If the desktop did not include the file extension in fileId, append it
+      // using the extension from the local path.
+      const extMatch = /\.([^.]+)$/.exec(localPath);
+      const ext = extMatch ? `.${extMatch[1]}` : '';
+      let driveKey = fileId;
+      if (ext && !fileId.endsWith(ext)) {
+        driveKey = `${fileId}${ext}`;
+        console.log(`[RelayManager] Adjusted fileId with extension: ${driveKey}`);
+      }
+
       try {
-        await this.drive.put(fileId, data);
-        console.log(`[RelayManager] Stored file ${fileId} in drive. Version now ${this.drive.version}`);
+        await this.drive.put(driveKey, data);
+        console.log(`[RelayManager] Stored file ${driveKey} in drive. Version now ${this.drive.version}`);
       } catch (err) {
         console.error('[RelayManager] Error storing file:', err);
         throw err;
