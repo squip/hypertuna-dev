@@ -15,6 +15,7 @@ const debounce = require('debounceify');
 const b4a = require('b4a');
 const stdio = require('pear-stdio');
 const { NostrInitializer, createDirectoryUpdater } = require('./fishy-gateway-nostr-client');
+const { Readable } = require('stream');
 
 // Import Hyperswarm client functions
 const {
@@ -1219,6 +1220,30 @@ app.post('/callback/finalize-auth/:identifier', async (req, res) => {
       error: 'Finalization failed',
       message: error.message
     });
+  }
+});
+
+app.get('/drive/:identifier/:file', async (req, res) => {
+  const { identifier } = req.params;
+  try {
+    const peer = await findHealthyPeerForRelay(identifier);
+    if (!peer) {
+      return res.status(503).json({ error: 'No healthy peers available for this relay' });
+    }
+
+    const response = await forwardRequestToPeer(peer, req, connectionPool);
+
+    Object.entries(response.headers).forEach(([key, value]) => {
+      res.setHeader(key, value);
+    });
+
+    res.status(response.statusCode);
+    Readable.from(response.body).pipe(res);
+
+    peer.lastSeen = Date.now();
+  } catch (error) {
+    console.error(`[${new Date().toISOString()}] Drive file error:`, error.message);
+    res.status(500).json({ error: 'Internal Server Error', message: error.message });
   }
 });
 
