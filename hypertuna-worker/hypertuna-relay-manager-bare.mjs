@@ -153,8 +153,10 @@ export class RelayManager {
         });
 
         this.relay.on('error', console.error);
-
+        
+        await this.relay.ready();
         await this.drive.ready();
+        
         console.log(`[RelayManager] Hyperdrive ready in ${this.storageDir}`);
         console.log(`[RelayManager] Drive key: ${b4a.toString(this.drive.key, 'hex')}`);
         console.log(`[RelayManager] Drive version: ${this.drive.version}`);
