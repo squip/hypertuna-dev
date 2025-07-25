@@ -155,13 +155,15 @@ export class RelayManager {
         this.relay.on('error', console.error);
         
         await this.relay.ready();
+        // Ensure the view is opened so that the open() handler assigns
+        // this.drive before we try to access it.
+        await this.relay.update();
         await this.drive.ready();
         
         console.log(`[RelayManager] Hyperdrive ready in ${this.storageDir}`);
         console.log(`[RelayManager] Drive key: ${b4a.toString(this.drive.key, 'hex')}`);
         console.log(`[RelayManager] Drive version: ${this.drive.version}`);
         
-        await this.relay.update();
 
         this.relay.view.core.on('append', async () => {
           if (this.relay.view.version === 1) return;
