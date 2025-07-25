@@ -88,3 +88,13 @@ test('concurrent member set updates do not lose updates', async t => {
   t.alike(members, ['alice', 'bob'])
   await fs.rm(tmp, { recursive: true, force: true })
 })
+
+test('profiles include drive fields after load', async t => {
+  const tmp = await setupProfile()
+  const profiles = await getAllRelayProfiles()
+  t.ok('drive_key' in profiles[0])
+  t.ok('drive_discovery_key' in profiles[0])
+  t.is(profiles[0].drive_key, null)
+  t.is(profiles[0].drive_discovery_key, null)
+  await fs.rm(tmp, { recursive: true, force: true })
+})
