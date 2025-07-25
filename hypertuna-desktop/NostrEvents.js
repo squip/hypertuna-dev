@@ -5,6 +5,7 @@
  */
 
 import { NostrUtils } from './NostrUtils.js';
+import { HypertunaUtils } from './HypertunaUtils.js';
 
 class NostrEvents {
     /**
@@ -127,8 +128,8 @@ class NostrEvents {
      * @param {string} privateKey - Private key for signing
      * @returns {Promise<Object>} - Signed event
      */
-    static async createTextNote(content, tags, privateKey) {
-        const eventTags = Array.isArray(tags) ? tags : [];
+    static async createTextNote(content, tags, privateKey, filePath = '') {
+        const eventTags = Array.isArray(tags) ? [...tags] : [];
         const urls = NostrUtils.extractUrls(content);
         for (const url of urls) {
             if (!eventTags.some(t => t[0] === 'r' && t[1] === url)) {
@@ -136,12 +137,32 @@ class NostrEvents {
             }
         }
 
-        return this.createEvent(
+        let fileUrl = null;
+        if (filePath) {
+            const fileId = NostrUtils.generateRandomId();
+            const ext = filePath.split('.').pop();
+            let gatewayDomain;
+            try {
+                gatewayDomain = new URL(HypertunaUtils.DEFAULT_GATEWAY_URL).hostname;
+            } catch (e) {
+                gatewayDomain = HypertunaUtils.DEFAULT_GATEWAY_URL.replace(/^https?:\/\//, '');
+            }
+
+            const publicIdentifier = eventTags.find(t => t[0] === 'h')?.[1] || '';
+            fileUrl = `https://${gatewayDomain}/${publicIdentifier}/${fileId}${ext ? `.${ext}` : ''}`;
+            eventTags.push(['r', fileUrl, 'hypertuna:drive']);
+            eventTags.push(['i', 'hypertuna:drive']);
+        }
+
+        const event = await this.createEvent(
             this.KIND_TEXT_NOTE,
             content,
             eventTags,
             privateKey
         );
+
+        if (fileUrl) event.fileUrl = fileUrl;
+        return event;
     }
     
     /**
@@ -152,7 +173,7 @@ class NostrEvents {
      * @param {string} privateKey - Private key for signing
      * @returns {Promise<Object>} - Signed event
      */
-    static async createGroupMessage(groupId, content, previousEvents, privateKey) {
+    static async createGroupMessage(groupId, content, previousEvents, privateKey, filePath = '') {
         console.log(`Creating group message for group ${groupId.substring(0, 8)}...`);
         console.log(`Message content length: ${content.length}`);
         
@@ -170,7 +191,7 @@ class NostrEvents {
             });
         }
         
-        return this.createTextNote(content, tags, privateKey);
+        return this.createTextNote(content, tags, privateKey, filePath);
     }
     
     /**

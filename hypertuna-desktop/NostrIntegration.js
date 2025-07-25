@@ -502,8 +502,8 @@ class NostrIntegration {
      * @param {string} content - Message content
      * @returns {Promise<Object>} - Message event
      */
-    async sendGroupMessage(groupId, content) {
-        return await this.client.sendGroupMessage(groupId, content);
+    async sendGroupMessage(groupId, content, filePath = '') {
+        return await this.client.sendGroupMessage(groupId, content, filePath);
     }
     
     /**
