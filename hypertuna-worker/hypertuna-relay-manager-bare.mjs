@@ -241,18 +241,44 @@ export class RelayManager {
         }
         
         const addWriterMessage = addWriterProtocol.addMessage({
-          encoding: c.string,
+          encoding: c.json,
           onmessage: async (message) => {
-            const writerKey = message.toString();
-            console.log('Received new writer key:', writerKey);
-            try {
-              await this.addWriter(writerKey);
-              await this.relay.update();
-              console.log('Writer key added successfully');
-              addWriterProtocol.close();
-            } catch (error) {
-              console.error('Error adding writer key:', error);
+            const { writerKey, driveKey, driveDiscoveryKey } = message || {};
+            if (writerKey) {
+              console.log('Received new writer key:', writerKey);
+              try {
+                await this.addWriter(writerKey);
+                await this.relay.update();
+                console.log('Writer key added successfully');
+              } catch (error) {
+                console.error('Error adding writer key:', error);
+              }
             }
+
+            if (driveKey || driveDiscoveryKey) {
+              console.log('Received drive info via add-writer:', {
+                driveKey,
+                driveDiscoveryKey
+              });
+
+              this.driveKey = driveKey || this.driveKey;
+              this.driveDiscoveryKey = driveDiscoveryKey || this.driveDiscoveryKey;
+
+              if (!this.drive) {
+                this.drive = this._createHyperdriveView(
+                  this.store,
+                  this.driveKey,
+                  this.driveDiscoveryKey
+                );
+                await this.drive.ready();
+              }
+
+              if (this.drive) {
+                this.drive.replicate(connection);
+              }
+            }
+
+            addWriterProtocol.close();
           }
         });
         
@@ -260,8 +286,10 @@ export class RelayManager {
         console.log('Opened add-writer protocol');
         
         const writerKey = b4a.toString(this.relay.local.key, 'hex');
-        addWriterMessage.send(writerKey);
-        console.log('Sent writer key:', writerKey);
+        const driveKey = this.drive ? b4a.toString(this.drive.key, 'hex') : null;
+        const driveDiscoveryKey = this.drive ? b4a.toString(this.drive.discoveryKey, 'hex') : null;
+        addWriterMessage.send({ writerKey, driveKey, driveDiscoveryKey });
+        console.log('Sent add-writer payload:', { writerKey, driveKey, driveDiscoveryKey });
 
         console.log('[RelayManager] Replicating Autobase with peer');
         this.relay.replicate(connection);
