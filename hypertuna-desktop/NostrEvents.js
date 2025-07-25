@@ -137,10 +137,13 @@ class NostrEvents {
             }
         }
 
-        let fileUrl = null;
+        let fileId = null;
         if (filePath) {
-            const fileId = NostrUtils.generateRandomId();
-            const ext = filePath.split('.').pop();
+            const baseId = NostrUtils.generateRandomId();
+            const extPart = filePath.split('.').pop();
+            const ext = extPart && extPart !== filePath ? `.${extPart}` : '';
+            fileId = `${baseId}${ext}`;
+
             let gatewayDomain;
             try {
                 gatewayDomain = new URL(HypertunaUtils.DEFAULT_GATEWAY_URL).hostname;
@@ -149,7 +152,7 @@ class NostrEvents {
             }
 
             const publicIdentifier = eventTags.find(t => t[0] === 'h')?.[1] || '';
-            fileUrl = `https://${gatewayDomain}/drive/${publicIdentifier}/${fileId}${ext ? `.${ext}` : ''}`;
+            const fileUrl = `https://${gatewayDomain}/drive/${publicIdentifier}/${fileId}`;
             eventTags.push(['r', fileUrl, 'hypertuna:drive']);
             eventTags.push(['i', 'hypertuna:drive']);
         }
@@ -161,7 +164,7 @@ class NostrEvents {
             privateKey
         );
 
-        return event;
+        return { event, fileId };
     }
     
     /**
