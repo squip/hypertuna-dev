@@ -365,8 +365,8 @@ export async function getRelayProfileByPublicIdentifier(publicIdentifier) {
 /**
  * Add or update a relay profile in the storage file
  * @param {Object} relayProfile - The relay profile to add or update
- * @returns {Promise<boolean>} - True if successful, false otherwise
- */
+ * @returns {Promise<Object|null>} - The saved profile or null on failure
+*/
 export async function saveRelayProfile(relayProfile) {
     return withProfileLock(() => _saveRelayProfile(relayProfile));
 }
@@ -462,11 +462,11 @@ async function _saveRelayProfile(relayProfile) {
             console.error('[ProfileManager] Failed to update relay adapter maps:', err);
         }
 
-        return true;
+        return relayProfile;
     } catch (error) {
         console.error(`[ProfileManager] Error saving relay profile:`, error);
         console.error(error.stack);
-        return false;
+        return null;
     }
 }
 
@@ -583,10 +583,11 @@ export async function updateAutoConnectSetting(relayKey, autoConnect) {
         profile.updated_at = new Date().toISOString();
         
         // Save the updated profile
-        const success = await saveRelayProfile(profile);
-        console.log(`[ProfileManager] Profile save result for ${relayKey}: ${success}`);
-        
-        return success;
+        const saved = await saveRelayProfile(profile);
+        const ok = !!saved;
+        console.log(`[ProfileManager] Profile save result for ${relayKey}: ${ok}`);
+
+        return ok;
     } catch (error) {
         console.error(`[ProfileManager] Error updating auto-connect setting for ${relayKey}:`, error);
         console.error(error.stack);

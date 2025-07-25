@@ -3,7 +3,7 @@ import fs from 'fs/promises'
 import path from 'path'
 import os from 'os'
 
-import { updateRelayAuthToken, updateRelayMemberSets, getAllRelayProfiles } from '../hypertuna-relay-profile-manager-bare.mjs'
+import { updateRelayAuthToken, updateRelayMemberSets, getAllRelayProfiles, saveRelayProfile } from '../hypertuna-relay-profile-manager-bare.mjs'
 
 // Helper to create temporary storage and seed legacy profile
 async function setupLegacyProfile() {
@@ -96,5 +96,21 @@ test('profiles include drive fields after load', async t => {
   t.ok('drive_discovery_key' in profiles[0])
   t.is(profiles[0].drive_key, null)
   t.is(profiles[0].drive_discovery_key, null)
+  await fs.rm(tmp, { recursive: true, force: true })
+})
+
+test('saveRelayProfile persists drive fields', async t => {
+  const tmp = await setupProfile()
+  const profilePath = path.join(tmp, 'relay-profiles.json')
+
+  // Save a new minimal profile without drive fields
+  await saveRelayProfile({ relay_key: 'relay2', name: 'Test Relay' })
+
+  const raw = JSON.parse(await fs.readFile(profilePath, 'utf8'))
+  t.ok('drive_key' in raw.relays[1])
+  t.ok('drive_discovery_key' in raw.relays[1])
+  t.is(raw.relays[1].drive_key, null)
+  t.is(raw.relays[1].drive_discovery_key, null)
+
   await fs.rm(tmp, { recursive: true, force: true })
 })
