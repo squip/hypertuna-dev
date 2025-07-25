@@ -4,6 +4,7 @@
 import { promises as fs } from 'bare-fs';
 import { join } from 'bare-path';
 import crypto from 'bare-crypto';
+import b4a from 'b4a';
 
 // Import the legacy modules (these need to be adapted for Bare)
 // We'll need to update their imports to use bare- modules
@@ -119,7 +120,10 @@ export async function createRelay(options = {}) {
         // Create relay manager instance
         const relayManager = new RelayManager(defaultStorageDir, null);
         await relayManager.initialize();
-        
+
+        const driveKey = b4a.toString(relayManager.drive.key, 'hex');
+        const driveDiscoveryKey = b4a.toString(relayManager.drive.discoveryKey, 'hex');
+
         const relayKey = relayManager.getPublicKey();
         activeRelays.set(relayKey, relayManager);
         
@@ -148,6 +152,8 @@ export async function createRelay(options = {}) {
             relay_key: relayKey, // Internal key
             public_identifier: publicIdentifier, // New public-facing identifier
             relay_storage: defaultStorageDir,
+            drive_key: driveKey,
+            drive_discovery_key: driveDiscoveryKey,
             created_at: new Date().toISOString(),
             auto_connect: true,
             is_active: true,
@@ -331,6 +337,9 @@ export async function joinRelay(options = {}) {
         // Create relay manager instance
         const relayManager = new RelayManager(defaultStorageDir, relayKey);
         await relayManager.initialize();
+
+        const driveKey = b4a.toString(relayManager.drive.key, 'hex');
+        const driveDiscoveryKey = b4a.toString(relayManager.drive.discoveryKey, 'hex');
         
         activeRelays.set(relayKey, relayManager);
         
@@ -351,6 +360,8 @@ export async function joinRelay(options = {}) {
                 relay_key: relayKey,
                 public_identifier: publicIdentifier || null,
                 relay_storage: defaultStorageDir,
+                drive_key: driveKey,
+                drive_discovery_key: driveDiscoveryKey,
                 joined_at: new Date().toISOString(),
                 auto_connect: true,
                 is_active: true
@@ -360,6 +371,8 @@ export async function joinRelay(options = {}) {
         } else {
             // Update existing profile
             profileInfo.relay_storage = defaultStorageDir;
+            profileInfo.drive_key = driveKey;
+            profileInfo.drive_discovery_key = driveDiscoveryKey;
             profileInfo.last_joined_at = new Date().toISOString();
             profileInfo.is_active = true;
             if (name) profileInfo.name = name;
