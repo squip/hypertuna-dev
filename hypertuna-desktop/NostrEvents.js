@@ -149,7 +149,7 @@ class NostrEvents {
             }
 
             const publicIdentifier = eventTags.find(t => t[0] === 'h')?.[1] || '';
-            fileUrl = `https://${gatewayDomain}/${publicIdentifier}/${fileId}${ext ? `.${ext}` : ''}`;
+            fileUrl = `https://${gatewayDomain}/drive/${publicIdentifier}/${fileId}${ext ? `.${ext}` : ''}`;
             eventTags.push(['r', fileUrl, 'hypertuna:drive']);
             eventTags.push(['i', 'hypertuna:drive']);
         }
@@ -161,7 +161,6 @@ class NostrEvents {
             privateKey
         );
 
-        if (fileUrl) event.fileUrl = fileUrl;
         return event;
     }
     
