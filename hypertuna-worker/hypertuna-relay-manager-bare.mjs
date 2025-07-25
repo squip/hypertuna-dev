@@ -126,21 +126,11 @@ export class RelayManager {
         // ==============================
         // Hyperdrive Setup (multiwriter)
         // ==============================
-        const db = new Hyperbee(this.store.get({ name: 'drive-db' }), {
-          keyEncoding: 'utf-8',
-          valueEncoding: 'json',
-          metadata: { contentFeed: null },
-          extension: false
-        });
-        const blobs = new Hyperblobs(this.store.get({ name: 'drive-blobs' }));
-        this.drive = new Hyperdrive(this.store, { _db: db });
-        this.drive.blobs = blobs;
-        await this.drive.ready();
-        console.log(`[RelayManager] Hyperdrive ready in ${this.storageDir}`);
-        console.log(`[RelayManager] Drive key: ${b4a.toString(this.drive.key, 'hex')}`);
-        console.log(`[RelayManager] Drive version: ${this.drive.version}`);
-        
         this.relay = new NostrRelay(this.store, this.bootstrap, {
+          open: (viewStore) => {
+            this.drive = this._createHyperdriveView(viewStore);
+            return this.drive;
+          },
           apply: async (batch, view, base) => {
             for (const node of batch) {
               const op = node.value;
@@ -158,6 +148,11 @@ export class RelayManager {
 
         this.relay.on('error', console.error);
 
+        await this.drive.ready();
+        console.log(`[RelayManager] Hyperdrive ready in ${this.storageDir}`);
+        console.log(`[RelayManager] Drive key: ${b4a.toString(this.drive.key, 'hex')}`);
+        console.log(`[RelayManager] Drive version: ${this.drive.version}`);
+        
         await this.relay.update();
 
         this.relay.view.core.on('append', async () => {
@@ -494,6 +489,23 @@ export class RelayManager {
         releaseFileLock(`${this.storageDir}-flush`);
         throw error;
       }
+    }
+
+    _createHyperdriveView(viewStore, driveKey) {
+      const db = new Hyperbee(viewStore.get({ name: 'drive-db' }), {
+        keyEncoding: 'utf-8',
+        valueEncoding: 'json',
+        metadata: { contentFeed: null },
+        extension: false
+      });
+      const blobs = new Hyperblobs(viewStore.get({ name: 'drive-blobs' }));
+
+      const drive = driveKey
+        ? new Hyperdrive(viewStore, driveKey, { _db: db })
+        : new Hyperdrive(viewStore, { _db: db });
+
+      drive.blobs = blobs;
+      return drive;
     }
 
     async close() {
