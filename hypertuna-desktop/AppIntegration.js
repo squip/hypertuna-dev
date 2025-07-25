@@ -1965,21 +1965,37 @@ App.syncHypertunaConfigToFile = async function() {
         if (!this.currentUser || !this.currentGroupId) return;
         
         const messageInput = document.getElementById('message-input');
+        const fileInput = document.getElementById('message-file');
         const sendButton = document.getElementById('btn-send-message');
         const messageText = messageInput.value.trim();
-        
-        if (!messageText) return;
+
+        const file = fileInput.files[0];
+        let filePath = '';
+        if (file) {
+            try {
+                filePath = Pear.media.getPathForFile(file);
+            } catch (e) {
+                console.error('Error getting file path:', e);
+            }
+        }
+
+        if (!messageText && !filePath) return;
         
         try {
             // Disable input and button while sending
             messageInput.disabled = true;
+            fileInput.disabled = true;
             sendButton.disabled = true;
             
-            await this.nostr.sendGroupMessage(this.currentGroupId, messageText);
+            await this.nostr.sendGroupMessage(this.currentGroupId, {
+                text: messageText,
+                filePath
+            });
             
-            // Clear input
+            // Clear inputs
             messageInput.value = '';
             messageInput.style.height = 'auto';
+            fileInput.value = '';
             
             // Reload messages
             this.loadGroupMessages();
@@ -1990,6 +2006,7 @@ App.syncHypertunaConfigToFile = async function() {
         } finally {
             // Re-enable input and button
             messageInput.disabled = false;
+            fileInput.disabled = false;
             sendButton.disabled = false;
             messageInput.focus();
         }
