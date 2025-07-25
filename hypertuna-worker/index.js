@@ -20,7 +20,7 @@ import {
   calculateMembers,
   calculateAuthorizedUsers
 } from './hypertuna-relay-profile-manager-bare.mjs'
-import { loadRelayKeyMappings } from './hypertuna-relay-manager-adapter.mjs'
+import { loadRelayKeyMappings, writeFile } from './hypertuna-relay-manager-adapter.mjs'
 import {
   queuePendingAuthUpdate,
   applyPendingAuthUpdates
@@ -476,7 +476,27 @@ if (workerPipe) {
                 }
               }
               break;
-              
+
+            case 'upload-file':
+              console.log('[Worker] Upload file requested:', message.data);
+              if (relayServer) {
+                try {
+                  const { relayKey, filePath, fileId } = message.data;
+                  await writeFile(relayKey, filePath, fileId);
+                  sendMessage({
+                    type: 'file-uploaded',
+                    relayKey,
+                    fileId
+                  });
+                } catch (err) {
+                  sendMessage({
+                    type: 'error',
+                    message: `Failed to upload file: ${err.message}`
+                  });
+                }
+              }
+              break;
+
             case 'get-health':
               console.log('[Worker] Get health requested')
               // The relay server will send health updates automatically
