@@ -196,7 +196,7 @@ export default class NostrRelay extends Autobee {
             const record = op.record || {};
             logWithTimestamp('NostrRelay.apply: Adding file', record);
             if (record.key && record.data) {
-                await view.put(record.key, b4a.from(record.data));
+                await view.put(record.key, b4a.from(record.data, 'base64'));
             }
         } else if (op.type === 'remove-file') {
             const record = op.record || {};

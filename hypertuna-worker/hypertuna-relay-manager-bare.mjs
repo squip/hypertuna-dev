@@ -310,8 +310,14 @@ export class RelayManager {
       }
 
       try {
-        await this.drive.put(driveKey, data);
-        console.log(`[RelayManager] Stored file ${driveKey} in drive. Version now ${this.drive.version}`);
+        await this.relay.append({
+          type: 'add-file',
+          record: {
+            key: driveKey,
+            data: data.toString('base64')
+          }
+        });
+        console.log(`[RelayManager] Appended add-file operation for ${driveKey}`);
       } catch (err) {
         console.error('[RelayManager] Error storing file:', err);
         throw err;
