@@ -136,6 +136,9 @@ export class RelayManager {
         this.drive = new Hyperdrive(this.store, { _db: db });
         this.drive.blobs = blobs;
         await this.drive.ready();
+        console.log(`[RelayManager] Hyperdrive ready in ${this.storageDir}`);
+        console.log(`[RelayManager] Drive key: ${b4a.toString(this.drive.key, 'hex')}`);
+        console.log(`[RelayManager] Drive version: ${this.drive.version}`);
         
         this.relay = new NostrRelay(this.store, this.bootstrap, {
           apply: async (batch, view, base) => {
@@ -256,8 +259,10 @@ export class RelayManager {
         addWriterMessage.send(writerKey);
         console.log('Sent writer key:', writerKey);
         
+        console.log('[RelayManager] Replicating Autobase with peer');
         this.relay.replicate(connection);
         if (this.drive) {
+          console.log('[RelayManager] Replicating Hyperdrive with peer');
           this.drive.replicate(connection);
         }
       });
@@ -283,8 +288,16 @@ export class RelayManager {
       if (!this.drive) {
         throw new Error('Hyperdrive not initialized');
       }
+      console.log(`[RelayManager] writeFile called with ${localPath} -> ${fileId}`);
       const data = await fs.readFile(localPath);
-      await this.drive.put(fileId, data);
+      console.log(`[RelayManager] Read ${data.length} bytes from ${localPath}`);
+      try {
+        await this.drive.put(fileId, data);
+        console.log(`[RelayManager] Stored file ${fileId} in drive. Version now ${this.drive.version}`);
+      } catch (err) {
+        console.error('[RelayManager] Error storing file:', err);
+        throw err;
+      }
     }
 
     async handleMessage(message, sendResponse, connectionKey) {

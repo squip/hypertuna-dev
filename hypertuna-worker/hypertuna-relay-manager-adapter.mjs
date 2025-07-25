@@ -832,8 +832,10 @@ export async function updateRelaySubscriptions(relayKey, connectionKey, activeSu
   }
 
 export async function writeFile(relayKey, localPath, fileId) {
+    console.log(`[RelayAdapter] writeFile for relay ${relayKey} -> ${fileId}`);
     const relayManager = activeRelays.get(relayKey);
     if (!relayManager) {
+        console.error('[RelayAdapter] Relay not found for writeFile');
         throw new Error(`Relay not found: ${relayKey}`);
     }
     return relayManager.writeFile(localPath, fileId);
