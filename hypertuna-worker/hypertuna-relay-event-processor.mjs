@@ -192,6 +192,18 @@ export default class NostrRelay extends Autobee {
             const key = b4a.from(subscriptionData.connection, 'hex');
             logWithTimestamp(`NostrRelay.apply: Storing subscription data for connection: ${subscriptionData.connection}`);
             await b.put(key, op.subscriptions);
+        } else if (op.type === 'add-file') {
+            const record = op.record || {};
+            logWithTimestamp('NostrRelay.apply: Adding file', record);
+            if (record.key && record.data) {
+                await view.put(record.key, b4a.from(record.data));
+            }
+        } else if (op.type === 'remove-file') {
+            const record = op.record || {};
+            logWithTimestamp('NostrRelay.apply: Removing file', record);
+            if (record.key) {
+                await view.del(record.key);
+            }
         }
     }
   
