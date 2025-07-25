@@ -483,12 +483,14 @@ if (workerPipe) {
                 try {
                   const { relayKey, filePath, fileId } = message.data;
                   await writeFile(relayKey, filePath, fileId);
+                  console.log(`[Worker] File ${fileId} uploaded for relay ${relayKey}`);
                   sendMessage({
                     type: 'file-uploaded',
                     relayKey,
                     fileId
                   });
                 } catch (err) {
+                  console.error('[Worker] Failed to upload file:', err);
                   sendMessage({
                     type: 'error',
                     message: `Failed to upload file: ${err.message}`

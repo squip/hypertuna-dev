@@ -1579,6 +1579,7 @@ protocol.handle('/authorize', async (request) => {
     const fileId = request.params.file;
 
     console.log(`[RelayServer] Drive file requested: ${identifier}/${fileId}`);
+    console.log(`[RelayServer] Looking up relay manager for ${identifier}`);
 
     try {
       let relayKey = identifier;
@@ -1604,7 +1605,7 @@ protocol.handle('/authorize', async (request) => {
           body: b4a.from(JSON.stringify({ error: 'File not found' }))
         };
       }
-
+      console.log(`[RelayServer] Fetching file ${fileId} from drive`);
       const data = await relayManager.drive.get(fileId);
       if (!data) {
         updateMetrics(false);
@@ -1614,6 +1615,8 @@ protocol.handle('/authorize', async (request) => {
           body: b4a.from(JSON.stringify({ error: 'File not found' }))
         };
       }
+
+      console.log(`[RelayServer] Retrieved file ${fileId} (${data.length} bytes)`);
 
       updateMetrics(true);
       return {
