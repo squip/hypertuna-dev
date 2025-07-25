@@ -1572,6 +1572,65 @@ protocol.handle('/authorize', async (request) => {
       }))
     };
   });
+
+  // Serve files from a relay's Hyperdrive
+  protocol.handle('/drive/:identifier/:file', async (request) => {
+    const identifier = request.params.identifier;
+    const fileId = request.params.file;
+
+    console.log(`[RelayServer] Drive file requested: ${identifier}/${fileId}`);
+
+    try {
+      let relayKey = identifier;
+      if (identifier.includes(':')) {
+        relayKey = await getRelayKeyFromPublicIdentifier(identifier);
+        if (!relayKey) {
+          updateMetrics(false);
+          return {
+            statusCode: 404,
+            headers: { 'content-type': 'application/json' },
+            body: b4a.from(JSON.stringify({ error: 'Relay not found' }))
+          };
+        }
+      }
+
+      const { activeRelays } = await import('./hypertuna-relay-manager-adapter.mjs');
+      const relayManager = activeRelays.get(relayKey);
+      if (!relayManager || !relayManager.drive) {
+        updateMetrics(false);
+        return {
+          statusCode: 404,
+          headers: { 'content-type': 'application/json' },
+          body: b4a.from(JSON.stringify({ error: 'File not found' }))
+        };
+      }
+
+      const data = await relayManager.drive.get(fileId);
+      if (!data) {
+        updateMetrics(false);
+        return {
+          statusCode: 404,
+          headers: { 'content-type': 'application/json' },
+          body: b4a.from(JSON.stringify({ error: 'File not found' }))
+        };
+      }
+
+      updateMetrics(true);
+      return {
+        statusCode: 200,
+        headers: { 'content-type': 'application/octet-stream' },
+        body: b4a.from(data)
+      };
+    } catch (error) {
+      console.error('[RelayServer] Error fetching drive file:', error);
+      updateMetrics(false);
+      return {
+        statusCode: 500,
+        headers: { 'content-type': 'application/json' },
+        body: b4a.from(JSON.stringify({ error: error.message }))
+      };
+    }
+  });
   
   console.log('[RelayServer] Protocol handlers setup complete');
 }
