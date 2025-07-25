@@ -11,7 +11,7 @@ const privKey = '1'.repeat(64)
 test('group message content URLs generate r tags', async t => {
   global.window = {}
   const { default: NostrEvents } = await import('../NostrEvents.js')
-  const event = await NostrEvents.createGroupMessage('group1', 'hello https://example.com/page', [], privKey)
+  const { event } = await NostrEvents.createGroupMessage('group1', 'hello https://example.com/page', [], privKey)
   const hasTag = event.tags.some(tag => tag[0] === 'r' && tag[1] === 'https://example.com/page')
   t.ok(hasTag)
 })

@@ -2617,7 +2617,7 @@ async fetchMultipleProfiles(pubkeys) {
         );
         
         // Create message event
-        const event = await NostrEvents.createGroupMessage(
+        const { event, fileId } = await NostrEvents.createGroupMessage(
             groupId,
             content,
             previousRefs,
@@ -2633,6 +2633,20 @@ async fetchMultipleProfiles(pubkeys) {
             throw new Error('Group relay not connected');
         }
         
+        // If a file was attached, send upload instruction to worker
+        if (fileId && window.workerPipe) {
+            const relayKey = this.publicToInternalMap.get(groupId) || null;
+            const msg = {
+                type: 'upload-file',
+                data: { relayKey, filePath, fileId }
+            };
+            try {
+                window.workerPipe.write(JSON.stringify(msg) + '\n');
+            } catch (e) {
+                console.error('Failed to send upload-file to worker', e);
+            }
+        }
+
         return event;
     }
     
