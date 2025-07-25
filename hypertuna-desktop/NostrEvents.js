@@ -138,6 +138,7 @@ class NostrEvents {
         }
 
         let fileId = null;
+        let finalContent = content;
         if (filePath) {
             const baseId = NostrUtils.generateRandomId();
             const extPart = filePath.split('.').pop();
@@ -155,11 +156,17 @@ class NostrEvents {
             const fileUrl = `https://${gatewayDomain}/drive/${publicIdentifier}/${fileId}`;
             eventTags.push(['r', fileUrl, 'hypertuna:drive']);
             eventTags.push(['i', 'hypertuna:drive']);
+
+            // Append the file URL to the content so media loads in the UI
+            if (finalContent && !/\s$/.test(finalContent)) {
+                finalContent += ' ';
+            }
+            finalContent += fileUrl;
         }
 
         const event = await this.createEvent(
             this.KIND_TEXT_NOTE,
-            content,
+            finalContent,
             eventTags,
             privateKey
         );
