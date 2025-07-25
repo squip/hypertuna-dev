@@ -3,6 +3,10 @@
 
 import Corestore from 'corestore';
 import Hyperswarm from 'hyperswarm';
+import Hyperbee from 'hyperbee';
+import Hyperdrive from 'hyperdrive';
+import Hyperblobs from 'hyperblobs';
+import { promises as fs } from 'bare-fs';
 import NostrRelay from './hypertuna-relay-event-processor.mjs';
 import b4a from 'b4a';
 import c from 'compact-encoding';
@@ -103,6 +107,7 @@ export class RelayManager {
       this.bootstrap = bootstrap;
       this.store = null;  // Initialize in the initialize method
       this.relay = null;
+      this.drive = null;
       this.swarm = null;
       this.peers = new Map(); // Track connected peers
     }
@@ -117,6 +122,20 @@ export class RelayManager {
         
         // Initialize Corestore after acquiring the lock
         this.store = new Corestore(this.storageDir);
+
+        // ==============================
+        // Hyperdrive Setup (multiwriter)
+        // ==============================
+        const db = new Hyperbee(this.store.get('drive-db'), {
+          keyEncoding: 'utf-8',
+          valueEncoding: 'json',
+          metadata: { contentFeed: null },
+          extension: false
+        });
+        const blobs = new Hyperblobs(this.store.get('drive-blobs'));
+        this.drive = new Hyperdrive(this.store, { _db: db });
+        this.drive.blobs = blobs;
+        await this.drive.ready();
         
         this.relay = new NostrRelay(this.store, this.bootstrap, {
           apply: async (batch, view, base) => {
@@ -238,6 +257,9 @@ export class RelayManager {
         console.log('Sent writer key:', writerKey);
         
         this.relay.replicate(connection);
+        if (this.drive) {
+          this.drive.replicate(connection);
+        }
       });
     }
 
@@ -255,6 +277,14 @@ export class RelayManager {
         type: 'removeWriter',
         key
       });
+    }
+
+    async writeFile(localPath, fileId) {
+      if (!this.drive) {
+        throw new Error('Hyperdrive not initialized');
+      }
+      const data = await fs.readFile(localPath);
+      await this.drive.put(fileId, data);
     }
 
     async handleMessage(message, sendResponse, connectionKey) {
