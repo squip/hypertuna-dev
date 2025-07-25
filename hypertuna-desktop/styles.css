@@ -776,6 +776,12 @@ body {
     transform: scale(0.95);
 }
 
+/* File input next to message composer */
+#message-file {
+    height: 2.5rem;
+    align-self: flex-end;
+}
+
 /* Members Tab */
 .members-container {
     flex: 1;
