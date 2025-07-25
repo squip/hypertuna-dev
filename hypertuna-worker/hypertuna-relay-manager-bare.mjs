@@ -126,13 +126,13 @@ export class RelayManager {
         // ==============================
         // Hyperdrive Setup (multiwriter)
         // ==============================
-        const db = new Hyperbee(this.store.get('drive-db'), {
+        const db = new Hyperbee(this.store.get({ name: 'drive-db' }), {
           keyEncoding: 'utf-8',
           valueEncoding: 'json',
           metadata: { contentFeed: null },
           extension: false
         });
-        const blobs = new Hyperblobs(this.store.get('drive-blobs'));
+        const blobs = new Hyperblobs(this.store.get({ name: 'drive-blobs' }));
         this.drive = new Hyperdrive(this.store, { _db: db });
         this.drive.blobs = blobs;
         await this.drive.ready();
