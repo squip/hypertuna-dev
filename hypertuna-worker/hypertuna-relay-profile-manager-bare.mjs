@@ -100,6 +100,14 @@ function ensureProfileSchema(profile) {
         profile.isOpen = false;
     }
 
+    if (profile.drive_key === undefined) {
+        profile.drive_key = null;
+    }
+
+    if (profile.drive_discovery_key === undefined) {
+        profile.drive_discovery_key = null;
+    }
+
     return profile;
 }
 
