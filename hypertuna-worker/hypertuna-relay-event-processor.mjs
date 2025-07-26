@@ -336,13 +336,14 @@ export default class NostrRelay extends Autobee {
     logWithTimestamp(`getEvent: Converted key: ${key.toString('hex')}`);
     
     try {
-        const event = await this.view.get(key);
+        const store = this.view.db || this.view;
+        const event = await store.get(key);
         if (event) {
             logWithTimestamp(`getEvent: Event found for ID ${id}`);
             try {
-                return typeof event.value === 'string' ? 
-                       JSON.parse(event.value) : 
-                       event.value;
+                const value = event.value !== undefined ? event.value : event;
+                const str = Buffer.isBuffer(value) ? value.toString() : value;
+                return typeof str === 'string' ? JSON.parse(str) : str;
             } catch (error) {
                 logWithTimestamp('getEvent: Error parsing event:', error.message);
                 return null;
@@ -442,7 +443,7 @@ export default class NostrRelay extends Autobee {
     logWithTimestamp(`queryEvents: Last returned event timestamp:`, last_returned_event_timestamp);
     const queries = this.constructQueries(filter, last_returned_event_timestamp);
     logWithTimestamp(`queryEvents: Constructed query groups:`, JSON.stringify(queries, null, 2));
-    
+
     const results = await this.executeQueries(queries);
     logWithTimestamp(`queryEvents: Raw query results count:`, results.length);
     
@@ -601,6 +602,7 @@ export default class NostrRelay extends Autobee {
 
 async executeQueries(queryGroups) {
     logWithTimestamp(`executeQueries: Starting execution of ${queryGroups.length} query groups`);
+    const store = this.view.db || this.view;
 
     if (!queryGroups || queryGroups.length === 0) {
         logWithTimestamp('executeQueries: No queries to execute');
@@ -618,10 +620,11 @@ async executeQueries(queryGroups) {
             for (let j = 0; j < group.length; j++) {
                 const query = group[j];
                 logWithTimestamp(`executeQueries:  Query ${j + 1}/${group.length} in group ${i + 1}`);
-                for await (const entry of this.view.createReadStream(query)) {
-                    if (!entry || !entry.value) continue;
-                    const eventId = entry.value; // direct event ID
-                    unionIds.add(eventId);
+                for await (const entry of store.createReadStream(query)) {
+                    if (!entry) continue;
+                    let value = entry.value !== undefined ? entry.value : entry;
+                    const eventId = Buffer.isBuffer(value) ? value.toString() : value;
+                    if (eventId) unionIds.add(eventId);
                 }
             }
             logWithTimestamp(`executeQueries: Group ${i + 1} produced ${unionIds.size} unique IDs`);
@@ -750,11 +753,14 @@ async handleSubscription(connectionKey) {
     logWithTimestamp(`getSubscriptions: Attempting to retrieve subscriptions for connectionKey: ${connectionKey}`);
     const key = b4a.from(connectionKey, 'hex');
     logWithTimestamp(`getSubscriptions: Converted key: ${key.toString('hex')}`);
-    const subscriptionData = await this.view.get(key);
+    const store = this.view.db || this.view;
+    const subscriptionData = await store.get(key);
     if (subscriptionData) {
       logWithTimestamp(`getSubscriptions: Subscriptions found for connection ${connectionKey}: ${JSON.stringify(subscriptionData)}`);
       try {
-        return typeof subscriptionData.value === 'string' ? JSON.parse(subscriptionData.value) : subscriptionData.value;
+        const value = subscriptionData.value !== undefined ? subscriptionData.value : subscriptionData;
+        const str = Buffer.isBuffer(value) ? value.toString() : value;
+        return typeof str === 'string' ? JSON.parse(str) : str;
       } catch (error) {
         logWithTimestamp('getSubscriptions: Error parsing subscriptions:', error.message);
         return null;
