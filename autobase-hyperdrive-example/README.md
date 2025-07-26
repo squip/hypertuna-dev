@@ -50,6 +50,15 @@ this.relay = new NostrRelay(this.store, this.bootstrap, {
 await this.relay.ready()
 await this.relay.update() // ensures open() runs
 // replicate the drive with a peer before awaiting drive.ready()
+try {
+  await this.drive.ready()
+} catch (err) {
+  if (err.code === 'BLOCK_NOT_AVAILABLE') {
+    console.log('Waiting for drive header from peer')
+  } else {
+    throw err
+  }
+}
 ```
 
 The `_createHyperdriveView` helper constructs a `Hyperdrive` with an internal `Hyperbee` database and `Hyperblobs` store. The drive must replicate with a peer to fetch its header before `await drive.ready()` will succeed.

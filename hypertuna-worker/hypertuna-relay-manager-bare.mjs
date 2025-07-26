@@ -274,7 +274,15 @@ export class RelayManager {
 
                 if (this.drive) {
                   this.drive.replicate(connection)
-                  await this.drive.ready()
+                  try {
+                    await this.drive.ready()
+                  } catch (err) {
+                    if (err.code === 'BLOCK_NOT_AVAILABLE') {
+                      console.log('[RelayManager] Waiting for drive header from peer')
+                    } else {
+                      throw err
+                    }
+                  }
                   console.log('[RelayManager] Drive replication started with peer writer', writerKey || peerKey.substring(0, 16))
                 }
 
@@ -303,7 +311,15 @@ export class RelayManager {
 
               if (this.drive) {
                 this.drive.replicate(connection);
-                await this.drive.ready();
+                try {
+                  await this.drive.ready();
+                } catch (err) {
+                  if (err.code === 'BLOCK_NOT_AVAILABLE') {
+                    console.log('[RelayManager] Waiting for drive header from peer');
+                  } else {
+                    throw err;
+                  }
+                }
                 console.log('[RelayManager] Drive replication started with peer writer', writerKey || peerKey.substring(0, 16));
               }
             }
@@ -326,7 +342,15 @@ export class RelayManager {
         if (this.drive) {
           console.log('[RelayManager] Replicating Hyperdrive with peer');
           this.drive.replicate(connection);
-          await this.drive.ready();
+          try {
+            await this.drive.ready();
+          } catch (err) {
+            if (err.code === 'BLOCK_NOT_AVAILABLE') {
+              console.log('[RelayManager] Waiting for drive header from peer');
+            } else {
+              throw err;
+            }
+          }
           console.log('[RelayManager] Hyperdrive replication stream established with peer', peerKey.substring(0, 16));
         }
       });
