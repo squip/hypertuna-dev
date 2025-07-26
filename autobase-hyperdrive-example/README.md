@@ -49,9 +49,10 @@ this.relay = new NostrRelay(this.store, this.bootstrap, {
 
 await this.relay.ready()
 await this.relay.update() // ensures open() runs
+// replicate the drive with a peer before awaiting drive.ready()
 ```
 
-The `_createHyperdriveView` helper constructs a `Hyperdrive` with an internal `Hyperbee` database and `Hyperblobs` store. After `update()` the drive is ready for reads and writes.
+The `_createHyperdriveView` helper constructs a `Hyperdrive` with an internal `Hyperbee` database and `Hyperblobs` store. The drive must replicate with a peer to fetch its header before `await drive.ready()` will succeed.
 
 ## Multiwriter Replication Configuration
 

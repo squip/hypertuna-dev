@@ -170,14 +170,6 @@ export class RelayManager {
           console.log('[RelayManager] Reusing existing Hyperdrive view.');
         }
 
-        if (this.drive) {
-          await this.drive.ready();
-        }
-        
-        console.log(`[RelayManager] Hyperdrive ready in ${this.storageDir}`);
-        console.log(`[RelayManager] Drive key: ${b4a.toString(this.drive.key, 'hex')}`);
-        console.log(`[RelayManager] Drive version: ${this.drive.version}`);
-        
 
         this.relay.view.core.on('append', async () => {
           if (this.relay.view.version === 1) return;
@@ -279,8 +271,11 @@ export class RelayManager {
                   console.log('[RelayManager] Reusing existing Hyperdrive view.');
                 }
 
+
                 if (this.drive) {
-                  await this.drive.ready();
+                  this.drive.replicate(connection)
+                  await this.drive.ready()
+                  console.log('[RelayManager] Drive replication started with peer writer', writerKey || peerKey.substring(0, 16))
                 }
 
                 console.log('Writer key added successfully');
@@ -304,12 +299,11 @@ export class RelayManager {
                   this.driveKey,
                   this.driveDiscoveryKey
                 );
-                await this.drive.ready();
               }
 
               if (this.drive) {
-                await this.drive.ready();
                 this.drive.replicate(connection);
+                await this.drive.ready();
                 console.log('[RelayManager] Drive replication started with peer writer', writerKey || peerKey.substring(0, 16));
               }
             }
@@ -330,9 +324,9 @@ export class RelayManager {
         console.log('[RelayManager] Replicating Autobase with peer');
         this.relay.replicate(connection);
         if (this.drive) {
-          await this.drive.ready();
           console.log('[RelayManager] Replicating Hyperdrive with peer');
           this.drive.replicate(connection);
+          await this.drive.ready();
           console.log('[RelayManager] Hyperdrive replication stream established with peer', peerKey.substring(0, 16));
         }
       });
