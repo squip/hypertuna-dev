@@ -308,7 +308,9 @@ export class RelayManager {
               }
 
               if (this.drive) {
+                await this.drive.ready();
                 this.drive.replicate(connection);
+                console.log('[RelayManager] Drive replication started with peer writer', writerKey || peerKey.substring(0, 16));
               }
             }
 
@@ -328,8 +330,10 @@ export class RelayManager {
         console.log('[RelayManager] Replicating Autobase with peer');
         this.relay.replicate(connection);
         if (this.drive) {
+          await this.drive.ready();
           console.log('[RelayManager] Replicating Hyperdrive with peer');
           this.drive.replicate(connection);
+          console.log('[RelayManager] Hyperdrive replication stream established with peer', peerKey.substring(0, 16));
         }
       });
     }
