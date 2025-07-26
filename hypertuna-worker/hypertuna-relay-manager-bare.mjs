@@ -158,7 +158,21 @@ export class RelayManager {
         // Ensure the view is opened so that the open() handler assigns
         // this.drive before we try to access it.
         await this.relay.update();
-        await this.drive.ready();
+
+        if (!this.drive) {
+          if (this.store) {
+            console.log('[RelayManager] Drive missing after relay update. Creating a new Hyperdrive view.');
+            this.drive = this._createHyperdriveView(this.store, this.driveKey, this.driveDiscoveryKey);
+          } else {
+            throw new Error('Hyperdrive view missing after relay update and no store available to create one');
+          }
+        } else {
+          console.log('[RelayManager] Reusing existing Hyperdrive view.');
+        }
+
+        if (this.drive) {
+          await this.drive.ready();
+        }
         
         console.log(`[RelayManager] Hyperdrive ready in ${this.storageDir}`);
         console.log(`[RelayManager] Drive key: ${b4a.toString(this.drive.key, 'hex')}`);
@@ -253,6 +267,22 @@ export class RelayManager {
               try {
                 await this.addWriter(writerKey);
                 await this.relay.update();
+
+                if (!this.drive) {
+                  if (this.store) {
+                    console.log('[RelayManager] Drive missing after relay update in add-writer handler. Creating a new Hyperdrive view.');
+                    this.drive = this._createHyperdriveView(this.store, this.driveKey, this.driveDiscoveryKey);
+                  } else {
+                    throw new Error('Hyperdrive view missing after relay update and no store available to create one');
+                  }
+                } else {
+                  console.log('[RelayManager] Reusing existing Hyperdrive view.');
+                }
+
+                if (this.drive) {
+                  await this.drive.ready();
+                }
+
                 console.log('Writer key added successfully');
               } catch (error) {
                 console.error('Error adding writer key:', error);
