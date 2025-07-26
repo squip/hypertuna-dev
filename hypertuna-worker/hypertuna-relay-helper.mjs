@@ -10,18 +10,22 @@ export default class Autobee extends Autobase {
       bootstrap = null
     }
 
-    const open = (viewStore) => {
+    const { open, apply, ...rest } = handlers
+
+    const defaultOpen = (viewStore) => {
       const core = viewStore.get('autobee')
       return new Hyperbee(core, {
-        ...handlers,
+        ...rest,
         extension: false
       })
     }
 
-    const apply = 'apply' in handlers ? handlers.apply : Autobee.apply;
-
     try {
-        super(store, bootstrap, { ...handlers, open, apply });
+        super(store, bootstrap, {
+          ...rest,
+          open: open || defaultOpen,
+          apply: apply || Autobee.apply
+        })
   
         if (!this.subscriptions) {
           this.subscriptions = new Map();
