@@ -20,7 +20,7 @@ class TestRelayManager extends RelayManager {
   }
 }
 
-test('drive replicates after ready on peer connection', async t => {
+test('drive replicates before ready on peer connection', async t => {
   const manager = new TestRelayManager()
   manager.initializeFake()
 
@@ -29,10 +29,10 @@ test('drive replicates after ready on peer connection', async t => {
 
   manager.drive.ready = async () => {
     readyCalled = true
+    t.ok(replicateCalled, 'replicate called before drive.ready')
   }
   manager.drive.replicate = () => {
     replicateCalled = true
-    t.ok(readyCalled, 'drive.ready called before replicate')
   }
 
   const handler = manager.swarm.listeners('connection')[0]
