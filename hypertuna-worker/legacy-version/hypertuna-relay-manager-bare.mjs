@@ -102,11 +102,9 @@ function validateEvent(event) {
 }
 
 export class RelayManager {
-    constructor(storageDir, bootstrap, driveKey = null, driveDiscoveryKey = null) {
+    constructor(storageDir, bootstrap) {
       this.storageDir = storageDir;
       this.bootstrap = bootstrap;
-      this.driveKey = driveKey;
-      this.driveDiscoveryKey = driveDiscoveryKey;
       this.store = null;  // Initialize in the initialize method
       this.relay = null;
       this.drive = null;
@@ -128,15 +126,21 @@ export class RelayManager {
         // ==============================
         // Hyperdrive Setup (multiwriter)
         // ==============================
+        const db = new Hyperbee(this.store.get({ name: 'drive-db' }), {
+          keyEncoding: 'utf-8',
+          valueEncoding: 'json',
+          metadata: { contentFeed: null },
+          extension: false
+        });
+        const blobs = new Hyperblobs(this.store.get({ name: 'drive-blobs' }));
+        this.drive = new Hyperdrive(this.store, { _db: db });
+        this.drive.blobs = blobs;
+        await this.drive.ready();
+        console.log(`[RelayManager] Hyperdrive ready in ${this.storageDir}`);
+        console.log(`[RelayManager] Drive key: ${b4a.toString(this.drive.key, 'hex')}`);
+        console.log(`[RelayManager] Drive version: ${this.drive.version}`);
+        
         this.relay = new NostrRelay(this.store, this.bootstrap, {
-          open: (viewStore) => {
-            this.drive = this._createHyperdriveView(
-              viewStore,
-              this.driveKey,
-              this.driveDiscoveryKey
-            );
-            return this.drive;
-          },
           apply: async (batch, view, base) => {
             for (const node of batch) {
               const op = node.value;
@@ -153,23 +157,8 @@ export class RelayManager {
         });
 
         this.relay.on('error', console.error);
-        
-        await this.relay.ready();
-        // Ensure the view is opened so that the open() handler assigns
-        // this.drive before we try to access it.
+
         await this.relay.update();
-
-        if (!this.drive) {
-          if (this.store) {
-            console.log('[RelayManager] Drive missing after relay update. Creating a new Hyperdrive view.');
-            this.drive = this._createHyperdriveView(this.store, this.driveKey, this.driveDiscoveryKey);
-          } else {
-            throw new Error('Hyperdrive view missing after relay update and no store available to create one');
-          }
-        } else {
-          console.log('[RelayManager] Reusing existing Hyperdrive view.');
-        }
-
 
         this.relay.view.core.on('append', async () => {
           if (this.relay.view.version === 1) return;
@@ -251,80 +240,18 @@ export class RelayManager {
         }
         
         const addWriterMessage = addWriterProtocol.addMessage({
-          encoding: c.json,
+          encoding: c.string,
           onmessage: async (message) => {
-            const { writerKey, driveKey, driveDiscoveryKey } = message || {};
-            if (writerKey) {
-              console.log('Received new writer key:', writerKey);
-              try {
-                await this.addWriter(writerKey);
-                await this.relay.update();
-
-                if (!this.drive) {
-                  if (this.store) {
-                    console.log('[RelayManager] Drive missing after relay update in add-writer handler. Creating a new Hyperdrive view.');
-                    this.drive = this._createHyperdriveView(this.store, this.driveKey, this.driveDiscoveryKey);
-                  } else {
-                    throw new Error('Hyperdrive view missing after relay update and no store available to create one');
-                  }
-                } else {
-                  console.log('[RelayManager] Reusing existing Hyperdrive view.');
-                }
-
-
-                if (this.drive) {
-                  this.drive.replicate(connection)
-                  try {
-                    await this.drive.ready()
-                  } catch (err) {
-                    if (err.code === 'BLOCK_NOT_AVAILABLE') {
-                      console.log('[RelayManager] Waiting for drive header from peer')
-                    } else {
-                      throw err
-                    }
-                  }
-                  console.log('[RelayManager] Drive replication started with peer writer', writerKey || peerKey.substring(0, 16))
-                }
-
-                console.log('Writer key added successfully');
-              } catch (error) {
-                console.error('Error adding writer key:', error);
-              }
+            const writerKey = message.toString();
+            console.log('Received new writer key:', writerKey);
+            try {
+              await this.addWriter(writerKey);
+              await this.relay.update();
+              console.log('Writer key added successfully');
+              addWriterProtocol.close();
+            } catch (error) {
+              console.error('Error adding writer key:', error);
             }
-
-            if (driveKey || driveDiscoveryKey) {
-              console.log('Received drive info via add-writer:', {
-                driveKey,
-                driveDiscoveryKey
-              });
-
-              this.driveKey = driveKey || this.driveKey;
-              this.driveDiscoveryKey = driveDiscoveryKey || this.driveDiscoveryKey;
-
-              if (!this.drive) {
-                this.drive = this._createHyperdriveView(
-                  this.store,
-                  this.driveKey,
-                  this.driveDiscoveryKey
-                );
-              }
-
-              if (this.drive) {
-                this.drive.replicate(connection);
-                try {
-                  await this.drive.ready();
-                } catch (err) {
-                  if (err.code === 'BLOCK_NOT_AVAILABLE') {
-                    console.log('[RelayManager] Waiting for drive header from peer');
-                  } else {
-                    throw err;
-                  }
-                }
-                console.log('[RelayManager] Drive replication started with peer writer', writerKey || peerKey.substring(0, 16));
-              }
-            }
-
-            addWriterProtocol.close();
           }
         });
         
@@ -332,26 +259,14 @@ export class RelayManager {
         console.log('Opened add-writer protocol');
         
         const writerKey = b4a.toString(this.relay.local.key, 'hex');
-        const driveKey = this.drive ? b4a.toString(this.drive.key, 'hex') : null;
-        const driveDiscoveryKey = this.drive ? b4a.toString(this.drive.discoveryKey, 'hex') : null;
-        addWriterMessage.send({ writerKey, driveKey, driveDiscoveryKey });
-        console.log('Sent add-writer payload:', { writerKey, driveKey, driveDiscoveryKey });
+        addWriterMessage.send(writerKey);
+        console.log('Sent writer key:', writerKey);
 
         console.log('[RelayManager] Replicating Autobase with peer');
         this.relay.replicate(connection);
         if (this.drive) {
           console.log('[RelayManager] Replicating Hyperdrive with peer');
           this.drive.replicate(connection);
-          try {
-            await this.drive.ready();
-          } catch (err) {
-            if (err.code === 'BLOCK_NOT_AVAILABLE') {
-              console.log('[RelayManager] Waiting for drive header from peer');
-            } else {
-              throw err;
-            }
-          }
-          console.log('[RelayManager] Hyperdrive replication stream established with peer', peerKey.substring(0, 16));
         }
       });
     }
@@ -394,14 +309,8 @@ export class RelayManager {
       }
 
       try {
-        await this.relay.append({
-          type: 'add-file',
-          record: {
-            key: driveKey,
-            data: data.toString('base64')
-          }
-        });
-        console.log(`[RelayManager] Appended add-file operation for ${driveKey}`);
+        await this.drive.put(driveKey, data);
+        console.log(`[RelayManager] Stored file ${driveKey} in drive. Version now ${this.drive.version}`);
       } catch (err) {
         console.error('[RelayManager] Error storing file:', err);
         throw err;
@@ -585,25 +494,6 @@ export class RelayManager {
         releaseFileLock(`${this.storageDir}-flush`);
         throw error;
       }
-    }
-
-    _createHyperdriveView(viewStore, driveKey, driveDiscoveryKey) {
-      const db = new Hyperbee(viewStore.get({ name: 'drive-db' }), {
-        keyEncoding: 'utf-8',
-        valueEncoding: 'json',
-        metadata: { contentFeed: null },
-        extension: false
-      });
-      const blobs = new Hyperblobs(viewStore.get({ name: 'drive-blobs' }));
-
-      const opts = { _db: db };
-      if (driveKey) opts.key = typeof driveKey === 'string' ? b4a.from(driveKey, 'hex') : driveKey;
-      if (driveDiscoveryKey) opts.discoveryKey = typeof driveDiscoveryKey === 'string' ? b4a.from(driveDiscoveryKey, 'hex') : driveDiscoveryKey;
-
-      const drive = new Hyperdrive(viewStore, opts);
-
-      drive.blobs = blobs;
-      return drive;
     }
 
     async close() {
