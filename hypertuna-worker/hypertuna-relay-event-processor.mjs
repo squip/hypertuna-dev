@@ -5,7 +5,11 @@ import b4a from 'b4a';
 import { nobleSecp256k1 } from './crypto-libraries.js';
 import { NostrUtils } from './nostr-utils.js';
 
-export { validateEvent, verifyEventSignature, getEventHash, serializeEvent };
+export { validateEvent, verifyEventSignature, getEventHash, serializeEvent, isHyperdrive };
+
+function isHyperdrive(view) {
+  return !!view.db;
+}
 
 function logWithTimestamp(message, data = null) {
   const timestamp = new Date().toISOString();
@@ -147,7 +151,8 @@ export default class NostrRelay extends Autobee {
 
   static async apply(batch, view, base) {
     logWithTimestamp('NostrRelay.apply: Applying batch');
-    const b = view.batch({ update: false })
+    const store = view.db || view
+    const b = store.batch({ update: false })
   
     for (const node of batch) {
         const op = node.value;
