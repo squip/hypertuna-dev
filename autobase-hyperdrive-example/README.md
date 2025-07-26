@@ -65,3 +65,30 @@ await relayManager.initialize()
 
 When multiple writers replicate the same drive, ensure that each peer's `bootstrap` array includes a writable peer or that peers manually exchange writer keys.
 
+## Hyperdrive View Usage
+
+`RelayManager` passes the Hyperdrive instance returned from the `open` handler to `NostrRelay`. The drive exposes an internal Hyperbee database available at `drive.db`. Events are persisted in this database while the drive itself is used for file blobs via `drive.put()`/`drive.get()`.
+
+Because a drive's header is only fetched through replication, you must replicate with a peer **before** awaiting `drive.ready()`. Peers need the writer public keys (hex encoded) to replicate each other's drives.
+
+Below is a simplified example of `NostrRelay.apply` demonstrating how the view's database and file storage are accessed:
+
+```javascript
+static async apply (batch, view) {
+  const store = view.db || view
+  const b = store.batch({ update: false })
+
+  for (const node of batch) {
+    const op = node.value
+    if (op.type === 'event') {
+      const event = JSON.parse(op.event)
+      await b.put(b4a.from(event.id, 'hex'), op.event)
+    } else if (op.type === 'add-file') {
+      await view.put(op.record.key, b4a.from(op.record.data, 'base64'))
+    }
+  }
+
+  await b.flush()
+}
+```
+
