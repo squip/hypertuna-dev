@@ -102,11 +102,12 @@ function validateEvent(event) {
 }
 
 export class RelayManager {
-    constructor(storageDir, bootstrap, driveKey = null, driveDiscoveryKey = null) {
+    constructor(storageDir, bootstrap, driveKey = null, driveDiscoveryKey = null, opts = {}) {
       this.storageDir = storageDir;
       this.bootstrap = bootstrap;
       this.driveKey = driveKey;
       this.driveDiscoveryKey = driveDiscoveryKey;
+      this.onDriveInfo = opts.onDriveInfo || null;
       this.store = null;  // Initialize in the initialize method
       this.relay = null;
       this.drive = null;
@@ -301,12 +302,38 @@ export class RelayManager {
               this.driveKey = driveKey || this.driveKey;
               this.driveDiscoveryKey = driveDiscoveryKey || this.driveDiscoveryKey;
 
-              if (!this.drive) {
+              const incomingKeyHex = this.driveKey && typeof this.driveKey === 'string'
+                ? this.driveKey
+                : b4a.toString(this.driveKey, 'hex');
+              const currentKeyHex = this.drive ? b4a.toString(this.drive.key, 'hex') : null;
+
+              if (!this.drive || incomingKeyHex !== currentKeyHex) {
+                if (this.drive) {
+                  try {
+                    await this.drive.close();
+                  } catch (err) {
+                    console.error('Error closing existing drive:', err);
+                  }
+                }
                 this.drive = this._createHyperdriveView(
                   this.store,
                   this.driveKey,
                   this.driveDiscoveryKey
                 );
+                if (this.relay) {
+                  this.relay.view = this.drive;
+                }
+
+                if (typeof this.onDriveInfo === 'function') {
+                  try {
+                    await this.onDriveInfo(
+                      b4a.toString(this.drive.key, 'hex'),
+                      b4a.toString(this.drive.discoveryKey, 'hex')
+                    );
+                  } catch (err) {
+                    console.error('onDriveInfo callback failed:', err);
+                  }
+                }
               }
 
               if (this.drive) {

@@ -339,12 +339,27 @@ export async function joinRelay(options = {}) {
         const savedDriveKey = profileInfo?.drive_key || null;
         const savedDriveDiscoveryKey = profileInfo?.drive_discovery_key || null;
 
+        // Helper to persist drive info once received from the host
+        const handleDriveInfo = async (dKey, dDiscovery) => {
+            try {
+                const prof = await getRelayProfileByKey(relayKey);
+                if (prof) {
+                    prof.drive_key = dKey;
+                    prof.drive_discovery_key = dDiscovery;
+                    await saveRelayProfile(prof);
+                }
+            } catch (err) {
+                console.error('[RelayAdapter] Failed to persist drive info:', err);
+            }
+        };
+
         // Create relay manager instance
         const relayManager = new RelayManager(
             defaultStorageDir,
             relayKey,
             savedDriveKey,
-            savedDriveDiscoveryKey
+            savedDriveDiscoveryKey,
+            { onDriveInfo: handleDriveInfo }
         );
         await relayManager.initialize();
 
