@@ -770,7 +770,11 @@ async handleSubscription(connectionKey) {
   async putBlob(data) {
     const hashBytes = await nobleSecp256k1.utils.sha256(b4a.from(data))
     const hash = NostrUtils.bytesToHex(hashBytes)
-    await this.append({ type: 'blob-store', hash, blob: data })
+    const key = b4a.from(`blob:hash:${hash}`, 'utf8')
+    const existing = await this.view.bee.get(key)
+    if (!existing) {
+      await this.append({ type: 'blob-store', hash, blob: data })
+    }
     return hash
   }
 
