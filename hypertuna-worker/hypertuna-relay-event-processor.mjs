@@ -2,6 +2,8 @@
 
 import Autobee from './hypertuna-relay-helper.mjs';
 import b4a from 'b4a';
+import Hyperbee from 'hyperbee';
+import Hyperblobs from 'hyperblobs';
 import { nobleSecp256k1 } from './crypto-libraries.js';
 import { NostrUtils } from './nostr-utils.js';
 
@@ -130,7 +132,18 @@ async function verifyEventSignature(event) {
 
 export default class NostrRelay extends Autobee {
     constructor(store, bootstrap, handlers = {}) {
-      super(store, bootstrap, handlers);
+      let blobsInstance;
+      const open = (viewStore) => {
+        const core = viewStore.get('autobee');
+        blobsInstance = new Hyperblobs(viewStore.get('relay-blobs'));
+        return new Hyperbee(core, { ...handlers, extension: false });
+      };
+
+      const apply = 'apply' in handlers ? handlers.apply : NostrRelay.apply;
+
+      super(store, bootstrap, { ...handlers, open, apply });
+
+      this.blobs = blobsInstance;
       this.verifyEvent = handlers.verifyEvent || this.defaultVerifyEvent.bind(this);
       this.executeIdQueries = this.executeIdQueries.bind(this);
       this.findCommonIds = this.findCommonIds.bind(this);

@@ -1573,7 +1573,7 @@ protocol.handle('/authorize', async (request) => {
     };
   });
 
-  // Serve files from a relay's Hyperdrive
+  // Serve files from a relay's Hyperblobs storage
   protocol.handle('/drive/:identifier/:file', async (request) => {
     const identifier = request.params.identifier;
     const fileId = request.params.file;
@@ -1597,7 +1597,7 @@ protocol.handle('/authorize', async (request) => {
 
       const { activeRelays } = await import('./hypertuna-relay-manager-adapter.mjs');
       const relayManager = activeRelays.get(relayKey);
-      if (!relayManager || !relayManager.drive) {
+      if (!relayManager || !relayManager.relay || !relayManager.relay.blobs) {
         updateMetrics(false);
         return {
           statusCode: 404,
@@ -1605,8 +1605,8 @@ protocol.handle('/authorize', async (request) => {
           body: b4a.from(JSON.stringify({ error: 'File not found' }))
         };
       }
-      console.log(`[RelayServer] Fetching file ${fileId} from drive`);
-      const data = await relayManager.drive.get(fileId);
+      console.log(`[RelayServer] Fetching file ${fileId} from blobs`);
+      const data = await relayManager.relay.blobs.get(fileId);
       if (!data) {
         updateMetrics(false);
         return {
@@ -1625,7 +1625,7 @@ protocol.handle('/authorize', async (request) => {
         body: b4a.from(data)
       };
     } catch (error) {
-      console.error('[RelayServer] Error fetching drive file:', error);
+      console.error('[RelayServer] Error fetching blob file:', error);
       updateMetrics(false);
       return {
         statusCode: 500,
