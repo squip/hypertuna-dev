@@ -1607,8 +1607,8 @@ protocol.handle('/authorize', async (request) => {
       }
       const hash = fileId.replace(/\..*$/, '');
       console.log(`[RelayServer] Fetching blob ${hash} via metadata`);
-      const data = await relayManager.relay.getBlob(hash);
-      if (!data) {
+      const blob = await relayManager.relay.getBlob(hash);
+      if (!blob) {
         updateMetrics(false);
         return {
           statusCode: 404,
@@ -1617,13 +1617,13 @@ protocol.handle('/authorize', async (request) => {
         };
       }
 
-      console.log(`[RelayServer] Retrieved blob ${hash} (${data.length} bytes)`);
+      console.log(`[RelayServer] Retrieved blob ${hash} (${blob.size} bytes)`);
 
       updateMetrics(true);
       return {
         statusCode: 200,
         headers: { 'content-type': 'application/octet-stream' },
-        body: b4a.from(data)
+        body: b4a.from(blob.data)
       };
     } catch (error) {
       console.error('[RelayServer] Error fetching blob file:', error);
