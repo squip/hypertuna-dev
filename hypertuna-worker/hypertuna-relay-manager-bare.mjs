@@ -112,7 +112,7 @@ export class RelayManager {
   
     async initialize() {
       console.log('Initializing relay with bootstrap:', this.bootstrap);
-  
+    
       try {
         // Acquire lock for the storage directory
         await acquireFileLock(this.storageDir);
@@ -120,7 +120,7 @@ export class RelayManager {
         
         // Initialize Corestore after acquiring the lock
         this.store = new Corestore(this.storageDir);
-
+    
         // ==============================
         // NostrRelay Setup
         // ==============================
@@ -140,27 +140,36 @@ export class RelayManager {
           valueEncoding: c.any,
           verifyEvent: this.verifyEvent.bind(this)
         });
-
+    
         this.relay.on('error', console.error);
-
+    
         await this.relay.update();
-
-        this.relay.view.core.on('append', async () => {
-          if (this.relay.view.version === 1) return;
-          console.log('\rRelay event appended. Current version:', this.relay.view.version);
-        });
-
+    
+        // FIX: Access the core from the bee component of the view
+        if (this.relay.view && this.relay.view.bee && this.relay.view.bee.core) {
+          this.relay.view.bee.core.on('append', async () => {
+            if (this.relay.view.bee.version === 1) return;
+            console.log('\rRelay event appended. Current version:', this.relay.view.bee.version);
+          });
+        } else {
+          console.log('Warning: Unable to attach append listener - view structure:', {
+            hasView: !!this.relay.view,
+            hasBee: !!(this.relay.view?.bee),
+            hasCore: !!(this.relay.view?.bee?.core)
+          });
+        }
+    
         if (!this.bootstrap) {
           console.log('Relay public key:', b4a.toString(this.relay.key, 'hex'));
         }
-
+    
         this.swarm = new Hyperswarm();
         this.setupSwarmListeners();
-
+    
         console.log('Joining swarm with discovery key:', b4a.toString(this.relay.discoveryKey, 'hex'));
         const discovery = this.swarm.join(this.relay.discoveryKey);
         await discovery.flushed();
-
+    
         console.log('Initializing relay');
         if (this.relay.writable) {
           try {
@@ -273,34 +282,32 @@ export class RelayManager {
     }
 
     async writeFile(localPath, fileId) {
-      if (!this.relay || !this.relay.blobs) {
-        throw new Error('Hyperblobs not initialized');
+      if (!this.relay) {
+        throw new Error('Relay not initialized');
       }
-
+    
       console.log(`[RelayManager] writeFile called with ${localPath} -> ${fileId}`);
-
+      
       const data = await fs.readFile(localPath);
       console.log(`[RelayManager] Read ${data.length} bytes from ${localPath}`);
-
-      // Ensure the key used for storage matches the HTTP retrieval key.
-      // If the desktop did not include the file extension in fileId, append it
-      // using the extension from the local path.
-      const extMatch = /\.([^.]+)$/.exec(localPath);
-      const ext = extMatch ? `.${extMatch[1]}` : '';
-      let driveKey = fileId;
-      if (ext && !fileId.endsWith(ext)) {
-        driveKey = `${fileId}${ext}`;
-        console.log(`[RelayManager] Adjusted fileId with extension: ${driveKey}`);
-      }
-
+    
       try {
-        await this.relay.blobs.put(driveKey, data);
-        console.log(`[RelayManager] Stored file ${driveKey} in blobs`);
+        // Use the putBlob method from NostrRelay
+        const hash = await this.relay.putBlob(data, {
+          filename: fileId,
+          uploadedBy: this.relay.localWriter?.key ? 
+            b4a.toString(this.relay.localWriter.key, 'hex') : 
+            'unknown'
+        });
+        
+        console.log(`[RelayManager] Stored file with hash: ${hash}`);
+        return hash;
       } catch (err) {
         console.error('[RelayManager] Error storing file:', err);
         throw err;
       }
     }
+    
 
     async handleMessage(message, sendResponse, connectionKey) {
       if (!this.relay) {

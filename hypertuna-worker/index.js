@@ -477,30 +477,33 @@ if (workerPipe) {
               }
               break;
 
-            case 'upload-file':
-              console.log('[Worker] Upload file requested:', message.data);
-              if (relayServer) {
-                try {
-                  const { relayKey, filePath, fileId } = message.data;
-                  const relayManager = activeRelays.get(relayKey);
-                  if (!relayManager || !relayManager.relay) {
-                    throw new Error('Relay not found');
+              case 'upload-file':
+                console.log('[Worker] Upload file requested:', message.data);
+                if (relayServer) {
+                  try {
+                    const { relayKey, filePath, fileId } = message.data;
+                    const relayManager = activeRelays.get(relayKey);
+                    if (!relayManager || !relayManager.relay) {
+                      throw new Error('Relay not found');
+                    }
+                    
+                    // Use the updated writeFile method
+                    const hash = await relayManager.writeFile(filePath, fileId);
+                    
+                    console.log(`[Worker] File uploaded with hash: ${hash}`);
+                    sendMessage({
+                      type: 'file-uploaded',
+                      relayKey,
+                      fileId,
+                      hash // Include the hash for reference
+                    });
+                  } catch (err) {
+                    console.error('[Worker] Failed to upload file:', err);
+                    sendMessage({
+                      type: 'error',
+                      message: `Failed to upload file: ${err.message}`
+                    });
                   }
-                  const data = await fs.readFile(filePath);
-                  const hash = await relayManager.relay.putBlob(data);
-                  console.log(`[Worker] Blob ${hash} uploaded for relay ${relayKey}`);
-                  sendMessage({
-                    type: 'file-uploaded',
-                    relayKey,
-                    fileId
-                  });
-                } catch (err) {
-                  console.error('[Worker] Failed to upload file:', err);
-                  sendMessage({
-                    type: 'error',
-                    message: `Failed to upload file: ${err.message}`
-                  });
-                }
               }
               break;
 

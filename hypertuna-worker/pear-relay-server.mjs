@@ -1577,10 +1577,9 @@ protocol.handle('/authorize', async (request) => {
   protocol.handle('/drive/:identifier/:file', async (request) => {
     const identifier = request.params.identifier;
     const fileId = request.params.file;
-
+  
     console.log(`[RelayServer] Drive file requested: ${identifier}/${fileId}`);
-    console.log(`[RelayServer] Looking up relay manager for ${identifier}`);
-
+  
     try {
       let relayKey = identifier;
       if (identifier.includes(':')) {
@@ -1594,7 +1593,7 @@ protocol.handle('/authorize', async (request) => {
           };
         }
       }
-
+  
       const { activeRelays } = await import('./hypertuna-relay-manager-adapter.mjs');
       const relayManager = activeRelays.get(relayKey);
       if (!relayManager || !relayManager.relay) {
@@ -1602,13 +1601,16 @@ protocol.handle('/authorize', async (request) => {
         return {
           statusCode: 404,
           headers: { 'content-type': 'application/json' },
-          body: b4a.from(JSON.stringify({ error: 'File not found' }))
+          body: b4a.from(JSON.stringify({ error: 'Relay not found' }))
         };
       }
-      const hash = fileId.replace(/\..*$/, '');
-      console.log(`[RelayServer] Fetching blob ${hash} via metadata`);
+  
+      // Extract hash from fileId (remove extension if present)
+      const hash = fileId.split('.')[0];
+      console.log(`[RelayServer] Fetching blob with hash: ${hash}`);
+      
       const blob = await relayManager.relay.getBlob(hash);
-      if (!blob) {
+      if (!blob || !blob.data) {
         updateMetrics(false);
         return {
           statusCode: 404,
@@ -1616,14 +1618,34 @@ protocol.handle('/authorize', async (request) => {
           body: b4a.from(JSON.stringify({ error: 'File not found' }))
         };
       }
-
+  
       console.log(`[RelayServer] Retrieved blob ${hash} (${blob.size} bytes)`);
-
+  
+      // Determine content type from metadata or fileId
+      let contentType = 'application/octet-stream';
+      if (blob.metadata?.mimeType) {
+        contentType = blob.metadata.mimeType;
+      } else if (fileId.includes('.')) {
+        const ext = fileId.split('.').pop().toLowerCase();
+        const mimeTypes = {
+          'jpg': 'image/jpeg',
+          'jpeg': 'image/jpeg',
+          'png': 'image/png',
+          'gif': 'image/gif',
+          'pdf': 'application/pdf',
+          'txt': 'text/plain'
+        };
+        contentType = mimeTypes[ext] || contentType;
+      }
+  
       updateMetrics(true);
       return {
         statusCode: 200,
-        headers: { 'content-type': 'application/octet-stream' },
-        body: b4a.from(blob.data)
+        headers: { 
+          'content-type': contentType,
+          'content-length': blob.size.toString()
+        },
+        body: blob.data // Should already be a buffer
       };
     } catch (error) {
       console.error('[RelayServer] Error fetching blob file:', error);

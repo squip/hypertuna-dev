@@ -133,29 +133,18 @@ async function verifyEventSignature(event) {
 }
 
 export default class NostrRelay extends Autobee {
-    constructor(store, bootstrap, handlers = {}) {
-      let blobsInstance;
-      const open = (viewStore) => {
-        const core = viewStore.get('autobee');
-        const bee = new Hyperbee(core, { ...handlers, extension: false });
-        const blobs = new Hyperblobs(viewStore.get('relay-blobs'), {
-          blockSize: handlers.blobBlockSize || 256 * 1024
-        });
-        blobsInstance = blobs;
-        return { bee, blobs };
-      };
+  constructor(store, bootstrap, handlers = {}) {
+    // Since parent already handles bee and blobs, just pass handlers through
+    super(store, bootstrap, {
+      ...handlers,
+      apply: handlers.apply || NostrRelay.apply
+    });
 
-      const apply = 'apply' in handlers ? handlers.apply : NostrRelay.apply;
-
-      super(store, bootstrap, { ...handlers, open, apply });
-
-      this.blobs = blobsInstance;
-      this.bee = this.view.bee;
-      this.verifyEvent = handlers.verifyEvent || this.defaultVerifyEvent.bind(this);
-      this.executeIdQueries = this.executeIdQueries.bind(this);
-      this.findCommonIds = this.findCommonIds.bind(this);
-      logWithTimestamp('NostrRelay: Initialized');
-    }
+    this.verifyEvent = handlers.verifyEvent || this.defaultVerifyEvent.bind(this);
+    this.executeIdQueries = this.executeIdQueries.bind(this);
+    this.findCommonIds = this.findCommonIds.bind(this);
+    logWithTimestamp('NostrRelay: Initialized');
+  }
   
   // Update defaultVerifyEvent to be async
   async defaultVerifyEvent(event) {
@@ -167,78 +156,113 @@ export default class NostrRelay extends Autobee {
 
   static async apply(batch, view, base) {
     logWithTimestamp('NostrRelay.apply: Applying batch');
-    const b = view.bee.batch({ update: false })
+    const b = view.bee.batch({ update: false });
   
     for (const node of batch) {
-        const op = node.value;
-        if (op.type === 'event') {
-            const event = JSON.parse(op.event);
-            // Note: This is a static method, so we can't use async verification here
-            // The verification should happen before the event reaches this point
-            // We'll just do basic validation
-            if (validateEvent(event)) {
-                // Store the full event under its ID
-                const eventKey = b4a.from(event.id, 'hex');
-                logWithTimestamp(`NostrRelay.apply: Storing event with ID: ${event.id}`);
-                await b.put(eventKey, op.event);
+      const op = node.value;
+      
+      if (op.type === 'event') {
+        const event = JSON.parse(op.event);
+        if (validateEvent(event)) {
+          // Store the full event under its ID
+          const eventKey = b4a.from(event.id, 'hex');
+          logWithTimestamp(`NostrRelay.apply: Storing event with ID: ${event.id}`);
+          await b.put(eventKey, op.event);
 
-                // Store index references - store just the event ID
-                const kindKey = NostrRelay.constructIndexKeyKind(event);
-                logWithTimestamp(`NostrRelay.apply: Storing kind index for event ${event.id} under key: ${kindKey}`);
-                await b.put(b4a.from(kindKey, 'utf8'), event.id);
+          // Store index references - store just the event ID
+          const kindKey = NostrRelay.constructIndexKeyKind(event);
+          logWithTimestamp(`NostrRelay.apply: Storing kind index for event ${event.id} under key: ${kindKey}`);
+          await b.put(b4a.from(kindKey, 'utf8'), event.id);
 
-                const pubkeyKey = NostrRelay.constructIndexKeyPubkey(event);
-                logWithTimestamp(`NostrRelay.apply: Storing pubkey index for event ${event.id} under key: ${pubkeyKey}`);
-                await b.put(b4a.from(pubkeyKey, 'utf8'), event.id);
+          const pubkeyKey = NostrRelay.constructIndexKeyPubkey(event);
+          logWithTimestamp(`NostrRelay.apply: Storing pubkey index for event ${event.id} under key: ${pubkeyKey}`);
+          await b.put(b4a.from(pubkeyKey, 'utf8'), event.id);
 
-                const createdAtKey = NostrRelay.constructIndexKeyCreatedAt(event);
-                logWithTimestamp(`NostrRelay.apply: Storing created_at index for event ${event.id} under key: ${createdAtKey}`);
-                await b.put(b4a.from(createdAtKey, 'utf8'), event.id);
+          const createdAtKey = NostrRelay.constructIndexKeyCreatedAt(event);
+          logWithTimestamp(`NostrRelay.apply: Storing created_at index for event ${event.id} under key: ${createdAtKey}`);
+          await b.put(b4a.from(createdAtKey, 'utf8'), event.id);
 
-                // Store tag references
-                for (const tag of event.tags) {
-                    if (tag.length >= 2 && /^[a-zA-Z]$/.test(tag[0])) {
-                        const tagKey = NostrRelay.constructIndexKeyTagKey(event, tag[0], tag[1]);
-                        logWithTimestamp(`NostrRelay.apply: Storing tag index for event ${event.id} under key: ${tagKey}`);
-                        await b.put(b4a.from(tagKey, 'utf8'), event.id);
-                    }
-                }
-            } else {
-                logWithTimestamp(`NostrRelay.apply: Invalid event, not storing. ID: ${event.id}`);
+          // Store tag references
+          for (const tag of event.tags) {
+            if (tag.length >= 2 && /^[a-zA-Z]$/.test(tag[0])) {
+              const tagKey = NostrRelay.constructIndexKeyTagKey(event, tag[0], tag[1]);
+              logWithTimestamp(`NostrRelay.apply: Storing tag index for event ${event.id} under key: ${tagKey}`);
+              await b.put(b4a.from(tagKey, 'utf8'), event.id);
             }
-        } else if (op.type === 'subscriptions') {
-            const subscriptionData = JSON.parse(op.subscriptions);
-            logWithTimestamp('NostrRelay.apply: Processing subscription data:', subscriptionData);
-            const key = b4a.from(subscriptionData.connection, 'hex');
-            logWithTimestamp(`NostrRelay.apply: Storing subscription data for connection: ${subscriptionData.connection}`);
-            await b.put(key, op.subscriptions);
-        } else if (op.type === 'blob-store') {
-            const blobData = b4a.from(op.data, 'base64');
-            const localBlobId = await view.blobs.put(blobData);
-            const blobKey = `blob:hash:${op.hash}`;
-            await b.put(b4a.from(blobKey, 'utf8'), JSON.stringify({
-                writer: node.writer.core ? b4a.toString(node.writer.core.key, 'hex') : b4a.toString(node.writer, 'hex'),
-                localBlobId: {
-                  blockOffset: localBlobId.blockOffset,
-                  blockLength: localBlobId.blockLength,
-                  byteOffset: localBlobId.byteOffset,
-                  byteLength: localBlobId.byteLength
-                },
-                size: op.size,
-                metadata: op.metadata,
-                timestamp: op.timestamp
-            }));
-
-            if (op.metadata && op.metadata.uploadedBy) {
-                const uploaderKey = `blob:uploader:${op.metadata.uploadedBy}:${op.hash}`;
-                await b.put(b4a.from(uploaderKey, 'utf8'), op.hash);
-            }
+          }
+        } else {
+          logWithTimestamp(`NostrRelay.apply: Invalid event, not storing. ID: ${event.id}`);
         }
+        
+      } else if (op.type === 'subscriptions') {
+        const subscriptionData = JSON.parse(op.subscriptions);
+        logWithTimestamp('NostrRelay.apply: Processing subscription data:', subscriptionData);
+        const key = b4a.from(subscriptionData.connection, 'hex');
+        logWithTimestamp(`NostrRelay.apply: Storing subscription data for connection: ${subscriptionData.connection}`);
+        await b.put(key, op.subscriptions);
+        
+      } else if (op.type === 'blob-store') {
+        logWithTimestamp(`NostrRelay.apply: Processing blob-store operation for hash: ${op.hash}`);
+        
+        try {
+          // Decode base64 data from oplog
+          const blobData = b4a.from(op.data, 'base64');
+          logWithTimestamp(`NostrRelay.apply: Decoded blob data, size: ${blobData.length} bytes`);
+          
+          // Store in local Hyperblobs
+          const localBlobId = await view.blobs.put(blobData);
+          logWithTimestamp(`NostrRelay.apply: Stored in Hyperblobs with ID:`, localBlobId);
+          
+          // Extract writer key properly
+          let writerKey = 'unknown';
+          if (node.clock && node.clock.writer) {
+            // node.clock.writer is the writer's Hypercore key
+            writerKey = b4a.toString(node.clock.writer, 'hex');
+          } else if (node.writer && b4a.isBuffer(node.writer)) {
+            writerKey = b4a.toString(node.writer, 'hex');
+          }
+          
+          // Store metadata in Hyperbee
+          const blobKey = `blob:hash:${op.hash}`;
+          const blobMetadata = {
+            writer: writerKey,
+            localBlobId: {
+              blockOffset: localBlobId.blockOffset,
+              blockLength: localBlobId.blockLength,
+              byteOffset: localBlobId.byteOffset,
+              byteLength: localBlobId.byteLength
+            },
+            size: op.size,
+            metadata: op.metadata || {},
+            timestamp: op.timestamp
+          };
+          
+          await b.put(b4a.from(blobKey, 'utf8'), JSON.stringify(blobMetadata));
+          logWithTimestamp(`NostrRelay.apply: Stored blob metadata under key: ${blobKey}`);
+          
+          // Create indexes
+          if (op.metadata && op.metadata.uploadedBy) {
+            const uploaderKey = `blob:uploader:${op.metadata.uploadedBy}:${op.hash}`;
+            await b.put(b4a.from(uploaderKey, 'utf8'), op.hash);
+            logWithTimestamp(`NostrRelay.apply: Created uploader index: ${uploaderKey}`);
+          }
+          
+          if (op.metadata && op.metadata.mimeType) {
+            const typeKey = `blob:type:${op.metadata.mimeType.replace('/', '-')}:${op.hash}`;
+            await b.put(b4a.from(typeKey, 'utf8'), op.hash);
+            logWithTimestamp(`NostrRelay.apply: Created type index: ${typeKey}`);
+          }
+          
+        } catch (error) {
+          logWithTimestamp(`NostrRelay.apply: Error processing blob-store:`, error);
+          // Continue processing other operations even if this one fails
+        }
+      }
     }
   
     logWithTimestamp('NostrRelay.apply: Flushing batch');
     await b.flush();
-}
+  }
 
   /////////////////////////////////////////////////////////////////////////////////////////////////////////
   // PROCESSES TO <PUBLISH> EVENTS TO HYPERBEE: ///////////////////////////////////////////////////////////
@@ -790,23 +814,27 @@ async handleSubscription(connectionKey) {
   }
 
   async putBlob(data, metadata = {}) {
-    if (!b4a.isBuffer(data)) data = b4a.from(data)
+    if (!this.blobs) {
+      throw new Error('Blobs view not initialized');
+    }
 
-    const hashBytes = await nobleSecp256k1.utils.sha256(data)
-    const hash = NostrUtils.bytesToHex(hashBytes)
+    if (!b4a.isBuffer(data)) data = b4a.from(data);
 
-    const key = b4a.from(`blob:hash:${hash}`, 'utf8')
-    const existing = await this.view.bee.get(key)
+    const hashBytes = await nobleSecp256k1.utils.sha256(data);
+    const hash = NostrUtils.bytesToHex(hashBytes);
+
+    const key = b4a.from(`blob:hash:${hash}`, 'utf8');
+    const existing = await this.view.bee.get(key);
     if (existing) {
-      logWithTimestamp('putBlob: Blob already exists', { hash })
-      return hash
+      logWithTimestamp('putBlob: Blob already exists', { hash });
+      return hash;
     }
 
     if (data.length > MAX_BLOB_SIZE) {
-      return this.putLargeBlob(data, metadata)
+      return this.putLargeBlob(data, metadata);
     }
 
-    logWithTimestamp('putBlob: Storing new blob', { hash, size: data.length })
+    logWithTimestamp('putBlob: Storing new blob', { hash, size: data.length });
 
     await this.append({
       type: 'blob-store',
@@ -815,9 +843,9 @@ async handleSubscription(connectionKey) {
       size: data.length,
       metadata,
       timestamp: Date.now()
-    })
+    });
 
-    return hash
+    return hash;
   }
 
   async putLargeBlob(data, metadata = {}, chunkSize = 1024 * 1024) {
@@ -880,25 +908,32 @@ async handleSubscription(connectionKey) {
   }
 
   async getBlob(hash) {
-    const entry = await this.view.bee.get(b4a.from(`blob:hash:${hash}`, 'utf8'))
-    if (!entry) return null
-    const metadata = JSON.parse(entry.value.toString())
+    if (!this.blobs || !this.bee) {
+      throw new Error('Views not initialized');
+    }
+
+    const entry = await this.view.bee.get(b4a.from(`blob:hash:${hash}`, 'utf8'));
+    if (!entry) return null;
+    
+    const metadata = JSON.parse(entry.value.toString());
+    
+    // Check if this is a manifest for a large blob
     if (metadata.metadata && metadata.metadata.isManifest) {
-      return this.getLargeBlob(hash, metadata)
+      return this.getLargeBlob(hash, metadata);
     }
 
     try {
-      const data = await this.view.blobs.get(metadata.localBlobId)
+      const data = await this.view.blobs.get(metadata.localBlobId);
       return {
         data,
         metadata: metadata.metadata,
         writer: metadata.writer,
         size: metadata.size,
         timestamp: metadata.timestamp
-      }
+      };
     } catch (err) {
-      console.error(`Blob ${hash} indexed but data not available locally`)
-      return null
+      logWithTimestamp(`getBlob: Blob ${hash} indexed but data not available locally:`, err);
+      return null;
     }
   }
 

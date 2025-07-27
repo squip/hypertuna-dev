@@ -26,8 +26,8 @@ export default class Autobee extends Autobase {
     try {
         super(store, bootstrap, { ...handlers, open, apply });
 
-        this.bee = this.view.bee;
-        this.blobs = this.view.blobs;
+        // this.bee = this.view.bee;
+        // this.blobs = this.view.blobs;
 
         if (!this.subscriptions) {
           this.subscriptions = new Map();
@@ -138,6 +138,15 @@ export default class Autobee extends Autobase {
       console.error('Error in del operation:', error);
       throw error;
     }
+  }
+
+  // Add getters for bee and blobs views
+  get bee() {
+    return this.view?.bee;
+  }
+
+  get blobs() {
+    return this.view?.blobs;
   }
 
   get (key, opts) {
