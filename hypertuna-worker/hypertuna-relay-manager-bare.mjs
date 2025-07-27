@@ -4,8 +4,6 @@
 import Corestore from 'corestore';
 import Hyperswarm from 'hyperswarm';
 import Hyperbee from 'hyperbee';
-import Hyperdrive from 'hyperdrive';
-import Hyperblobs from 'hyperblobs';
 import { promises as fs } from 'bare-fs';
 import NostrRelay from './hypertuna-relay-event-processor.mjs';
 import b4a from 'b4a';
@@ -107,7 +105,7 @@ export class RelayManager {
       this.bootstrap = bootstrap;
       this.store = null;  // Initialize in the initialize method
       this.relay = null;
-      this.drive = null;
+      this.blobs = null;
       this.swarm = null;
       this.peers = new Map(); // Track connected peers
     }
@@ -124,21 +122,8 @@ export class RelayManager {
         this.store = new Corestore(this.storageDir);
 
         // ==============================
-        // Hyperdrive Setup (multiwriter)
+        // NostrRelay Setup
         // ==============================
-        const db = new Hyperbee(this.store.get({ name: 'drive-db' }), {
-          keyEncoding: 'utf-8',
-          valueEncoding: 'json',
-          metadata: { contentFeed: null },
-          extension: false
-        });
-        const blobs = new Hyperblobs(this.store.get({ name: 'drive-blobs' }));
-        this.drive = new Hyperdrive(this.store, { _db: db });
-        this.drive.blobs = blobs;
-        await this.drive.ready();
-        console.log(`[RelayManager] Hyperdrive ready in ${this.storageDir}`);
-        console.log(`[RelayManager] Drive key: ${b4a.toString(this.drive.key, 'hex')}`);
-        console.log(`[RelayManager] Drive version: ${this.drive.version}`);
         
         this.relay = new NostrRelay(this.store, this.bootstrap, {
           apply: async (batch, view, base) => {
@@ -264,9 +249,9 @@ export class RelayManager {
 
         console.log('[RelayManager] Replicating Autobase with peer');
         this.relay.replicate(connection);
-        if (this.drive) {
-          console.log('[RelayManager] Replicating Hyperdrive with peer');
-          this.drive.replicate(connection);
+        if (this.relay.blobs) {
+          console.log('[RelayManager] Replicating Hyperblobs with peer');
+          this.relay.blobs.replicate(connection);
         }
       });
     }
@@ -288,8 +273,8 @@ export class RelayManager {
     }
 
     async writeFile(localPath, fileId) {
-      if (!this.drive) {
-        throw new Error('Hyperdrive not initialized');
+      if (!this.relay || !this.relay.blobs) {
+        throw new Error('Hyperblobs not initialized');
       }
 
       console.log(`[RelayManager] writeFile called with ${localPath} -> ${fileId}`);
@@ -309,8 +294,8 @@ export class RelayManager {
       }
 
       try {
-        await this.drive.put(driveKey, data);
-        console.log(`[RelayManager] Stored file ${driveKey} in drive. Version now ${this.drive.version}`);
+        await this.relay.blobs.put(driveKey, data);
+        console.log(`[RelayManager] Stored file ${driveKey} in blobs`);
       } catch (err) {
         console.error('[RelayManager] Error storing file:', err);
         throw err;
