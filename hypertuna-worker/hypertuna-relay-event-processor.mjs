@@ -7,6 +7,8 @@ import Hyperblobs from 'hyperblobs';
 import { nobleSecp256k1 } from './crypto-libraries.js';
 import { NostrUtils } from './nostr-utils.js';
 
+const MAX_BLOB_SIZE = 10 * 1024 * 1024; // 10MB
+
 export { validateEvent, verifyEventSignature, getEventHash, serializeEvent };
 
 function logWithTimestamp(message, data = null) {
@@ -136,7 +138,9 @@ export default class NostrRelay extends Autobee {
       const open = (viewStore) => {
         const core = viewStore.get('autobee');
         const bee = new Hyperbee(core, { ...handlers, extension: false });
-        const blobs = new Hyperblobs(viewStore.get('relay-blobs'));
+        const blobs = new Hyperblobs(viewStore.get('relay-blobs'), {
+          blockSize: handlers.blobBlockSize || 256 * 1024
+        });
         blobsInstance = blobs;
         return { bee, blobs };
       };
@@ -786,20 +790,92 @@ async handleSubscription(connectionKey) {
   }
 
   async putBlob(data, metadata = {}) {
-    const hashBytes = await nobleSecp256k1.utils.sha256(b4a.from(data))
+    if (!b4a.isBuffer(data)) data = b4a.from(data)
+
+    const hashBytes = await nobleSecp256k1.utils.sha256(data)
     const hash = NostrUtils.bytesToHex(hashBytes)
+
     const key = b4a.from(`blob:hash:${hash}`, 'utf8')
     const existing = await this.view.bee.get(key)
-    if (!existing) {
+    if (existing) {
+      logWithTimestamp('putBlob: Blob already exists', { hash })
+      return hash
+    }
+
+    if (data.length > MAX_BLOB_SIZE) {
+      return this.putLargeBlob(data, metadata)
+    }
+
+    logWithTimestamp('putBlob: Storing new blob', { hash, size: data.length })
+
+    await this.append({
+      type: 'blob-store',
+      hash,
+      data: b4a.toString(data, 'base64'),
+      size: data.length,
+      metadata,
+      timestamp: Date.now()
+    })
+
+    return hash
+  }
+
+  async putLargeBlob(data, metadata = {}, chunkSize = 1024 * 1024) {
+    const hashBytes = await nobleSecp256k1.utils.sha256(data)
+    const hash = NostrUtils.bytesToHex(hashBytes)
+
+    const key = b4a.from(`blob:hash:${hash}`, 'utf8')
+    const existing = await this.view.bee.get(key)
+    if (existing) {
+      logWithTimestamp('putLargeBlob: Blob already exists', { hash })
+      return hash
+    }
+
+    const chunks = []
+
+    logWithTimestamp('putLargeBlob: Storing large blob in chunks', {
+      hash,
+      totalSize: data.length,
+      chunkSize
+    })
+
+    for (let i = 0; i < data.length; i += chunkSize) {
+      const chunk = data.slice(i, Math.min(i + chunkSize, data.length))
+      const chunkHashBytes = await nobleSecp256k1.utils.sha256(chunk)
+      const chunkHash = NostrUtils.bytesToHex(chunkHashBytes)
+
       await this.append({
         type: 'blob-store',
-        hash,
-        data: b4a.toString(data, 'base64'),
-        size: data.length,
-        metadata,
+        hash: chunkHash,
+        data: b4a.toString(chunk, 'base64'),
+        size: chunk.length,
+        metadata: {
+          isChunk: true,
+          parentHash: hash,
+          chunkIndex: chunks.length
+        },
         timestamp: Date.now()
       })
+
+      chunks.push(chunkHash)
     }
+
+    const manifest = {
+      type: 'manifest',
+      chunks,
+      totalSize: data.length,
+      chunkSize
+    }
+
+    await this.append({
+      type: 'blob-store',
+      hash,
+      data: b4a.from(JSON.stringify(manifest)).toString('base64'),
+      size: 0,
+      metadata: { ...metadata, isManifest: true },
+      timestamp: Date.now()
+    })
+
     return hash
   }
 
@@ -807,6 +883,10 @@ async handleSubscription(connectionKey) {
     const entry = await this.view.bee.get(b4a.from(`blob:hash:${hash}`, 'utf8'))
     if (!entry) return null
     const metadata = JSON.parse(entry.value.toString())
+    if (metadata.metadata && metadata.metadata.isManifest) {
+      return this.getLargeBlob(hash, metadata)
+    }
+
     try {
       const data = await this.view.blobs.get(metadata.localBlobId)
       return {
@@ -819,6 +899,30 @@ async handleSubscription(connectionKey) {
     } catch (err) {
       console.error(`Blob ${hash} indexed but data not available locally`)
       return null
+    }
+  }
+
+  async getLargeBlob(hash, manifestMetadata) {
+    logWithTimestamp('getLargeBlob: Retrieving large blob', { hash })
+
+    const manifestData = await this.view.blobs.get(manifestMetadata.localBlobId)
+    const manifest = JSON.parse(manifestData.toString())
+
+    const chunks = []
+    for (const chunkHash of manifest.chunks) {
+      const chunk = await this.getBlob(chunkHash)
+      if (!chunk) {
+        logWithTimestamp('getLargeBlob: Missing chunk', { parentHash: hash, chunkHash })
+        return null
+      }
+      chunks.push(chunk.data)
+    }
+
+    return {
+      data: b4a.concat(chunks),
+      metadata: manifestMetadata.metadata,
+      writer: manifestMetadata.writer,
+      size: manifest.totalSize
     }
   }
 
