@@ -2617,7 +2617,7 @@ async fetchMultipleProfiles(pubkeys) {
         );
         
         // Create message event
-        const { event, fileId } = await NostrEvents.createGroupMessage(
+        const { event, fileId, fileDataHash } = await NostrEvents.createGroupMessage(
             groupId,
             content,
             previousRefs,
@@ -2638,7 +2638,7 @@ async fetchMultipleProfiles(pubkeys) {
             const relayKey = this.publicToInternalMap.get(groupId) || null;
             const msg = {
                 type: 'upload-file',
-                data: { relayKey, filePath, fileId }
+                data: { relayKey, filePath, fileId, fileHash: fileDataHash }
             };
             try {
                 window.workerPipe.write(JSON.stringify(msg) + '\n');

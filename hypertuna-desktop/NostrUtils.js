@@ -265,6 +265,32 @@ export class NostrUtils {
     }
 
     /**
+     * Compute SHA-256 hash of data
+     * @param {Uint8Array|ArrayBuffer|string} data - Data to hash
+     * @returns {Promise<string>} - Hex encoded hash
+     */
+    static async computeSha256(data) {
+        const secp = nobleSecp256k1 || window.nobleSecp256k1;
+        if (!secp) {
+            throw new Error('Noble Secp256k1 library not available');
+        }
+
+        let bytes;
+        if (data instanceof Uint8Array) {
+            bytes = data;
+        } else if (data instanceof ArrayBuffer) {
+            bytes = new Uint8Array(data);
+        } else if (typeof data === 'string') {
+            bytes = new TextEncoder().encode(data);
+        } else {
+            throw new Error('Unsupported data type for hashing');
+        }
+
+        const hash = await secp.utils.sha256(bytes);
+        return this.bytesToHex(hash);
+    }
+
+    /**
      * Extract all HTTP/HTTPS URLs from a string
      * @param {string} text - Text to search
      * @returns {Array<string>} - Array of URLs
