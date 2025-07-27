@@ -1597,7 +1597,7 @@ protocol.handle('/authorize', async (request) => {
 
       const { activeRelays } = await import('./hypertuna-relay-manager-adapter.mjs');
       const relayManager = activeRelays.get(relayKey);
-      if (!relayManager || !relayManager.relay || !relayManager.relay.blobs) {
+      if (!relayManager || !relayManager.relay) {
         updateMetrics(false);
         return {
           statusCode: 404,
@@ -1605,8 +1605,9 @@ protocol.handle('/authorize', async (request) => {
           body: b4a.from(JSON.stringify({ error: 'File not found' }))
         };
       }
-      console.log(`[RelayServer] Fetching file ${fileId} from blobs`);
-      const data = await relayManager.relay.blobs.get(fileId);
+      const hash = fileId.replace(/\..*$/, '');
+      console.log(`[RelayServer] Fetching blob ${hash} via metadata`);
+      const data = await relayManager.relay.getBlob(hash);
       if (!data) {
         updateMetrics(false);
         return {
@@ -1616,7 +1617,7 @@ protocol.handle('/authorize', async (request) => {
         };
       }
 
-      console.log(`[RelayServer] Retrieved file ${fileId} (${data.length} bytes)`);
+      console.log(`[RelayServer] Retrieved blob ${hash} (${data.length} bytes)`);
 
       updateMetrics(true);
       return {
