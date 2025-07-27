@@ -138,12 +138,15 @@ class NostrEvents {
         }
 
         let fileId = null;
+        let fileDataHash = null;
         let finalContent = content;
         if (filePath) {
-            const baseId = NostrUtils.generateRandomId();
+            const { promises: fs } = await import('fs');
+            const fileBuffer = await fs.readFile(filePath);
+            fileDataHash = await NostrUtils.computeSha256(fileBuffer);
             const extPart = filePath.split('.').pop();
             const ext = extPart && extPart !== filePath ? `.${extPart}` : '';
-            fileId = `${baseId}${ext}`;
+            fileId = `${fileDataHash}${ext}`;
 
             let gatewayDomain;
             try {
@@ -171,7 +174,7 @@ class NostrEvents {
             privateKey
         );
 
-        return { event, fileId };
+        return { event, fileId, fileDataHash };
     }
     
     /**
