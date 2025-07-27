@@ -375,7 +375,9 @@ export class RelayManager {
 
         console.log('[RelayManager] Replicating Autobase with peer');
         this.relay.replicate(connection);
-        if (this.drive) {
+
+        // Defer Hyperdrive replication until drive info is confirmed
+        if (this.driveKey && this.driveDiscoveryKey && this.drive) {
           console.log('[RelayManager] Replicating Hyperdrive with peer');
           this.drive.replicate(connection);
           try {
@@ -388,6 +390,8 @@ export class RelayManager {
             }
           }
           console.log('[RelayManager] Hyperdrive replication stream established with peer', peerKey.substring(0, 16));
+        } else {
+          console.log('[RelayManager] Waiting for drive info before replicating Hyperdrive');
         }
       });
     }

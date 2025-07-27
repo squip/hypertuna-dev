@@ -367,6 +367,11 @@ export async function joinRelay(options = {}) {
                     prof.drive_key = dKey;
                     prof.drive_discovery_key = dDiscovery;
                     await saveRelayProfile(prof);
+                    console.log('[RelayAdapter] Persisted drive info from host:', {
+                        relayKey,
+                        driveKey: dKey,
+                        driveDiscoveryKey: dDiscovery
+                    });
                 }
             } catch (err) {
                 console.error('[RelayAdapter] Failed to persist drive info:', err);
