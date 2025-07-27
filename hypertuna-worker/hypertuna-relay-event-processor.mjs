@@ -209,8 +209,26 @@ export default class NostrRelay extends Autobee {
             logWithTimestamp(`NostrRelay.apply: Storing subscription data for connection: ${subscriptionData.connection}`);
             await b.put(key, op.subscriptions);
         } else if (op.type === 'blob-store') {
-            const blobId = await view.blobs.put(op.blob);
-            await b.put(b4a.from(`blob:hash:${op.hash}`, 'utf8'), JSON.stringify(blobId));
+            const blobData = b4a.from(op.data, 'base64');
+            const localBlobId = await view.blobs.put(blobData);
+            const blobKey = `blob:hash:${op.hash}`;
+            await b.put(b4a.from(blobKey, 'utf8'), JSON.stringify({
+                writer: node.writer.core ? b4a.toString(node.writer.core.key, 'hex') : b4a.toString(node.writer, 'hex'),
+                localBlobId: {
+                  blockOffset: localBlobId.blockOffset,
+                  blockLength: localBlobId.blockLength,
+                  byteOffset: localBlobId.byteOffset,
+                  byteLength: localBlobId.byteLength
+                },
+                size: op.size,
+                metadata: op.metadata,
+                timestamp: op.timestamp
+            }));
+
+            if (op.metadata && op.metadata.uploadedBy) {
+                const uploaderKey = `blob:uploader:${op.metadata.uploadedBy}:${op.hash}`;
+                await b.put(b4a.from(uploaderKey, 'utf8'), op.hash);
+            }
         }
     }
   
@@ -767,13 +785,20 @@ async handleSubscription(connectionKey) {
     }
   }
 
-  async putBlob(data) {
+  async putBlob(data, metadata = {}) {
     const hashBytes = await nobleSecp256k1.utils.sha256(b4a.from(data))
     const hash = NostrUtils.bytesToHex(hashBytes)
     const key = b4a.from(`blob:hash:${hash}`, 'utf8')
     const existing = await this.view.bee.get(key)
     if (!existing) {
-      await this.append({ type: 'blob-store', hash, blob: data })
+      await this.append({
+        type: 'blob-store',
+        hash,
+        data: b4a.toString(data, 'base64'),
+        size: data.length,
+        metadata,
+        timestamp: Date.now()
+      })
     }
     return hash
   }
@@ -781,8 +806,20 @@ async handleSubscription(connectionKey) {
   async getBlob(hash) {
     const entry = await this.view.bee.get(b4a.from(`blob:hash:${hash}`, 'utf8'))
     if (!entry) return null
-    const id = typeof entry.value === 'string' ? JSON.parse(entry.value) : entry.value
-    return this.blobs.get(id)
+    const metadata = JSON.parse(entry.value.toString())
+    try {
+      const data = await this.view.blobs.get(metadata.localBlobId)
+      return {
+        data,
+        metadata: metadata.metadata,
+        writer: metadata.writer,
+        size: metadata.size,
+        timestamp: metadata.timestamp
+      }
+    } catch (err) {
+      console.error(`Blob ${hash} indexed but data not available locally`)
+      return null
+    }
   }
 
 
