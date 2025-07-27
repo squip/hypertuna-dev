@@ -121,11 +121,17 @@ export async function createRelay(options = {}) {
         const relayManager = new RelayManager(defaultStorageDir, null);
         await relayManager.initialize();
 
+        console.log('[RelayAdapter] RelayManager initialized. Drive keys:', {
+            driveKey: b4a.toString(relayManager.drive.key, 'hex'),
+            driveDiscoveryKey: b4a.toString(relayManager.drive.discoveryKey, 'hex')
+        });
+
         const driveKey = b4a.toString(relayManager.drive.key, 'hex');
         const driveDiscoveryKey = b4a.toString(relayManager.drive.discoveryKey, 'hex');
 
         const relayKey = relayManager.getPublicKey();
         activeRelays.set(relayKey, relayManager);
+        console.log('[RelayAdapter] Added relayManager to activeRelays:', relayKey);
         
         // Generate public identifier
         const npub = config.nostr_npub || (config.nostr_pubkey_hex ? 
@@ -281,6 +287,15 @@ export async function joinRelay(options = {}) {
     
     try {
         await ensureProfilesInitialized(globalUserKey);
+
+        console.log('[RelayAdapter] joinRelay called with options:', {
+            relayKey,
+            name,
+            description,
+            publicIdentifier,
+            storageDir,
+            fromAutoConnect
+        });
         
         // Check if already connected
         if (activeRelays.has(relayKey)) {
@@ -339,13 +354,39 @@ export async function joinRelay(options = {}) {
         const savedDriveKey = profileInfo?.drive_key || null;
         const savedDriveDiscoveryKey = profileInfo?.drive_discovery_key || null;
 
+        console.log('[RelayAdapter] Retrieved saved drive info:', {
+            savedDriveKey,
+            savedDriveDiscoveryKey
+        });
+
+        // Helper to persist drive info once received from the host
+        const handleDriveInfo = async (dKey, dDiscovery) => {
+            try {
+                const prof = await getRelayProfileByKey(relayKey);
+                if (prof) {
+                    prof.drive_key = dKey;
+                    prof.drive_discovery_key = dDiscovery;
+                    await saveRelayProfile(prof);
+                }
+            } catch (err) {
+                console.error('[RelayAdapter] Failed to persist drive info:', err);
+            }
+        };
+
         // Create relay manager instance
         const relayManager = new RelayManager(
             defaultStorageDir,
             relayKey,
             savedDriveKey,
-            savedDriveDiscoveryKey
+            savedDriveDiscoveryKey,
+            { onDriveInfo: handleDriveInfo }
         );
+        console.log('[RelayAdapter] Created RelayManager with:', {
+            storageDir: defaultStorageDir,
+            relayKey,
+            savedDriveKey,
+            savedDriveDiscoveryKey
+        });
         await relayManager.initialize();
 
         const driveKey = b4a.toString(relayManager.drive.key, 'hex');
@@ -376,6 +417,7 @@ export async function joinRelay(options = {}) {
             };
 
             await saveRelayProfile(profileInfo);
+            console.log('[RelayAdapter] Created new relay profile:', profileInfo);
         } else {
             // Update existing profile
             profileInfo.relay_storage = defaultStorageDir;
@@ -390,6 +432,7 @@ export async function joinRelay(options = {}) {
             }
 
             await saveRelayProfile(profileInfo);
+            console.log('[RelayAdapter] Updated existing relay profile:', profileInfo);
         }
 
         // Load members into in-memory map
@@ -399,13 +442,17 @@ export async function joinRelay(options = {}) {
         }
         
         console.log('[RelayAdapter] Joined relay:', relayKey);
-        
+
         // Send relay initialized message for joined relay ONLY if not from auto-connect
         if (!fromAutoConnect && global.sendMessage) {
             const identifierPath = profileInfo.public_identifier ? profileInfo.public_identifier.replace(':', '/') : relayKey;
             const baseGw = `wss://${config.proxy_server_address}/${identifierPath}`;
             const gw = authToken ? `${baseGw}?token=${authToken}` : baseGw;
             console.log(`[RelayAdapter] [3] joinRelay -> Sending relay-initialized for ${relayKey} with URL ${gw}`);
+            console.log('[RelayAdapter] Emitting relay-initialized message:', {
+                relayKey,
+                gatewayUrl: gw
+            });
             global.sendMessage({
                 type: 'relay-initialized',
                 relayKey: relayKey,
@@ -420,6 +467,10 @@ export async function joinRelay(options = {}) {
         
         const identifierPathReturn = profileInfo.public_identifier ? profileInfo.public_identifier.replace(':', '/') : relayKey;
         const returnBase = `wss://${config.proxy_server_address}/${identifierPathReturn}`;
+        console.log('[RelayAdapter] joinRelay returning:', {
+            connectionUrl: authToken ? `${returnBase}?token=${authToken}` : returnBase,
+            profile: profileInfo
+        });
         return {
             success: true,
             relayKey,
@@ -943,7 +994,9 @@ export async function cleanupRelays() {
 
 // Helper function to generate hex keys
 function generateHexKey() {
-    return crypto.randomBytes(32).toString('hex');
+    const key = crypto.randomBytes(32).toString('hex');
+    console.log('[RelayAdapter] Generated random hex key:', key);
+    return key;
 }
 
 // Export the active relays map for direct access if needed

@@ -102,11 +102,12 @@ function validateEvent(event) {
 }
 
 export class RelayManager {
-    constructor(storageDir, bootstrap, driveKey = null, driveDiscoveryKey = null) {
+    constructor(storageDir, bootstrap, driveKey = null, driveDiscoveryKey = null, opts = {}) {
       this.storageDir = storageDir;
       this.bootstrap = bootstrap;
       this.driveKey = driveKey;
       this.driveDiscoveryKey = driveDiscoveryKey;
+      this.onDriveInfo = opts.onDriveInfo || null;
       this.store = null;  // Initialize in the initialize method
       this.relay = null;
       this.drive = null;
@@ -130,11 +131,20 @@ export class RelayManager {
         // ==============================
         this.relay = new NostrRelay(this.store, this.bootstrap, {
           open: (viewStore) => {
+            console.log('[RelayManager] open() handler invoked');
+            console.log('[RelayManager] Creating Hyperdrive with keys:', {
+              driveKey: this.driveKey,
+              driveDiscoveryKey: this.driveDiscoveryKey
+            });
             this.drive = this._createHyperdriveView(
               viewStore,
               this.driveKey,
               this.driveDiscoveryKey
             );
+            console.log('[RelayManager] open() assigned drive with key',
+              b4a.toString(this.drive.key, 'hex'),
+              'and discovery',
+              b4a.toString(this.drive.discoveryKey, 'hex'));
             return this.drive;
           },
           apply: async (batch, view, base) => {
@@ -301,12 +311,38 @@ export class RelayManager {
               this.driveKey = driveKey || this.driveKey;
               this.driveDiscoveryKey = driveDiscoveryKey || this.driveDiscoveryKey;
 
-              if (!this.drive) {
+              const incomingKeyHex = this.driveKey && typeof this.driveKey === 'string'
+                ? this.driveKey
+                : b4a.toString(this.driveKey, 'hex');
+              const currentKeyHex = this.drive ? b4a.toString(this.drive.key, 'hex') : null;
+
+              if (!this.drive || incomingKeyHex !== currentKeyHex) {
+                if (this.drive) {
+                  try {
+                    await this.drive.close();
+                  } catch (err) {
+                    console.error('Error closing existing drive:', err);
+                  }
+                }
                 this.drive = this._createHyperdriveView(
                   this.store,
                   this.driveKey,
                   this.driveDiscoveryKey
                 );
+                if (this.relay) {
+                  this.relay.view = this.drive;
+                }
+
+                if (typeof this.onDriveInfo === 'function') {
+                  try {
+                    await this.onDriveInfo(
+                      b4a.toString(this.drive.key, 'hex'),
+                      b4a.toString(this.drive.discoveryKey, 'hex')
+                    );
+                  } catch (err) {
+                    console.error('onDriveInfo callback failed:', err);
+                  }
+                }
               }
 
               if (this.drive) {
@@ -588,6 +624,10 @@ export class RelayManager {
     }
 
     _createHyperdriveView(viewStore, driveKey, driveDiscoveryKey) {
+      console.log('[RelayManager] _createHyperdriveView called with:', {
+        driveKey,
+        driveDiscoveryKey
+      });
       const db = new Hyperbee(viewStore.get({ name: 'drive-db' }), {
         keyEncoding: 'utf-8',
         valueEncoding: 'json',
@@ -601,6 +641,11 @@ export class RelayManager {
       if (driveDiscoveryKey) opts.discoveryKey = typeof driveDiscoveryKey === 'string' ? b4a.from(driveDiscoveryKey, 'hex') : driveDiscoveryKey;
 
       const drive = new Hyperdrive(viewStore, opts);
+
+      console.log('[RelayManager] Hyperdrive instance created with key',
+        b4a.toString(drive.key, 'hex'),
+        'and discovery',
+        b4a.toString(drive.discoveryKey, 'hex'));
 
       drive.blobs = blobs;
       return drive;
