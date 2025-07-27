@@ -376,7 +376,7 @@ export class RelayManager {
         
         let count = 0;
         const events = [];
-        for await (const node of this.relay.createReadStream()) {
+        for await (const node of this.relay.bee.createReadStream()) {
           try {
             const event = JSON.parse(node.value);
             events.push({
