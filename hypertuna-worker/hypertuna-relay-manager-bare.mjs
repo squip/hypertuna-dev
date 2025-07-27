@@ -131,20 +131,11 @@ export class RelayManager {
         // ==============================
         this.relay = new NostrRelay(this.store, this.bootstrap, {
           open: (viewStore) => {
-            console.log('[RelayManager] open() handler invoked');
-            console.log('[RelayManager] Creating Hyperdrive with keys:', {
-              driveKey: this.driveKey,
-              driveDiscoveryKey: this.driveDiscoveryKey
-            });
             this.drive = this._createHyperdriveView(
               viewStore,
               this.driveKey,
               this.driveDiscoveryKey
             );
-            console.log('[RelayManager] open() assigned drive with key',
-              b4a.toString(this.drive.key, 'hex'),
-              'and discovery',
-              b4a.toString(this.drive.discoveryKey, 'hex'));
             return this.drive;
           },
           apply: async (batch, view, base) => {
@@ -624,10 +615,6 @@ export class RelayManager {
     }
 
     _createHyperdriveView(viewStore, driveKey, driveDiscoveryKey) {
-      console.log('[RelayManager] _createHyperdriveView called with:', {
-        driveKey,
-        driveDiscoveryKey
-      });
       const db = new Hyperbee(viewStore.get({ name: 'drive-db' }), {
         keyEncoding: 'utf-8',
         valueEncoding: 'json',
@@ -641,11 +628,6 @@ export class RelayManager {
       if (driveDiscoveryKey) opts.discoveryKey = typeof driveDiscoveryKey === 'string' ? b4a.from(driveDiscoveryKey, 'hex') : driveDiscoveryKey;
 
       const drive = new Hyperdrive(viewStore, opts);
-
-      console.log('[RelayManager] Hyperdrive instance created with key',
-        b4a.toString(drive.key, 'hex'),
-        'and discovery',
-        b4a.toString(drive.discoveryKey, 'hex'));
 
       drive.blobs = blobs;
       return drive;
