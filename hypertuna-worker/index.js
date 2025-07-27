@@ -20,7 +20,7 @@ import {
   calculateMembers,
   calculateAuthorizedUsers
 } from './hypertuna-relay-profile-manager-bare.mjs'
-import { loadRelayKeyMappings, writeFile } from './hypertuna-relay-manager-adapter.mjs'
+import { loadRelayKeyMappings, activeRelays } from './hypertuna-relay-manager-adapter.mjs'
 import {
   queuePendingAuthUpdate,
   applyPendingAuthUpdates
@@ -482,8 +482,13 @@ if (workerPipe) {
               if (relayServer) {
                 try {
                   const { relayKey, filePath, fileId } = message.data;
-                  await writeFile(relayKey, filePath, fileId);
-                  console.log(`[Worker] File ${fileId} uploaded for relay ${relayKey}`);
+                  const relayManager = activeRelays.get(relayKey);
+                  if (!relayManager || !relayManager.relay) {
+                    throw new Error('Relay not found');
+                  }
+                  const data = await fs.readFile(filePath);
+                  const hash = await relayManager.relay.putBlob(data);
+                  console.log(`[Worker] Blob ${hash} uploaded for relay ${relayKey}`);
                   sendMessage({
                     type: 'file-uploaded',
                     relayKey,
