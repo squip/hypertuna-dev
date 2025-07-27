@@ -135,8 +135,10 @@ export default class NostrRelay extends Autobee {
       let blobsInstance;
       const open = (viewStore) => {
         const core = viewStore.get('autobee');
-        blobsInstance = new Hyperblobs(viewStore.get('relay-blobs'));
-        return new Hyperbee(core, { ...handlers, extension: false });
+        const bee = new Hyperbee(core, { ...handlers, extension: false });
+        const blobs = new Hyperblobs(viewStore.get('relay-blobs'));
+        blobsInstance = blobs;
+        return { bee, blobs };
       };
 
       const apply = 'apply' in handlers ? handlers.apply : NostrRelay.apply;
@@ -144,6 +146,7 @@ export default class NostrRelay extends Autobee {
       super(store, bootstrap, { ...handlers, open, apply });
 
       this.blobs = blobsInstance;
+      this.bee = this.view.bee;
       this.verifyEvent = handlers.verifyEvent || this.defaultVerifyEvent.bind(this);
       this.executeIdQueries = this.executeIdQueries.bind(this);
       this.findCommonIds = this.findCommonIds.bind(this);
@@ -160,7 +163,7 @@ export default class NostrRelay extends Autobee {
 
   static async apply(batch, view, base) {
     logWithTimestamp('NostrRelay.apply: Applying batch');
-    const b = view.batch({ update: false })
+    const b = view.bee.batch({ update: false })
   
     for (const node of batch) {
         const op = node.value;
@@ -205,6 +208,9 @@ export default class NostrRelay extends Autobee {
             const key = b4a.from(subscriptionData.connection, 'hex');
             logWithTimestamp(`NostrRelay.apply: Storing subscription data for connection: ${subscriptionData.connection}`);
             await b.put(key, op.subscriptions);
+        } else if (op.type === 'blob-store') {
+            const blobId = await view.blobs.put(op.blob);
+            await b.put(b4a.from(`blob:hash:${op.hash}`, 'utf8'), JSON.stringify(blobId));
         }
     }
   
@@ -332,7 +338,7 @@ export default class NostrRelay extends Autobee {
     logWithTimestamp(`getEvent: Converted key: ${key.toString('hex')}`);
     
     try {
-        const event = await this.view.get(key);
+        const event = await this.view.bee.get(key);
         if (event) {
             logWithTimestamp(`getEvent: Event found for ID ${id}`);
             try {
@@ -614,7 +620,7 @@ async executeQueries(queryGroups) {
             for (let j = 0; j < group.length; j++) {
                 const query = group[j];
                 logWithTimestamp(`executeQueries:  Query ${j + 1}/${group.length} in group ${i + 1}`);
-                for await (const entry of this.view.createReadStream(query)) {
+                for await (const entry of this.view.bee.createReadStream(query)) {
                     if (!entry || !entry.value) continue;
                     const eventId = entry.value; // direct event ID
                     unionIds.add(eventId);
@@ -746,7 +752,7 @@ async handleSubscription(connectionKey) {
     logWithTimestamp(`getSubscriptions: Attempting to retrieve subscriptions for connectionKey: ${connectionKey}`);
     const key = b4a.from(connectionKey, 'hex');
     logWithTimestamp(`getSubscriptions: Converted key: ${key.toString('hex')}`);
-    const subscriptionData = await this.view.get(key);
+    const subscriptionData = await this.view.bee.get(key);
     if (subscriptionData) {
       logWithTimestamp(`getSubscriptions: Subscriptions found for connection ${connectionKey}: ${JSON.stringify(subscriptionData)}`);
       try {
@@ -759,6 +765,20 @@ async handleSubscription(connectionKey) {
       logWithTimestamp(`getSubscriptions: No subscriptions found for connection: ${connectionKey}`);
       return null;
     }
+  }
+
+  async putBlob(data) {
+    const hashBytes = await nobleSecp256k1.utils.sha256(b4a.from(data))
+    const hash = NostrUtils.bytesToHex(hashBytes)
+    await this.append({ type: 'blob-store', hash, blob: data })
+    return hash
+  }
+
+  async getBlob(hash) {
+    const entry = await this.view.bee.get(b4a.from(`blob:hash:${hash}`, 'utf8'))
+    if (!entry) return null
+    const id = typeof entry.value === 'string' ? JSON.parse(entry.value) : entry.value
+    return this.blobs.get(id)
   }
 
 

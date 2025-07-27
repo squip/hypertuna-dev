@@ -2,6 +2,7 @@
 import Autobase from 'autobase';
 import b4a from 'b4a';
 import Hyperbee from 'hyperbee';
+import Hyperblobs from 'hyperblobs';
 
 export default class Autobee extends Autobase {
   constructor (store, bootstrap, handlers = {}) {
@@ -12,17 +13,22 @@ export default class Autobee extends Autobase {
 
     const open = (viewStore) => {
       const core = viewStore.get('autobee')
-      return new Hyperbee(core, {
+      const bee = new Hyperbee(core, {
         ...handlers,
         extension: false
       })
+      const blobs = new Hyperblobs(viewStore.get('relay-blobs'))
+      return { bee, blobs }
     }
 
     const apply = 'apply' in handlers ? handlers.apply : Autobee.apply;
 
     try {
         super(store, bootstrap, { ...handlers, open, apply });
-  
+
+        this.bee = this.view.bee;
+        this.blobs = this.view.blobs;
+
         if (!this.subscriptions) {
           this.subscriptions = new Map();
         }
@@ -53,9 +59,9 @@ export default class Autobee extends Autobase {
   }
 
   static async apply (batch, view, base) {
-    const b = view.batch({ update: false })
-    const decodeKey = (x) => b4a.isBuffer(x) && view.keyEncoding
-      ? view.keyEncoding.decode(x)
+    const b = view.bee.batch({ update: false })
+    const decodeKey = (x) => b4a.isBuffer(x) && view.bee.keyEncoding
+      ? view.bee.keyEncoding.decode(x)
       : x
   
     try {
@@ -135,17 +141,17 @@ export default class Autobee extends Autobase {
   }
 
   get (key, opts) {
-    return this.view.get(key, opts)
+    return this.view.bee.get(key, opts)
   }
 
   peek (opts) {
-    return this.view.peek(opts)
+    return this.view.bee.peek(opts)
   }
 
   createReadStream(range, opts) {
-    if (!this.view) {
+    if (!this.view || !this.view.bee) {
       throw new Error('View is not initialized');
     }
-    return this.view.createReadStream(range, opts);
+    return this.view.bee.createReadStream(range, opts);
   }
 }
