@@ -482,25 +482,26 @@ export class RelayManager {
         if (this.relay.view && this.relay.view.blobs) {
           console.log('[RelayManager] Starting Hyperblobs replication...');
           
-          let blobsStream;
+          let blobStream;
           try {
-            blobsStream = this.relay.view.blobs.replicate(connection);
+            const blobCore = this.relay.view.blobs.core.getBackingCore();
+            blobStream = blobCore.replicate(connection);
             console.log('[RelayManager] blobs.replicate() called successfully');
           } catch (blobError) {
             console.error('[RelayManager] Failed to create Hyperblobs replication:', blobError);
             console.error('[RelayManager] Stack:', blobError.stack);
             // Don't return here - blobs failure shouldn't stop the connection
           }
-          
-          if (blobsStream) {
-            blobsStream.on('error', (err) => {
+
+          if (blobStream) {
+            blobStream.on('error', (err) => {
               console.error('[RelayManager] Hyperblobs replication error:', err);
             });
-            
-            blobsStream.on('sync', () => {
+
+            blobStream.on('sync', () => {
               console.log('[RelayManager] Hyperblobs replication synced!');
             });
-            
+
             console.log('[RelayManager] Hyperblobs replication initiated');
           } else {
             console.warn('[RelayManager] Hyperblobs replication stream is null');
