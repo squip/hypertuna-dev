@@ -335,6 +335,12 @@ export class RelayManager {
         try {
           replicationStream = this.relay.replicate(connection);
           console.log('[RelayManager] relay.replicate() called successfully');
+          // this.relay.replicate(connection) replicates both Corestore and
+          // Hyperblobs in a single stream. See the Corestore guide
+          // documentation (autobase-hyperblobs-documentation/corestore-guide.md
+          // lines 45-50) and the Autobase guide API section
+          // (autobase-hyperblobs-documentation/autobase-guide-api.md
+          // lines 211-221).
         } catch (replError) {
           console.error('[RelayManager] Failed to create replication stream:', replError);
           console.error('[RelayManager] Stack:', replError.stack);
