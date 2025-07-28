@@ -329,32 +329,31 @@ export class RelayManager {
           this.peers.delete(peerKey);
         });
   
-        // Establish corestore replication with error handling
-        console.log('[RelayManager] Creating corestore replication stream...');
+        // Establish replication with the peer
+        console.log('[RelayManager] Starting replication...');
         let replicationStream;
         try {
-          replicationStream = this.store.replicate(connection);
-          console.log('[RelayManager] Corestore replicate() called successfully');
+          replicationStream = this.relay.replicate(connection);
+          console.log('[RelayManager] relay.replicate() called successfully');
         } catch (replError) {
-          console.error('[RelayManager] Failed to create corestore replication:', replError);
+          console.error('[RelayManager] Failed to create replication stream:', replError);
           console.error('[RelayManager] Stack:', replError.stack);
           return;
         }
-        
-        if (!replicationStream) {
-          console.error('[RelayManager] Corestore replication returned null/undefined');
-          return;
+
+        if (replicationStream) {
+          replicationStream.on('error', (err) => {
+            console.error('[RelayManager] Replication error:', err);
+          });
+
+          replicationStream.on('sync', () => {
+            console.log('[RelayManager] Replication synced!');
+          });
+
+          console.log('[RelayManager] Replication stream established');
+        } else {
+          console.error('[RelayManager] Failed to create replication stream - returned null');
         }
-        
-        replicationStream.on('error', (err) => {
-          console.error('[RelayManager] Corestore replication error:', err);
-        });
-  
-        replicationStream.on('end', () => {
-          console.log('[RelayManager] Corestore replication stream ended');
-        });
-  
-        console.log('[RelayManager] Corestore replication stream established');
   
         // Add writer protocol with enhanced error handling
         console.log('[RelayManager] Creating add-writer protocol channel...');
@@ -453,67 +452,6 @@ export class RelayManager {
           console.log('[RelayManager] relay.local?.key:', this.relay.local?.key);
         }
   
-        // Enhanced Autobase replication logging
-        console.log('[RelayManager] Starting Autobase replication...');
-        
-        // Monitor the autobase replication
-        let autobaseStream;
-        try {
-          autobaseStream = this.relay.replicate(connection);
-          console.log('[RelayManager] relay.replicate() called successfully');
-        } catch (autoError) {
-          console.error('[RelayManager] Failed to create Autobase replication:', autoError);
-          console.error('[RelayManager] Stack:', autoError.stack);
-          return;
-        }
-        
-        if (autobaseStream) {
-          autobaseStream.on('error', (err) => {
-            console.error('[RelayManager] Autobase replication error:', err);
-          });
-          
-          autobaseStream.on('sync', () => {
-            console.log('[RelayManager] Autobase replication synced!');
-          });
-          
-          console.log('[RelayManager] Autobase replication initiated');
-        } else {
-          console.error('[RelayManager] Failed to create Autobase replication stream - returned null');
-        }
-        
-        // Enhanced Hyperblobs replication logging
-        if (this.relay.view && this.relay.view.blobs) {
-          console.log('[RelayManager] Starting Hyperblobs replication...');
-          
-          let blobStream;
-          try {
-            const blobCore = this.relay.view.blobs.core.getBackingCore();
-            blobStream = blobCore.replicate(connection);
-            console.log('[RelayManager] blobs.replicate() called successfully');
-          } catch (blobError) {
-            console.error('[RelayManager] Failed to create Hyperblobs replication:', blobError);
-            console.error('[RelayManager] Stack:', blobError.stack);
-            // Don't return here - blobs failure shouldn't stop the connection
-          }
-
-          if (blobStream) {
-            blobStream.on('error', (err) => {
-              console.error('[RelayManager] Hyperblobs replication error:', err);
-            });
-
-            blobStream.on('sync', () => {
-              console.log('[RelayManager] Hyperblobs replication synced!');
-            });
-
-            console.log('[RelayManager] Hyperblobs replication initiated');
-          } else {
-            console.warn('[RelayManager] Hyperblobs replication stream is null');
-          }
-        } else {
-          console.warn('[RelayManager] Hyperblobs not available for replication yet');
-          console.log('[RelayManager] relay.view:', !!this.relay.view);
-          console.log('[RelayManager] relay.view?.blobs:', !!this.relay.view?.blobs);
-        }
   
         // Add periodic status logging
         const statusInterval = setInterval(() => {
