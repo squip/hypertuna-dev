@@ -134,16 +134,61 @@ async function verifyEventSignature(event) {
 
 export default class NostrRelay extends Autobee {
   constructor(store, bootstrap, handlers = {}) {
-    // Since parent already handles bee and blobs, just pass handlers through
+    console.log('[NostrRelay] ========================================');
+    console.log('[NostrRelay] CONSTRUCTOR');
+    console.log('[NostrRelay] Bootstrap:', bootstrap || 'none');
+    console.log('[NostrRelay] ========================================');
+    
+    // Create a custom apply function that handles addWriter operations
+    const customApply = async (batch, view, base) => {
+      console.log('[NostrRelay] ========================================');
+      console.log('[NostrRelay] CUSTOM APPLY');
+      console.log('[NostrRelay] Batch size:', batch.length);
+      console.log('[NostrRelay] Base writable:', base?.writable);
+      console.log('[NostrRelay] ========================================');
+      
+      // First, handle any addWriter operations
+      for (const node of batch) {
+        const op = node.value;
+        if (op.type === 'addWriter') {
+          console.log(`[NostrRelay] Processing addWriter for key: ${op.key}`);
+          console.log('[NostrRelay] Current writers before add:', base.writers?.length || 0);
+          
+          try {
+            console.log('[NostrRelay] Calling base.addWriter()...');
+            await base.addWriter(b4a.from(op.key, 'hex'));
+            console.log(`[NostrRelay] Successfully added writer: ${op.key}`);
+            console.log('[NostrRelay] Current writers after add:', base.writers?.length || 0);
+          } catch (error) {
+            console.error(`[NostrRelay] Error adding writer: ${error.message}`);
+            console.error('[NostrRelay] Stack trace:', error.stack);
+            throw error;
+          }
+          // Continue to next operation without processing this through NostrRelay.apply
+          continue;
+        }
+      }
+      
+      // Then process all other operations through NostrRelay.apply
+      console.log('[NostrRelay] Processing remaining operations through NostrRelay.apply...');
+      await NostrRelay.apply(batch, view, base);
+      console.log('[NostrRelay] Custom apply completed');
+    };
+
+    // Pass the custom apply or use the provided one
     super(store, bootstrap, {
       ...handlers,
-      apply: handlers.apply || NostrRelay.apply
+      apply: handlers.apply || customApply
     });
 
     this.verifyEvent = handlers.verifyEvent || this.defaultVerifyEvent.bind(this);
     this.executeIdQueries = this.executeIdQueries.bind(this);
     this.findCommonIds = this.findCommonIds.bind(this);
-    logWithTimestamp('NostrRelay: Initialized');
+    
+    console.log('[NostrRelay] Constructor completed');
+    console.log('[NostrRelay] Initial state:');
+    console.log('[NostrRelay] - Writable:', this.writable);
+    console.log('[NostrRelay] - Has view:', !!this.view);
   }
   
   // Update defaultVerifyEvent to be async
@@ -154,73 +199,130 @@ export default class NostrRelay extends Autobee {
     return result;
   }
 
+  // Override the append method to handle addWriter operations properly
+  async append(value) {
+    console.log('[NostrRelay] ========================================');
+    console.log('[NostrRelay] APPEND OVERRIDE');
+    console.log('[NostrRelay] Value:', JSON.stringify(value));
+    console.log('[NostrRelay] ========================================');
+    
+    // If this is an addWriter operation, ensure we log it
+    if (value.type === 'addWriter') {
+      console.log(`[NostrRelay] Appending addWriter operation for key: ${value.key}`);
+    }
+    
+    try {
+      console.log('[NostrRelay] Calling parent append...');
+      const result = await super.append(value);
+      console.log('[NostrRelay] Parent append completed');
+      
+      if (value.type === 'addWriter') {
+        console.log(`[NostrRelay] addWriter operation appended successfully`);
+        console.log('[NostrRelay] Triggering update to ensure new writer is recognized...');
+        await this.update();
+        console.log('[NostrRelay] Update completed');
+        console.log('[NostrRelay] Current state after addWriter:');
+        console.log('[NostrRelay] - Writable:', this.writable);
+        console.log('[NostrRelay] - Writers count:', this.writers?.length || 0);
+      }
+      
+      return result;
+    } catch (error) {
+      console.error(`[NostrRelay] Error appending value: ${error.message}`);
+      console.error('[NostrRelay] Stack trace:', error.stack);
+      throw error;
+    }
+  }
+
   static async apply(batch, view, base) {
-    logWithTimestamp('NostrRelay.apply: Applying batch');
+    console.log('[NostrRelay] ========================================');
+    console.log('[NostrRelay] STATIC APPLY');
+    console.log('[NostrRelay] Batch size:', batch.length);
+    console.log('[NostrRelay] Processing batch for event storage');
+    console.log('[NostrRelay] ========================================');
+    
     const b = view.bee.batch({ update: false });
   
     for (const node of batch) {
       const op = node.value;
+      console.log('[NostrRelay] Processing operation type:', op.type);
+      
+      // Skip addWriter operations - they should be handled by the custom apply
+      if (op.type === 'addWriter') {
+        console.log(`[NostrRelay] Skipping addWriter operation (should be handled by custom apply)`);
+        continue;
+      }
       
       if (op.type === 'event') {
         const event = JSON.parse(op.event);
+        console.log('[NostrRelay] Processing EVENT:', {
+          id: event.id?.substring(0, 8) + '...',
+          kind: event.kind,
+          pubkey: event.pubkey?.substring(0, 8) + '...'
+        });
+        
         if (validateEvent(event)) {
           // Store the full event under its ID
           const eventKey = b4a.from(event.id, 'hex');
-          logWithTimestamp(`NostrRelay.apply: Storing event with ID: ${event.id}`);
+          console.log(`[NostrRelay] Storing event with ID: ${event.id}`);
           await b.put(eventKey, op.event);
-
-          // Store index references - store just the event ID
+          
+          // Log index creation
+          console.log('[NostrRelay] Creating indexes for event...');
+          
+          // Store index references
           const kindKey = NostrRelay.constructIndexKeyKind(event);
-          logWithTimestamp(`NostrRelay.apply: Storing kind index for event ${event.id} under key: ${kindKey}`);
           await b.put(b4a.from(kindKey, 'utf8'), event.id);
-
+          
           const pubkeyKey = NostrRelay.constructIndexKeyPubkey(event);
-          logWithTimestamp(`NostrRelay.apply: Storing pubkey index for event ${event.id} under key: ${pubkeyKey}`);
           await b.put(b4a.from(pubkeyKey, 'utf8'), event.id);
-
+          
           const createdAtKey = NostrRelay.constructIndexKeyCreatedAt(event);
-          logWithTimestamp(`NostrRelay.apply: Storing created_at index for event ${event.id} under key: ${createdAtKey}`);
           await b.put(b4a.from(createdAtKey, 'utf8'), event.id);
-
+          
           // Store tag references
           for (const tag of event.tags) {
             if (tag.length >= 2 && /^[a-zA-Z]$/.test(tag[0])) {
               const tagKey = NostrRelay.constructIndexKeyTagKey(event, tag[0], tag[1]);
-              logWithTimestamp(`NostrRelay.apply: Storing tag index for event ${event.id} under key: ${tagKey}`);
               await b.put(b4a.from(tagKey, 'utf8'), event.id);
             }
           }
+          
+          console.log('[NostrRelay] Event and indexes stored successfully');
         } else {
-          logWithTimestamp(`NostrRelay.apply: Invalid event, not storing. ID: ${event.id}`);
+          console.log(`[NostrRelay] Invalid event, not storing. ID: ${event.id}`);
         }
         
       } else if (op.type === 'subscriptions') {
         const subscriptionData = JSON.parse(op.subscriptions);
-        logWithTimestamp('NostrRelay.apply: Processing subscription data:', subscriptionData);
+        console.log('[NostrRelay] Processing subscription data for connection:', 
+          subscriptionData.connection?.substring(0, 16) + '...');
         const key = b4a.from(subscriptionData.connection, 'hex');
-        logWithTimestamp(`NostrRelay.apply: Storing subscription data for connection: ${subscriptionData.connection}`);
         await b.put(key, op.subscriptions);
         
       } else if (op.type === 'blob-store') {
-        logWithTimestamp(`NostrRelay.apply: Processing blob-store operation for hash: ${op.hash}`);
+        console.log(`[NostrRelay] Processing blob-store operation for hash: ${op.hash?.substring(0, 16)}...`);
+        console.log('[NostrRelay] Blob size:', op.size, 'bytes');
+        console.log('[NostrRelay] Has blobs view:', !!view.blobs);
         
         try {
           // Decode base64 data from oplog
           const blobData = b4a.from(op.data, 'base64');
-          logWithTimestamp(`NostrRelay.apply: Decoded blob data, size: ${blobData.length} bytes`);
+          console.log(`[NostrRelay] Decoded blob data, size: ${blobData.length} bytes`);
           
           // Store in local Hyperblobs
+          console.log('[NostrRelay] Storing blob in Hyperblobs...');
           const localBlobId = await view.blobs.put(blobData);
-          logWithTimestamp(`NostrRelay.apply: Stored in Hyperblobs with ID:`, localBlobId);
+          console.log(`[NostrRelay] Stored in Hyperblobs with ID:`, localBlobId);
           
           // Extract writer key properly
           let writerKey = 'unknown';
           if (node.clock && node.clock.writer) {
-            // node.clock.writer is the writer's Hypercore key
             writerKey = b4a.toString(node.clock.writer, 'hex');
           } else if (node.writer && b4a.isBuffer(node.writer)) {
             writerKey = b4a.toString(node.writer, 'hex');
           }
+          console.log('[NostrRelay] Writer key:', writerKey.substring(0, 16) + '...');
           
           // Store metadata in Hyperbee
           const blobKey = `blob:hash:${op.hash}`;
@@ -238,23 +340,26 @@ export default class NostrRelay extends Autobee {
           };
           
           await b.put(b4a.from(blobKey, 'utf8'), JSON.stringify(blobMetadata));
-          logWithTimestamp(`NostrRelay.apply: Stored blob metadata under key: ${blobKey}`);
+          console.log(`[NostrRelay] Stored blob metadata under key: ${blobKey}`);
           
           // Create indexes
           if (op.metadata && op.metadata.uploadedBy) {
             const uploaderKey = `blob:uploader:${op.metadata.uploadedBy}:${op.hash}`;
             await b.put(b4a.from(uploaderKey, 'utf8'), op.hash);
-            logWithTimestamp(`NostrRelay.apply: Created uploader index: ${uploaderKey}`);
+            console.log(`[NostrRelay] Created uploader index: ${uploaderKey}`);
           }
           
           if (op.metadata && op.metadata.mimeType) {
             const typeKey = `blob:type:${op.metadata.mimeType.replace('/', '-')}:${op.hash}`;
             await b.put(b4a.from(typeKey, 'utf8'), op.hash);
-            logWithTimestamp(`NostrRelay.apply: Created type index: ${typeKey}`);
+            console.log(`[NostrRelay] Created type index: ${typeKey}`);
           }
           
+          console.log('[NostrRelay] Blob processing completed successfully');
+          
         } catch (error) {
-          logWithTimestamp(`NostrRelay.apply: Error processing blob-store:`, error);
+          console.error(`[NostrRelay] Error processing blob-store:`, error);
+          console.error('[NostrRelay] Stack trace:', error.stack);
           // Continue processing other operations even if this one fails
         }
       }
@@ -262,6 +367,8 @@ export default class NostrRelay extends Autobee {
   
     logWithTimestamp('NostrRelay.apply: Flushing batch');
     await b.flush();
+    console.log('[NostrRelay] Batch flushed successfully');
+    console.log('[NostrRelay] ========================================');
   }
 
   /////////////////////////////////////////////////////////////////////////////////////////////////////////
