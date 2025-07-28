@@ -679,3 +679,758 @@ peer 2 - session 2 log: (process when peer 2 relaunches app, initializes relay f
 [NostrRelay] ========================================
 [NostrRelay] Processing operation type: subscriptions
 [NostrRelay] Processing subscription data for connection: b517cb3d7080dff0..
+[2025-07-28T04:04:23.743Z] NostrRelay.apply: Flushing batch
+[NostrRelay] Batch flushed successfully
+[NostrRelay] ========================================
+[NostrRelay] Custom apply completed
+[NostrRelay] ========================================
+[NostrRelay] CUSTOM APPLY
+[NostrRelay] Batch size: 1
+[NostrRelay] Base writable: true
+[NostrRelay] ========================================
+[NostrRelay] Processing remaining operations through NostrRelay.apply...
+[NostrRelay] ========================================
+[NostrRelay] STATIC APPLY
+[NostrRelay] Batch size: 1
+[NostrRelay] Processing batch for event storage
+[NostrRelay] ========================================
+[NostrRelay] Processing operation type: subscriptions
+[NostrRelay] Processing subscription data for connection: b517cb3d7080dff0...
+[2025-07-28T04:04:23.744Z] NostrRelay.apply: Flushing batch
+[NostrRelay] Batch flushed successfully
+[NostrRelay] ========================================
+[NostrRelay] Custom apply completed
+[NostrRelay] ========================================
+[NostrRelay] CUSTOM APPLY
+[NostrRelay] Batch size: 1
+[NostrRelay] Base writable: true
+[NostrRelay] ========================================
+[NostrRelay] Processing remaining operations through NostrRelay.apply...
+[NostrRelay] ========================================
+[NostrRelay] STATIC APPLY
+[NostrRelay] Batch size: 1
+[NostrRelay] Processing batch for event storage
+[NostrRelay] ========================================
+[NostrRelay] Processing operation type: subscriptions
+[NostrRelay] Processing subscription data for connection: c4fe571eb7ca3312...
+[2025-07-28T04:04:23.744Z] NostrRelay.apply: Flushing batch
+[NostrRelay] Batch flushed successfully
+[NostrRelay] ========================================
+[NostrRelay] Custom apply completed
+[NostrRelay] ========================================
+[NostrRelay] CUSTOM APPLY
+[NostrRelay] Batch size: 1
+[NostrRelay] Base writable: true
+[NostrRelay] ========================================
+[NostrRelay] Processing remaining operations through NostrRelay.apply...
+[NostrRelay] ========================================
+[NostrRelay] STATIC APPLY
+[NostrRelay] Batch size: 1
+[NostrRelay] Processing batch for event storage
+[NostrRelay] ========================================
+[NostrRelay] Processing operation type: subscriptions
+[NostrRelay] Processing subscription data for connection: b517cb3d7080dff0...
+[2025-07-28T04:04:23.744Z] NostrRelay.apply: Flushing batch
+[NostrRelay] Batch flushed successfully
+[NostrRelay] ========================================
+[NostrRelay] Custom apply completed
+[NostrRelay] ========================================
+[NostrRelay] CUSTOM APPLY
+[NostrRelay] Batch size: 1
+[NostrRelay] Base writable: true
+[NostrRelay] ========================================
+[NostrRelay] Processing remaining operations through NostrRelay.apply...
+[NostrRelay] ========================================
+[NostrRelay] STATIC APPLY
+[NostrRelay] Batch size: 1
+[NostrRelay] Processing batch for event storage
+[NostrRelay] ========================================
+[NostrRelay] Processing operation type: subscriptions
+[NostrRelay] Processing subscription data for connection: c4fe571eb7ca3312...
+[2025-07-28T04:04:23.744Z] NostrRelay.apply: Flushing batch
+[NostrRelay] Batch flushed successfully
+[NostrRelay] ========================================
+[NostrRelay] Custom apply completed
+[NostrRelay] ========================================
+[NostrRelay] CUSTOM APPLY
+[NostrRelay] Batch size: 1
+[NostrRelay] Base writable: true
+[NostrRelay] ========================================
+[NostrRelay] Processing remaining operations through NostrRelay.apply...
+[NostrRelay] ========================================
+[NostrRelay] STATIC APPLY
+[NostrRelay] Batch size: 1
+[NostrRelay] Processing batch for event storage
+[NostrRelay] ========================================
+[NostrRelay] Processing operation type: subscriptions
+[NostrRelay] Processing subscription data for connection: b517cb3d7080dff0...
+[2025-07-28T04:04:23.744Z] NostrRelay.apply: Flushing batch
+[NostrRelay] Batch flushed successfully
+[NostrRelay] ========================================
+[NostrRelay] Custom apply completed
+[NostrRelay] ========================================
+[NostrRelay] CUSTOM APPLY
+[NostrRelay] Batch size: 1
+[NostrRelay] Base writable: true
+[NostrRelay] ========================================
+[NostrRelay] Processing remaining operations through NostrRelay.apply...
+[NostrRelay] ========================================
+[NostrRelay] STATIC APPLY
+[NostrRelay] Batch size: 1
+[NostrRelay] Processing batch for event storage
+[NostrRelay] ========================================
+[NostrRelay] Processing operation type: subscriptions
+[NostrRelay] Processing subscription data for connection: c4fe571eb7ca3312...
+[2025-07-28T04:04:23.745Z] NostrRelay.apply: Flushing batch
+[NostrRelay] Batch flushed successfully
+[NostrRelay] ========================================
+[NostrRelay] Custom apply completed
+[NostrRelay] ========================================
+[NostrRelay] CUSTOM APPLY
+[NostrRelay] Batch size: 1
+[NostrRelay] Base writable: true
+[NostrRelay] ========================================
+[NostrRelay] Processing remaining operations through NostrRelay.apply...
+[NostrRelay] ========================================
+[NostrRelay] STATIC APPLY
+[NostrRelay] Batch size: 1
+[NostrRelay] Processing batch for event storage
+[NostrRelay] ========================================
+[NostrRelay] Processing operation type: event
+[NostrRelay] Processing EVENT: { id: '58c9beb8...', kind: 0, pubkey: '183fb361...' }
+[2025-07-28T04:04:23.745Z] validateEvent: Validating event:
+{
+  "kind": 0,
+  "content": "Relay initialized",
+  "created_at": 1753669418,
+  "tags": [],
+  "pubkey": "183fb361ca94199b5041fe29d1a33e6f7d21246f5ffec4176ea172a77e8f83c3",
+  "id": "58c9beb88a96801a15ed7cf2e2ba5763c10de8973a99d86c80f85ae213c6a36e",
+  "sig": "a0ac8e9da3328102ffae9a0221849df75a54b64f1f90ec38e95430b2c3907419dd1df8fb667fb894d891f00be0744df74d677da633230d34e6c06cd454455b32"
+}
+[2025-07-28T04:04:23.745Z] validateEvent: Event passed all validation checks
+[NostrRelay] Storing event with ID: 58c9beb88a96801a15ed7cf2e2ba5763c10de8973a99d86c80f85ae213c6a36e
+[NostrRelay] Creating indexes for event...
+[NostrRelay] Event and indexes stored successfully
+[2025-07-28T04:04:23.745Z] NostrRelay.apply: Flushing batch
+[NostrRelay] Batch flushed successfully
+[NostrRelay] ========================================
+[NostrRelay] Custom apply completed
+[NostrRelay] ========================================
+[NostrRelay] CUSTOM APPLY
+[NostrRelay] Batch size: 1
+[NostrRelay] Base writable: true
+[NostrRelay] ========================================
+[NostrRelay] Processing remaining operations through NostrRelay.apply...
+[NostrRelay] ========================================
+[NostrRelay] STATIC APPLY
+[NostrRelay] Batch size: 1
+[NostrRelay] Processing batch for event storage
+[NostrRelay] ========================================
+[NostrRelay] Processing operation type: subscriptions
+[NostrRelay] Processing subscription data for connection: 7cec921db675036a...
+[2025-07-28T04:04:23.747Z] NostrRelay.apply: Flushing batch
+[NostrRelay] Batch flushed successfully
+[NostrRelay] ========================================
+[NostrRelay] Custom apply completed
+[NostrRelay] ========================================
+[NostrRelay] CUSTOM APPLY
+[NostrRelay] Batch size: 1
+[NostrRelay] Base writable: true
+[NostrRelay] ========================================
+[NostrRelay] Processing remaining operations through NostrRelay.apply...
+[NostrRelay] ========================================
+[NostrRelay] STATIC APPLY
+[NostrRelay] Batch size: 1
+[NostrRelay] Processing batch for event storage
+[NostrRelay] ========================================
+[NostrRelay] Processing operation type: subscriptions
+[NostrRelay] Processing subscription data for connection: 7cec921db675036a...
+[2025-07-28T04:04:23.747Z] NostrRelay.apply: Flushing batch
+[NostrRelay] Batch flushed successfully
+[NostrRelay] ========================================
+[NostrRelay] Custom apply completed
+[NostrRelay] ========================================
+[NostrRelay] CUSTOM APPLY
+[NostrRelay] Batch size: 1
+[NostrRelay] Base writable: true
+[NostrRelay] ========================================
+[NostrRelay] Processing remaining operations through NostrRelay.apply...
+[NostrRelay] ========================================
+[NostrRelay] STATIC APPLY
+[NostrRelay] Batch size: 1
+[NostrRelay] Processing batch for event storage
+[NostrRelay] ========================================
+[NostrRelay] Processing operation type: subscriptions
+[NostrRelay] Processing subscription data for connection: 7cec921db675036a...
+[2025-07-28T04:04:23.747Z] NostrRelay.apply: Flushing batch
+[NostrRelay] Batch flushed successfully
+[NostrRelay] ========================================
+[NostrRelay] Custom apply completed
+[NostrRelay] ========================================
+[NostrRelay] CUSTOM APPLY
+[NostrRelay] Batch size: 1
+[NostrRelay] Base writable: true
+[NostrRelay] ========================================
+[NostrRelay] Processing remaining operations through NostrRelay.apply...
+[NostrRelay] ========================================
+[NostrRelay] STATIC APPLY
+[NostrRelay] Batch size: 1
+[NostrRelay] Processing batch for event storage
+[NostrRelay] ========================================
+[NostrRelay] Processing operation type: subscriptions
+[NostrRelay] Processing subscription data for connection: 7cec921db675036a...
+[2025-07-28T04:04:23.748Z] NostrRelay.apply: Flushing batch
+[NostrRelay] Batch flushed successfully
+[NostrRelay] ========================================
+[NostrRelay] Custom apply completed
+[NostrRelay] ========================================
+[NostrRelay] CUSTOM APPLY
+[NostrRelay] Batch size: 1
+[NostrRelay] Base writable: true
+[NostrRelay] ========================================
+[NostrRelay] Processing remaining operations through NostrRelay.apply...
+[NostrRelay] ========================================
+[NostrRelay] STATIC APPLY
+[NostrRelay] Batch size: 1
+[NostrRelay] Processing batch for event storage
+[NostrRelay] ========================================
+[NostrRelay] Processing operation type: subscriptions
+[NostrRelay] Processing subscription data for connection: 7cec921db675036a...
+[2025-07-28T04:04:23.748Z] NostrRelay.apply: Flushing batch
+[NostrRelay] Batch flushed successfully
+[NostrRelay] ========================================
+[NostrRelay] Custom apply completed
+[NostrRelay] ========================================
+[NostrRelay] CUSTOM APPLY
+[NostrRelay] Batch size: 1
+[NostrRelay] Base writable: true
+[NostrRelay] ========================================
+[NostrRelay] Processing remaining operations through NostrRelay.apply...
+[NostrRelay] ========================================
+[NostrRelay] STATIC APPLY
+[NostrRelay] Batch size: 1
+[NostrRelay] Processing batch for event storage
+[NostrRelay] ========================================
+[NostrRelay] Processing operation type: subscriptions
+[NostrRelay] Processing subscription data for connection: 7cec921db675036a...
+[2025-07-28T04:04:23.749Z] NostrRelay.apply: Flushing batch
+[NostrRelay] Batch flushed successfully
+[NostrRelay] ========================================
+[NostrRelay] Custom apply completed
+[NostrRelay] ========================================
+[NostrRelay] CUSTOM APPLY
+[NostrRelay] Batch size: 1
+[NostrRelay] Base writable: true
+[NostrRelay] ========================================
+[NostrRelay] Processing remaining operations through NostrRelay.apply...
+[NostrRelay] ========================================
+[NostrRelay] STATIC APPLY
+[NostrRelay] Batch size: 1
+[NostrRelay] Processing batch for event storage
+[NostrRelay] ========================================
+[NostrRelay] Processing operation type: subscriptions
+[NostrRelay] Processing subscription data for connection: 7cec921db675036a...
+[2025-07-28T04:04:23.749Z] NostrRelay.apply: Flushing batch
+[NostrRelay] Batch flushed successfully
+[NostrRelay] ========================================
+[NostrRelay] Custom apply completed
+[NostrRelay] ========================================
+[NostrRelay] CUSTOM APPLY
+[NostrRelay] Batch size: 1
+[NostrRelay] Base writable: true
+[NostrRelay] ========================================
+[NostrRelay] Processing remaining operations through NostrRelay.apply...
+[NostrRelay] ========================================
+[NostrRelay] STATIC APPLY
+[NostrRelay] Batch size: 1
+[NostrRelay] Processing batch for event storage
+[NostrRelay] ========================================
+[NostrRelay] Processing operation type: subscriptions
+[NostrRelay] Processing subscription data for connection: 7cec921db675036a...
+[2025-07-28T04:04:23.749Z] NostrRelay.apply: Flushing batch
+[NostrRelay] Batch flushed successfully
+[NostrRelay] ========================================
+[NostrRelay] Custom apply completed
+[NostrRelay] ========================================
+[NostrRelay] CUSTOM APPLY
+[NostrRelay] Batch size: 1
+[NostrRelay] Base writable: true
+[NostrRelay] ========================================
+[NostrRelay] Processing remaining operations through NostrRelay.apply...
+[NostrRelay] ========================================
+[NostrRelay] STATIC APPLY
+[NostrRelay] Batch size: 1
+[NostrRelay] Processing batch for event storage
+[NostrRelay] ========================================
+[NostrRelay] Processing operation type: subscriptions
+[NostrRelay] Processing subscription data for connection: 7cec921db675036a...
+[2025-07-28T04:04:23.749Z] NostrRelay.apply: Flushing batch
+[NostrRelay] Batch flushed successfully
+[NostrRelay] ========================================
+[NostrRelay] Custom apply completed
+[NostrRelay] ========================================
+[NostrRelay] CUSTOM APPLY
+[NostrRelay] Batch size: 1
+[NostrRelay] Base writable: true
+[NostrRelay] ========================================
+[NostrRelay] Processing remaining operations through NostrRelay.apply...
+[NostrRelay] ========================================
+[NostrRelay] STATIC APPLY
+[NostrRelay] Batch size: 1
+[NostrRelay] Processing batch for event storage
+[NostrRelay] ========================================
+[NostrRelay] Processing operation type: subscriptions
+[NostrRelay] Processing subscription data for connection: 7cec921db675036a...
+[2025-07-28T04:04:23.749Z] NostrRelay.apply: Flushing batch
+[NostrRelay] Batch flushed successfully
+[NostrRelay] ========================================
+[NostrRelay] Custom apply completed
+[NostrRelay] ========================================
+[NostrRelay] CUSTOM APPLY
+[NostrRelay] Batch size: 1
+[NostrRelay] Base writable: true
+[NostrRelay] ========================================
+[NostrRelay] Processing remaining operations through NostrRelay.apply...
+[NostrRelay] ========================================
+[NostrRelay] STATIC APPLY
+[NostrRelay] Batch size: 1
+[NostrRelay] Processing batch for event storage
+[NostrRelay] ========================================
+[NostrRelay] Processing operation type: event
+[NostrRelay] Processing EVENT: { id: '6298c3b3...', kind: 0, pubkey: 'afc37959...' }
+[2025-07-28T04:04:23.750Z] validateEvent: Validating event:
+{
+  "kind": 0,
+  "content": "Relay initialized",
+  "created_at": 1753670111,
+  "tags": [],
+  "pubkey": "afc37959f63522b33b240525e4dfdbd944180e87c04acadabf1c8bf8b0832715",
+  "id": "6298c3b3674036edf720f388248aacdfa62d966e8a2519e39af87a552b4bd9f2",
+  "sig": "dae07fa663042c023d795cb73151a6559595e56d0a6df783721035805a32b3368a8e10df86640c3f88fe66e696f88572c9042555b49f0b33de9a8a79608e1569"
+}
+[2025-07-28T04:04:23.750Z] validateEvent: Event passed all validation checks
+[NostrRelay] Storing event with ID: 6298c3b3674036edf720f388248aacdfa62d966e8a2519e39af87a552b4bd9f2
+[NostrRelay] Creating indexes for event...
+[NostrRelay] Event and indexes stored successfully
+[2025-07-28T04:04:23.750Z] NostrRelay.apply: Flushing batch
+[NostrRelay] Batch flushed successfully
+[NostrRelay] ========================================
+[NostrRelay] Custom apply completed
+[NostrRelay] ========================================
+[NostrRelay] CUSTOM APPLY
+[NostrRelay] Batch size: 1
+[NostrRelay] Base writable: true
+[NostrRelay] ========================================
+[NostrRelay] Processing remaining operations through NostrRelay.apply...
+[NostrRelay] ========================================
+[NostrRelay] STATIC APPLY
+[NostrRelay] Batch size: 1
+[NostrRelay] Processing batch for event storage
+[NostrRelay] ========================================
+[NostrRelay] Processing operation type: subscriptions
+[NostrRelay] Processing subscription data for connection: 175d8a1d1d1d6cf7...
+[2025-07-28T04:04:23.751Z] NostrRelay.apply: Flushing batch
+[NostrRelay] Batch flushed successfully
+[NostrRelay] ========================================
+[NostrRelay] Custom apply completed
+[NostrRelay] ========================================
+[NostrRelay] CUSTOM APPLY
+[NostrRelay] Batch size: 1
+[NostrRelay] Base writable: true
+[NostrRelay] ========================================
+[NostrRelay] Processing remaining operations through NostrRelay.apply...
+[NostrRelay] ========================================
+[NostrRelay] STATIC APPLY
+[NostrRelay] Batch size: 1
+[NostrRelay] Processing batch for event storage
+[NostrRelay] ========================================
+[NostrRelay] Processing operation type: subscriptions
+[NostrRelay] Processing subscription data for connection: 175d8a1d1d1d6cf7...
+[2025-07-28T04:04:23.751Z] NostrRelay.apply: Flushing batch
+[NostrRelay] Batch flushed successfully
+[NostrRelay] ========================================
+[NostrRelay] Custom apply completed
+[NostrRelay] ========================================
+[NostrRelay] CUSTOM APPLY
+[NostrRelay] Batch size: 1
+[NostrRelay] Base writable: true
+[NostrRelay] ========================================
+[NostrRelay] Processing remaining operations through NostrRelay.apply...
+[NostrRelay] ========================================
+[NostrRelay] STATIC APPLY
+[NostrRelay] Batch size: 1
+[NostrRelay] Processing batch for event storage
+[NostrRelay] ========================================
+[NostrRelay] Processing operation type: subscriptions
+[NostrRelay] Processing subscription data for connection: 175d8a1d1d1d6cf7...
+[2025-07-28T04:04:23.752Z] NostrRelay.apply: Flushing batch
+[NostrRelay] Batch flushed successfully
+[NostrRelay] ========================================
+[NostrRelay] Custom apply completed
+[NostrRelay] ========================================
+[NostrRelay] CUSTOM APPLY
+[NostrRelay] Batch size: 1
+[NostrRelay] Base writable: true
+[NostrRelay] ========================================
+[NostrRelay] Processing remaining operations through NostrRelay.apply...
+[NostrRelay] ========================================
+[NostrRelay] STATIC APPLY
+[NostrRelay] Batch size: 1
+[NostrRelay] Processing batch for event storage
+[NostrRelay] ========================================
+[NostrRelay] Processing operation type: subscriptions
+[NostrRelay] Processing subscription data for connection: 175d8a1d1d1d6cf7...
+[2025-07-28T04:04:23.752Z] NostrRelay.apply: Flushing batch
+[NostrRelay] Batch flushed successfully
+[NostrRelay] ========================================
+[NostrRelay] Custom apply completed
+[NostrRelay] ========================================
+[NostrRelay] CUSTOM APPLY
+[NostrRelay] Batch size: 1
+[NostrRelay] Base writable: true
+[NostrRelay] ========================================
+[NostrRelay] Processing remaining operations through NostrRelay.apply...
+[NostrRelay] ========================================
+[NostrRelay] STATIC APPLY
+[NostrRelay] Batch size: 1
+[NostrRelay] Processing batch for event storage
+[NostrRelay] ========================================
+[NostrRelay] Processing operation type: subscriptions
+[NostrRelay] Processing subscription data for connection: 175d8a1d1d1d6cf7...
+[2025-07-28T04:04:23.752Z] NostrRelay.apply: Flushing batch
+[NostrRelay] Batch flushed successfully
+[NostrRelay] ========================================
+[NostrRelay] Custom apply completed
+[NostrRelay] ========================================
+[NostrRelay] CUSTOM APPLY
+[NostrRelay] Batch size: 1
+[NostrRelay] Base writable: true
+[NostrRelay] ========================================
+[NostrRelay] Processing remaining operations through NostrRelay.apply...
+[NostrRelay] ========================================
+[NostrRelay] STATIC APPLY
+[NostrRelay] Batch size: 1
+[NostrRelay] Processing batch for event storage
+[NostrRelay] ========================================
+[NostrRelay] Processing operation type: subscriptions
+[NostrRelay] Processing subscription data for connection: 175d8a1d1d1d6cf7...
+[2025-07-28T04:04:23.752Z] NostrRelay.apply: Flushing batch
+[NostrRelay] Batch flushed successfully
+[NostrRelay] ========================================
+[NostrRelay] Custom apply completed
+[NostrRelay] ========================================
+[NostrRelay] CUSTOM APPLY
+[NostrRelay] Batch size: 1
+[NostrRelay] Base writable: true
+[NostrRelay] ========================================
+[NostrRelay] Processing remaining operations through NostrRelay.apply...
+[NostrRelay] ========================================
+[NostrRelay] STATIC APPLY
+[NostrRelay] Batch size: 1
+[NostrRelay] Processing batch for event storage
+[NostrRelay] ========================================
+[NostrRelay] Processing operation type: subscriptions
+[NostrRelay] Processing subscription data for connection: 175d8a1d1d1d6cf7...
+[2025-07-28T04:04:23.753Z] NostrRelay.apply: Flushing batch
+[NostrRelay] Batch flushed successfully
+[NostrRelay] ========================================
+[NostrRelay] Custom apply completed
+[NostrRelay] ========================================
+[NostrRelay] CUSTOM APPLY
+[NostrRelay] Batch size: 1
+[NostrRelay] Base writable: true
+[NostrRelay] ========================================
+[NostrRelay] Processing remaining operations through NostrRelay.apply...
+[NostrRelay] ========================================
+[NostrRelay] STATIC APPLY
+[NostrRelay] Batch size: 1
+[NostrRelay] Processing batch for event storage
+[NostrRelay] ========================================
+[NostrRelay] Processing operation type: subscriptions
+[NostrRelay] Processing subscription data for connection: 175d8a1d1d1d6cf7...
+[2025-07-28T04:04:23.753Z] NostrRelay.apply: Flushing batch
+[NostrRelay] Batch flushed successfully
+[NostrRelay] ========================================
+[NostrRelay] Custom apply completed
+[NostrRelay] ========================================
+[NostrRelay] CUSTOM APPLY
+[NostrRelay] Batch size: 1
+[NostrRelay] Base writable: true
+[NostrRelay] ========================================
+[NostrRelay] Processing remaining operations through NostrRelay.apply...
+[NostrRelay] ========================================
+[NostrRelay] STATIC APPLY
+[NostrRelay] Batch size: 1
+[NostrRelay] Processing batch for event storage
+[NostrRelay] ========================================
+[NostrRelay] Processing operation type: event
+[NostrRelay] Processing EVENT: { id: '198c5d16...', kind: 0, pubkey: 'c0418c2f...' }
+[2025-07-28T04:04:23.753Z] validateEvent: Validating event:
+{
+  "kind": 0,
+  "content": "Relay initialized",
+  "created_at": 1753674650,
+  "tags": [],
+  "pubkey": "c0418c2f78cc2024ce87d10aa0eb435f05c8322758421e4aaf5c3fc35ee3f715",
+  "id": "198c5d160769858fcbce3bbcf1b7461a936c81a8b6498541f3574753abcc581f",
+  "sig": "c9634a86e63fc62fa7c0191ff4714fa74ff75b07ce843b6a19b928a9906027598d02e3791f9056c14dcf8a8edb222e6bde92b55e21480ebb6d314f4e41456cdc"
+}
+[2025-07-28T04:04:23.753Z] validateEvent: Event passed all validation checks
+[NostrRelay] Storing event with ID: 198c5d160769858fcbce3bbcf1b7461a936c81a8b6498541f3574753abcc581f
+[NostrRelay] Creating indexes for event...
+[NostrRelay] Event and indexes stored successfully
+[2025-07-28T04:04:23.754Z] NostrRelay.apply: Flushing batch
+[NostrRelay] Batch flushed successfully
+[NostrRelay] ========================================
+[NostrRelay] Custom apply completed
+[NostrRelay] ========================================
+[NostrRelay] CUSTOM APPLY
+[NostrRelay] Batch size: 1
+[NostrRelay] Base writable: true
+[NostrRelay] ========================================
+[NostrRelay] Processing remaining operations through NostrRelay.apply...
+[NostrRelay] ========================================
+[NostrRelay] STATIC APPLY
+[NostrRelay] Batch size: 1
+[NostrRelay] Processing batch for event storage
+[NostrRelay] ========================================
+[NostrRelay] Processing operation type: subscriptions
+[NostrRelay] Processing subscription data for connection: 7a4f4e7b10a46244...
+[2025-07-28T04:04:23.754Z] NostrRelay.apply: Flushing batch
+[NostrRelay] Batch flushed successfully
+[NostrRelay] ========================================
+[NostrRelay] Custom apply completed
+[NostrRelay] ========================================
+[NostrRelay] CUSTOM APPLY
+[NostrRelay] Batch size: 1
+[NostrRelay] Base writable: true
+[NostrRelay] ========================================
+[NostrRelay] Processing remaining operations through NostrRelay.apply...
+[NostrRelay] ========================================
+[NostrRelay] STATIC APPLY
+[NostrRelay] Batch size: 1
+[NostrRelay] Processing batch for event storage
+[NostrRelay] ========================================
+[NostrRelay] Processing operation type: subscriptions
+[NostrRelay] Processing subscription data for connection: 7a4f4e7b10a46244...
+[2025-07-28T04:04:23.754Z] NostrRelay.apply: Flushing batch
+[NostrRelay] Batch flushed successfully
+[NostrRelay] ========================================
+[NostrRelay] Custom apply completed
+[NostrRelay] ========================================
+[NostrRelay] CUSTOM APPLY
+[NostrRelay] Batch size: 1
+[NostrRelay] Base writable: true
+[NostrRelay] ========================================
+[NostrRelay] Processing remaining operations through NostrRelay.apply...
+[NostrRelay] ========================================
+[NostrRelay] STATIC APPLY
+[NostrRelay] Batch size: 1
+[NostrRelay] Processing batch for event storage
+[NostrRelay] ========================================
+[NostrRelay] Processing operation type: subscriptions
+[NostrRelay] Processing subscription data for connection: 7a4f4e7b10a46244...
+[2025-07-28T04:04:23.754Z] NostrRelay.apply: Flushing batch
+[NostrRelay] Batch flushed successfully
+[NostrRelay] ========================================
+[NostrRelay] Custom apply completed
+[NostrRelay] ========================================
+[NostrRelay] CUSTOM APPLY
+[NostrRelay] Batch size: 1
+[NostrRelay] Base writable: true
+[NostrRelay] ========================================
+[NostrRelay] Processing remaining operations through NostrRelay.apply...
+[NostrRelay] ========================================
+[NostrRelay] STATIC APPLY
+[NostrRelay] Batch size: 1
+[NostrRelay] Processing batch for event storage
+[NostrRelay] ========================================
+[NostrRelay] Processing operation type: subscriptions
+[NostrRelay] Processing subscription data for connection: 7a4f4e7b10a46244...
+[2025-07-28T04:04:23.755Z] NostrRelay.apply: Flushing batch
+[NostrRelay] Batch flushed successfully
+[NostrRelay] ========================================
+[NostrRelay] Custom apply completed
+[NostrRelay] ========================================
+[NostrRelay] CUSTOM APPLY
+[NostrRelay] Batch size: 1
+[NostrRelay] Base writable: true
+[NostrRelay] ========================================
+[NostrRelay] Processing remaining operations through NostrRelay.apply...
+[NostrRelay] ========================================
+[NostrRelay] STATIC APPLY
+[NostrRelay] Batch size: 1
+[NostrRelay] Processing batch for event storage
+[NostrRelay] ========================================
+[NostrRelay] Processing operation type: subscriptions
+[NostrRelay] Processing subscription data for connection: 7a4f4e7b10a46244...
+[2025-07-28T04:04:23.755Z] NostrRelay.apply: Flushing batch
+[NostrRelay] Batch flushed successfully
+[NostrRelay] ========================================
+[NostrRelay] Custom apply completed
+[NostrRelay] ========================================
+[NostrRelay] CUSTOM APPLY
+[NostrRelay] Batch size: 1
+[NostrRelay] Base writable: true
+[NostrRelay] ========================================
+[NostrRelay] Processing remaining operations through NostrRelay.apply...
+[NostrRelay] ========================================
+[NostrRelay] STATIC APPLY
+[NostrRelay] Batch size: 1
+[NostrRelay] Processing batch for event storage
+[NostrRelay] ========================================
+[NostrRelay] Processing operation type: subscriptions
+[NostrRelay] Processing subscription data for connection: 7a4f4e7b10a46244...
+[2025-07-28T04:04:23.755Z] NostrRelay.apply: Flushing batch
+[NostrRelay] Batch flushed successfully
+[NostrRelay] ========================================
+[NostrRelay] Custom apply completed
+[NostrRelay] ========================================
+[NostrRelay] CUSTOM APPLY
+[NostrRelay] Batch size: 1
+[NostrRelay] Base writable: true
+[NostrRelay] ========================================
+[NostrRelay] Processing remaining operations through NostrRelay.apply...
+[NostrRelay] ========================================
+[NostrRelay] STATIC APPLY
+[NostrRelay] Batch size: 1
+[NostrRelay] Processing batch for event storage
+[NostrRelay] ========================================
+[NostrRelay] Processing operation type: subscriptions
+[NostrRelay] Processing subscription data for connection: 7a4f4e7b10a46244...
+[2025-07-28T04:04:23.755Z] NostrRelay.apply: Flushing batch
+[NostrRelay] Batch flushed successfully
+[NostrRelay] ========================================
+[NostrRelay] Custom apply completed
+[NostrRelay] ========================================
+[NostrRelay] CUSTOM APPLY
+[NostrRelay] Batch size: 1
+[NostrRelay] Base writable: true
+[NostrRelay] ========================================
+[NostrRelay] Processing remaining operations through NostrRelay.apply...
+[NostrRelay] ========================================
+[NostrRelay] STATIC APPLY
+[NostrRelay] Batch size: 1
+[NostrRelay] Processing batch for event storage
+[NostrRelay] ========================================
+[NostrRelay] Processing operation type: subscriptions
+[NostrRelay] Processing subscription data for connection: 7a4f4e7b10a46244...
+[2025-07-28T04:04:23.755Z] NostrRelay.apply: Flushing batch
+[NostrRelay] Batch flushed successfully
+[NostrRelay] ========================================
+[NostrRelay] Custom apply completed
+[NostrRelay] ========================================
+[NostrRelay] CUSTOM APPLY
+[NostrRelay] Batch size: 1
+[NostrRelay] Base writable: true
+[NostrRelay] ========================================
+[NostrRelay] Processing remaining operations through NostrRelay.apply...
+[NostrRelay] ========================================
+[NostrRelay] STATIC APPLY
+[NostrRelay] Batch size: 1
+[NostrRelay] Processing batch for event storage
+[NostrRelay] ========================================
+[NostrRelay] Processing operation type: subscriptions
+[NostrRelay] Processing subscription data for connection: 7a4f4e7b10a46244...
+[2025-07-28T04:04:23.756Z] NostrRelay.apply: Flushing batch
+[NostrRelay] Batch flushed successfully
+[NostrRelay] ========================================
+[NostrRelay] Custom apply completed
+[NostrRelay] ========================================
+[NostrRelay] CUSTOM APPLY
+[NostrRelay] Batch size: 1
+[NostrRelay] Base writable: true
+[NostrRelay] ========================================
+[NostrRelay] Processing remaining operations through NostrRelay.apply...
+[NostrRelay] ========================================
+[NostrRelay] STATIC APPLY
+[NostrRelay] Batch size: 1
+[NostrRelay] Processing batch for event storage
+[NostrRelay] ========================================
+[NostrRelay] Processing operation type: subscriptions
+[NostrRelay] Processing subscription data for connection: 7a4f4e7b10a46244...
+[2025-07-28T04:04:23.756Z] NostrRelay.apply: Flushing batch
+[NostrRelay] Batch flushed successfully
+[NostrRelay] ========================================
+[NostrRelay] Custom apply completed
+[RelayManager] Initial update completed
+[RelayManager] State after update:
+[RelayManager] - Key: cb2518ea3bf849acb8adfba787e0585745e39af592f47bc5b216e2973c99da78
+[RelayManager] - Discovery key: 9a7120dcb2bf66816fd7bc94e967803e9225dcbe1143f1319e6e3ffcf3b43bd4
+[RelayManager] - Writable: true
+[RelayManager] View is ready
+[RelayManager] - Bee available: true
+[RelayManager] - Blobs available: true
+[RelayManager] Attached bee append listener
+[RelayManager] Joining swarm with discovery key: 9a7120dcb2bf66816fd7bc94e967803e9225dcbe1143f1319e6e3ffcf3b43bd4
+[RelayManager] Swarm joined successfully
+[RelayManager] Relay is writable, initializing...
+Initialized event (before publishing): {
+  "kind": 0,
+  "content": "Relay initialized",
+  "created_at": 1753675467,
+  "tags": [],
+  "pubkey": "fefa2c6baa61d0c49a66bb248248519b775d121d60f4e927425f63c6cfca6418",
+  "id": "e031e4719331c6de60568119bb1b25a51f7156429531ce4a8de5f232da75e07a",
+  "sig": "aa0fd08268ea90c7db36b352d9920218a76f1aa95387577065e84886e645848df0fd053db7bfcfd0deb5a7df076737bee51668f15ee9b299e6535799ad0254f7"
+}
+Serialized event: [0,"fefa2c6baa61d0c49a66bb248248519b775d121d60f4e927425f63c6cfca6418",1753675467,0,[],"Relay initialized"]
+Event hash: e031e4719331c6de60568119bb1b25a51f7156429531ce4a8de5f232da75e07a
+[2025-07-28T04:04:27.045Z] publishEvent: Attempting to publish event:
+{
+  "kind": 0,
+  "content": "Relay initialized",
+  "created_at": 1753675467,
+  "tags": [],
+  "pubkey": "fefa2c6baa61d0c49a66bb248248519b775d121d60f4e927425f63c6cfca6418",
+  "id": "e031e4719331c6de60568119bb1b25a51f7156429531ce4a8de5f232da75e07a",
+  "sig": "aa0fd08268ea90c7db36b352d9920218a76f1aa95387577065e84886e645848df0fd053db7bfcfd0deb5a7df076737bee51668f15ee9b299e6535799ad0254f7"
+}
+Verifying Event Signature ===
+Serialized Event: [0,"fefa2c6baa61d0c49a66bb248248519b775d121d60f4e927425f63c6cfca6418",1753675467,0,[],"Relay initialized"]
+Event Hash: e031e4719331c6de60568119bb1b25a51f7156429531ce4a8de5f232da75e07a
+Verification Details:
+Public Key: fefa2c6baa61d0c49a66bb248248519b775d121d60f4e927425f63c6cfca6418
+Signature: aa0fd08268ea90c7db36b352d9920218a76f1aa95387577065e84886e645848df0fd053db7bfcfd0deb5a7df076737bee51668f15ee9b299e6535799ad0254f7
+Verification Result: true
+[2025-07-28T04:04:27.069Z] publishEvent: Event verification result:
+true
+[2025-07-28T04:04:27.069Z] publishEvent: Publishing event with ID: e031e4719331c6de60568119bb1b25a51f7156429531ce4a8de5f232da75e07a
+[NostrRelay] ========================================
+[NostrRelay] APPEND OVERRIDE
+[NostrRelay] Value: [{"type":"event","event":"{\"kind\":0,\"content\":\"Relay initialized\",\"created_at\":1753675467,\"tags\":[],\"pubkey\":\"fefa2c6baa61d0c49a66bb248248519b775d121d60f4e927425f63c6cfca6418\",\"id\":\"e031e4719331c6de60568119bb1b25a51f7156429531ce4a8de5f232da75e07a\",\"sig\":\"aa0fd08268ea90c7db36b352d9920218a76f1aa95387577065e84886e645848df0fd053db7bfcfd0deb5a7df076737bee51668f15ee9b299e6535799ad0254f7\"}"}]
+[NostrRelay] ========================================
+[NostrRelay] Calling parent append...
+[Autobee] ========================================
+[Autobee] APPEND OPERATION
+[Autobee] Value type: array
+[Autobee] Current writable state: true
+[Autobee] ========================================
+[Autobee] Calling parent append...
+[NostrRelay] ========================================
+[NostrRelay] CUSTOM APPLY
+[NostrRelay] Batch size: 1
+[NostrRelay] Base writable: true
+[NostrRelay] ========================================
+[NostrRelay] Processing remaining operations through NostrRelay.apply...
+[NostrRelay] ========================================
+[NostrRelay] STATIC APPLY
+[NostrRelay] Batch size: 1
+[NostrRelay] Processing batch for event storage
+[NostrRelay] ========================================
+[NostrRelay] Processing operation type: event
+[NostrRelay] Processing EVENT: { id: 'e031e471...', kind: 0, pubkey: 'fefa2c6b...' }
+[2025-07-28T04:04:27.070Z] validateEvent: Validating event:
+{
+  "kind": 0,
+  "content": "Relay initialized",
+  "created_at": 1753675467,
+  "tags": [],
+  "pubkey": "fefa2c6baa61d0c49a66bb248248519b775d121d60f4e927425f63c6cfca6418",
+  "id": "e031e4719331c6de60568119bb1b25a51f7156429531ce4a8de5f232da75e07a",
+  "sig": "aa0fd08268ea90c7db36b352d9920218a76f1aa95387577065e84886e645848df0fd053db7bfcfd0deb5a7df076737bee51668f15ee9b299e6535799ad0254f7"
+}
+[2025-07-28T04:04:27.070Z] validateEvent: Event passed all validation checks
+[NostrRelay] Storing event with ID: e031e4719331c6de60568119bb1b25a51f7156429531ce4a8de5f232da75e07a
+[NostrRelay] Creating indexes for event...
