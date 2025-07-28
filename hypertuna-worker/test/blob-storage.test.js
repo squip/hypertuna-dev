@@ -6,6 +6,7 @@ import b4a from 'b4a'
 
 export default test('putBlob avoids duplicate uploads', async t => {
   const relay = new NostrRelay(null, null, { verifyEvent: async () => true })
+  await relay.ready()
   const data = b4a.from('hello world')
 
   const metadata = { uploadedBy: 'tester' }

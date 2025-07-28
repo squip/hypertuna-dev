@@ -132,6 +132,9 @@ export class RelayManager {
         valueEncoding: c.any,
         verifyEvent: this.verifyEvent.bind(this)
       });
+
+      // Wait for the relay to finish opening its view
+      await this.relay.ready();
   
       // Monitor relay events
       this.relay.on('error', (err) => {

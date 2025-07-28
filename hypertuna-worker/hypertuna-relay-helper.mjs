@@ -17,7 +17,7 @@ export default class Autobee extends Autobase {
       bootstrap = null
     }
 
-    const open = (viewStore) => {
+    const open = async (viewStore) => {
       console.log('[Autobee] Opening view store...');
       
       const core = viewStore.get('autobee')
@@ -35,23 +35,24 @@ export default class Autobee extends Autobase {
         blobs.ready = blobSession.ready.bind(blobSession)
       }
       console.log('[Autobee] Created Hyperblobs instance');
-      
-      // Monitor bee and blobs readiness
-      bee.ready().then(() => {
-        console.log('[Autobee] Hyperbee is ready');
-        console.log('[Autobee] - Version:', bee.version);
-        console.log('[Autobee] - Feed length:', bee.feed?.length || 0);
-      }).catch(err => {
-        console.error('[Autobee] Hyperbee ready error:', err);
-      });
-      
-      blobs.ready().then(() => {
-        console.log('[Autobee] Hyperblobs is ready');
-        console.log('[Autobee] - Core length:', blobs.core?.length || 0);
-      }).catch(err => {
-        console.error('[Autobee] Hyperblobs ready error:', err);
-      });
-      
+
+      try {
+        await bee.ready()
+        console.log('[Autobee] Hyperbee is ready')
+        console.log('[Autobee] - Version:', bee.version)
+        console.log('[Autobee] - Feed length:', bee.feed?.length || 0)
+      } catch (err) {
+        console.error('[Autobee] Hyperbee ready error:', err)
+      }
+
+      try {
+        await blobs.ready()
+        console.log('[Autobee] Hyperblobs is ready')
+        console.log('[Autobee] - Core length:', blobs.core?.length || 0)
+      } catch (err) {
+        console.error('[Autobee] Hyperblobs ready error:', err)
+      }
+
       return { bee, blobs }
     }
 
