@@ -60,12 +60,16 @@ export default class Autobee extends Autobase {
       console.log('[Autobee] Calling parent Autobase constructor...');
       super(store, bootstrap, { ...handlers, open, apply });
       console.log('[Autobee] Parent constructor completed');
-      
-      // Log initial state
-      console.log('[Autobee] Initial state:');
-      console.log('[Autobee] - Key:', this.key ? b4a.toString(this.key, 'hex') : 'not set');
-      console.log('[Autobee] - Writable:', this.writable);
-      console.log('[Autobee] - Has view:', !!this.view);
+
+      // Defer initial state logging until the Autobase is ready
+      this.ready().then(() => {
+        console.log('[Autobee] Initial state:');
+        console.log('[Autobee] - Key:', this.key ? b4a.toString(this.key, 'hex') : 'not set');
+        console.log('[Autobee] - Writable:', this.writable);
+        console.log('[Autobee] - Has view:', !!this.view);
+      }).catch(err => {
+        console.error('[Autobee] Ready error:', err);
+      });
       
       // Monitor state changes
       this.on('update', () => {

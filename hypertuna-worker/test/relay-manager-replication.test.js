@@ -77,3 +77,47 @@ export default test('replicates store once per peer', async t => {
   t.is(storeReplicateCount, 1)
   t.is(blobReplicateCount, 0)
 })
+
+export default test('multiple connections each replicate once', async t => {
+  let storeReplicateCount = 0
+  const store = {
+    replicate () {
+      storeReplicateCount++
+      return { on () {} }
+    }
+  }
+
+  const relay = {
+    replicate (conn) {
+      return store.replicate(conn)
+    },
+    view: {},
+    local: { key: b4a.alloc(32) },
+    writable: false,
+    writers: [],
+    update: async () => {}
+  }
+
+  const manager = new RelayManager('/tmp/test', null)
+  manager.store = store
+  manager.relay = relay
+  manager.swarm = {
+    handler: null,
+    on (event, fn) {
+      if (event === 'connection') this.handler = fn
+    }
+  }
+
+  manager.Protomux = FakeProtomux
+  manager.setupSwarmListeners()
+
+  const c1 = new FakeConnection()
+  const c2 = new FakeConnection()
+  const p1 = { publicKey: b4a.alloc(32) }
+  const p2 = { publicKey: b4a.alloc(32) }
+
+  await manager.swarm.handler(c1, p1)
+  await manager.swarm.handler(c2, p2)
+
+  t.is(storeReplicateCount, 2)
+})

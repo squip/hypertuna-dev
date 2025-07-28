@@ -186,9 +186,13 @@ export default class NostrRelay extends Autobee {
     this.findCommonIds = this.findCommonIds.bind(this);
     
     console.log('[NostrRelay] Constructor completed');
-    console.log('[NostrRelay] Initial state:');
-    console.log('[NostrRelay] - Writable:', this.writable);
-    console.log('[NostrRelay] - Has view:', !!this.view);
+    this.ready().then(() => {
+      console.log('[NostrRelay] Initial state:');
+      console.log('[NostrRelay] - Writable:', this.writable);
+      console.log('[NostrRelay] - Has view:', !!this.view);
+    }).catch(err => {
+      console.error('[NostrRelay] Ready error:', err);
+    });
   }
   
   // Update defaultVerifyEvent to be async
