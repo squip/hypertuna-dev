@@ -218,7 +218,9 @@ const swarm = new Hyperswarm()
 // Join a topic
 swarm.join(base.discoveryKey)
 
-swarn.on('connection', (connection) => store.replicate(connection))
+// replicate the entire relay (Corestore, Autobase and Hyperblobs)
+// see the docs in autobase-hyperblobs-documentation
+swarm.on('connection', conn => relay.replicate(conn))
 ```
 
 #### `const heads = base.heads()`

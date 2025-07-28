@@ -45,9 +45,9 @@ console.log('main core key:', b4a.toString(core1.key, 'hex'))
 // We don't need to announce core2 and core3, because they'll be replicated with core1
 swarm.join(core1.discoveryKey)
 
-// Corestore replication internally manages to replicate every loaded core
-// Corestore *does not* exchange keys (read capabilities) during replication.
-swarm.on('connection', (conn) => store.replicate(conn))
+// Replicate everything through the relay in a single stream
+// See autobase-hyperblobs-documentation for more details
+swarm.on('connection', conn => relay.replicate(conn))
 
 // Since Corestore does not exchange keys, they need to be exchanged elsewhere.
 // Here, we'll record the other keys in the first block of core1.
@@ -97,8 +97,9 @@ await store.ready()
 const swarm = new Hyperswarm()
 Pear.teardown(() => swarm.destroy())
 
-// replication of corestore instance on every connection
-swarm.on('connection', (conn) => store.replicate(conn))
+// replicate the relay to sync Corestore, Autobase and Hyperblobs
+// see autobase-hyperblobs-documentation for details
+swarm.on('connection', conn => relay.replicate(conn))
 
 // creation/getting of a hypercore instance using the key passed
 const core = store.get({ key, valueEncoding: 'json' })
@@ -236,8 +237,8 @@ Using [`Hyperswarm`](../building-blocks/hyperswarm.md) one can replicate Coresto
 const swarm = new Hyperswarm()
 // join the relevant topic
 swarm.join(...)
-// simply pass the connection stream to corestore
-swarm.on('connection', conn => store.replicate(conn))
+// replicate the relay which syncs Corestore, Autobase and Hyperblobs
+swarm.on('connection', conn => relay.replicate(conn))
 ```
 
 As with Hypercore, users can also create new protocol streams by treating `options` as the `isInitiator` boolean and then replicate these streams over a transport layer of their choosing:
