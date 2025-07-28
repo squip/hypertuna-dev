@@ -30,10 +30,10 @@ export default class Autobee extends Autobase {
       console.log('[Autobee] Created Hyperbee instance');
       
       const blobSession = viewStore.get('relay-blobs')
-      const blobCore = blobSession && typeof blobSession.getBackingCore === 'function'
-        ? blobSession.getBackingCore()
-        : (blobSession?.core || blobSession)
-      const blobs = new Hyperblobs(blobCore)
+      const blobs = new Hyperblobs(blobSession)
+      if (typeof blobSession?.ready === 'function') {
+        blobs.ready = blobSession.ready.bind(blobSession)
+      }
       console.log('[Autobee] Created Hyperblobs instance');
       
       // Monitor bee and blobs readiness
