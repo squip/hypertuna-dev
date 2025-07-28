@@ -242,10 +242,11 @@ export default class NostrRelay extends Autobee {
     console.log('[NostrRelay] ========================================');
     
     const b = view.bee.batch({ update: false });
-  
-    for (const node of batch) {
-      const op = node.value;
-      console.log('[NostrRelay] Processing operation type:', op.type);
+
+    try {
+      for (const node of batch) {
+        const op = node.value;
+        console.log('[NostrRelay] Processing operation type:', op.type);
       
       // Skip addWriter operations - they should be handled by the custom apply
       if (op.type === 'addWriter') {
@@ -364,11 +365,16 @@ export default class NostrRelay extends Autobee {
         }
       }
     }
-  
-    logWithTimestamp('NostrRelay.apply: Flushing batch');
-    await b.flush();
-    console.log('[NostrRelay] Batch flushed successfully');
-    console.log('[NostrRelay] ========================================');
+
+      logWithTimestamp('NostrRelay.apply: Flushing batch');
+      await b.flush();
+      console.log('[NostrRelay] Batch flushed successfully');
+      console.log('[NostrRelay] ========================================');
+    } catch (error) {
+      console.error('[NostrRelay] Error applying batch:', error);
+      console.error('[NostrRelay] Stack trace:', error.stack);
+      throw error;
+    }
   }
 
   /////////////////////////////////////////////////////////////////////////////////////////////////////////
