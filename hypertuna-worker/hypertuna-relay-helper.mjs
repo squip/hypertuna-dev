@@ -17,7 +17,7 @@ export default class Autobee extends Autobase {
       bootstrap = null
     }
 
-    const open = async (viewStore) => {
+    const open = (viewStore) => {
       console.log('[Autobee] Opening view store...');
       
       const core = viewStore.get('autobee')
@@ -36,22 +36,20 @@ export default class Autobee extends Autobase {
       }
       console.log('[Autobee] Created Hyperblobs instance');
 
-      try {
-        await bee.ready()
+      bee.ready().then(() => {
         console.log('[Autobee] Hyperbee is ready')
         console.log('[Autobee] - Version:', bee.version)
         console.log('[Autobee] - Feed length:', bee.feed?.length || 0)
-      } catch (err) {
+      }).catch(err => {
         console.error('[Autobee] Hyperbee ready error:', err)
-      }
+      })
 
-      try {
-        await blobs.ready()
+      blobs.ready().then(() => {
         console.log('[Autobee] Hyperblobs is ready')
         console.log('[Autobee] - Core length:', blobs.core?.length || 0)
-      } catch (err) {
+      }).catch(err => {
         console.error('[Autobee] Hyperblobs ready error:', err)
-      }
+      })
 
       return { bee, blobs }
     }
