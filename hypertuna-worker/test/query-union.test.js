@@ -3,8 +3,9 @@ import NostrRelay from '../hypertuna-relay-event-processor.mjs'
 
 // Basic unit test for the two-level union/intersection logic used when applying filters
 
-test('filter union across same attribute values', t => {
+test('filter union across same attribute values', async t => {
   const relay = new NostrRelay(null, null, { verifyEvent: async () => true })
+  await relay.ready()
 
   // Simulate query results
   const kindUnion = new Set(['id1']) // results for kinds 9000/9001 (9001 has no events)
