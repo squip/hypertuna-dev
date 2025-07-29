@@ -678,6 +678,7 @@ export async function autoConnectStoredRelays(config) {
                     name: profile.name,
                     description: profile.description,
                     storageDir: profile.relay_storage,
+                    fileSharing: profile.fileSharing || false,
                     config,
                     fromAutoConnect: true  // Add this flag
                 });
