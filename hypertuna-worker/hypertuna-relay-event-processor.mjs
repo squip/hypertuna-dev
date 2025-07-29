@@ -2,8 +2,12 @@
 
 import Autobee from './hypertuna-relay-helper.mjs';
 import b4a from 'b4a';
+import Hyperbee from 'hyperbee';
+import Hyperblobs from 'hyperblobs';
 import { nobleSecp256k1 } from './crypto-libraries.js';
 import { NostrUtils } from './nostr-utils.js';
+
+const MAX_BLOB_SIZE = 10 * 1024 * 1024; // 10MB
 
 export { validateEvent, verifyEventSignature, getEventHash, serializeEvent };
 
@@ -129,13 +133,67 @@ async function verifyEventSignature(event) {
 }
 
 export default class NostrRelay extends Autobee {
-    constructor(store, bootstrap, handlers = {}) {
-      super(store, bootstrap, handlers);
-      this.verifyEvent = handlers.verifyEvent || this.defaultVerifyEvent.bind(this);
-      this.executeIdQueries = this.executeIdQueries.bind(this);
-      this.findCommonIds = this.findCommonIds.bind(this);
-      logWithTimestamp('NostrRelay: Initialized');
-    }
+  constructor(store, bootstrap, handlers = {}) {
+    console.log('[NostrRelay] ========================================');
+    console.log('[NostrRelay] CONSTRUCTOR');
+    console.log('[NostrRelay] Bootstrap:', bootstrap || 'none');
+    console.log('[NostrRelay] ========================================');
+    
+    // Create a custom apply function that handles addWriter operations
+    const customApply = async (batch, view, base) => {
+      console.log('[NostrRelay] ========================================');
+      console.log('[NostrRelay] CUSTOM APPLY');
+      console.log('[NostrRelay] Batch size:', batch.length);
+      console.log('[NostrRelay] Base writable:', base?.writable);
+      console.log('[NostrRelay] ========================================');
+      
+      // First, handle any addWriter operations
+      for (const node of batch) {
+        const op = node.value;
+        if (op.type === 'addWriter') {
+          console.log(`[NostrRelay] Processing addWriter for key: ${op.key}`);
+          console.log('[NostrRelay] Current writers before add:', base.writers?.length || 0);
+          
+          try {
+            console.log('[NostrRelay] Calling base.addWriter()...');
+            await base.addWriter(b4a.from(op.key, 'hex'));
+            console.log(`[NostrRelay] Successfully added writer: ${op.key}`);
+            console.log('[NostrRelay] Current writers after add:', base.writers?.length || 0);
+          } catch (error) {
+            console.error(`[NostrRelay] Error adding writer: ${error.message}`);
+            console.error('[NostrRelay] Stack trace:', error.stack);
+            throw error;
+          }
+          // Continue to next operation without processing this through NostrRelay.apply
+          continue;
+        }
+      }
+      
+      // Then process all other operations through NostrRelay.apply
+      console.log('[NostrRelay] Processing remaining operations through NostrRelay.apply...');
+      await NostrRelay.apply(batch, view, base);
+      console.log('[NostrRelay] Custom apply completed');
+    };
+
+    // Pass the custom apply or use the provided one
+    super(store, bootstrap, {
+      ...handlers,
+      apply: handlers.apply || customApply
+    });
+
+    this.verifyEvent = handlers.verifyEvent || this.defaultVerifyEvent.bind(this);
+    this.executeIdQueries = this.executeIdQueries.bind(this);
+    this.findCommonIds = this.findCommonIds.bind(this);
+    
+    console.log('[NostrRelay] Constructor completed');
+    this.ready().then(() => {
+      console.log('[NostrRelay] Initial state:');
+      console.log('[NostrRelay] - Writable:', this.writable);
+      console.log('[NostrRelay] - Has view:', !!this.view);
+    }).catch(err => {
+      console.error('[NostrRelay] Ready error:', err);
+    });
+  }
   
   // Update defaultVerifyEvent to be async
   async defaultVerifyEvent(event) {
@@ -145,59 +203,183 @@ export default class NostrRelay extends Autobee {
     return result;
   }
 
-  static async apply(batch, view, base) {
-    logWithTimestamp('NostrRelay.apply: Applying batch');
-    const b = view.batch({ update: false })
-  
-    for (const node of batch) {
-        const op = node.value;
-        if (op.type === 'event') {
-            const event = JSON.parse(op.event);
-            // Note: This is a static method, so we can't use async verification here
-            // The verification should happen before the event reaches this point
-            // We'll just do basic validation
-            if (validateEvent(event)) {
-                // Store the full event under its ID
-                const eventKey = b4a.from(event.id, 'hex');
-                logWithTimestamp(`NostrRelay.apply: Storing event with ID: ${event.id}`);
-                await b.put(eventKey, op.event);
-
-                // Store index references - store just the event ID
-                const kindKey = NostrRelay.constructIndexKeyKind(event);
-                logWithTimestamp(`NostrRelay.apply: Storing kind index for event ${event.id} under key: ${kindKey}`);
-                await b.put(b4a.from(kindKey, 'utf8'), event.id);
-
-                const pubkeyKey = NostrRelay.constructIndexKeyPubkey(event);
-                logWithTimestamp(`NostrRelay.apply: Storing pubkey index for event ${event.id} under key: ${pubkeyKey}`);
-                await b.put(b4a.from(pubkeyKey, 'utf8'), event.id);
-
-                const createdAtKey = NostrRelay.constructIndexKeyCreatedAt(event);
-                logWithTimestamp(`NostrRelay.apply: Storing created_at index for event ${event.id} under key: ${createdAtKey}`);
-                await b.put(b4a.from(createdAtKey, 'utf8'), event.id);
-
-                // Store tag references
-                for (const tag of event.tags) {
-                    if (tag.length >= 2 && /^[a-zA-Z]$/.test(tag[0])) {
-                        const tagKey = NostrRelay.constructIndexKeyTagKey(event, tag[0], tag[1]);
-                        logWithTimestamp(`NostrRelay.apply: Storing tag index for event ${event.id} under key: ${tagKey}`);
-                        await b.put(b4a.from(tagKey, 'utf8'), event.id);
-                    }
-                }
-            } else {
-                logWithTimestamp(`NostrRelay.apply: Invalid event, not storing. ID: ${event.id}`);
-            }
-        } else if (op.type === 'subscriptions') {
-            const subscriptionData = JSON.parse(op.subscriptions);
-            logWithTimestamp('NostrRelay.apply: Processing subscription data:', subscriptionData);
-            const key = b4a.from(subscriptionData.connection, 'hex');
-            logWithTimestamp(`NostrRelay.apply: Storing subscription data for connection: ${subscriptionData.connection}`);
-            await b.put(key, op.subscriptions);
-        }
+  // Override the append method to handle addWriter operations properly
+  async append(value) {
+    console.log('[NostrRelay] ========================================');
+    console.log('[NostrRelay] APPEND OVERRIDE');
+    console.log('[NostrRelay] Value:', JSON.stringify(value));
+    console.log('[NostrRelay] ========================================');
+    
+    // If this is an addWriter operation, ensure we log it
+    if (value.type === 'addWriter') {
+      console.log(`[NostrRelay] Appending addWriter operation for key: ${value.key}`);
     }
-  
-    logWithTimestamp('NostrRelay.apply: Flushing batch');
-    await b.flush();
-}
+    
+    try {
+      console.log('[NostrRelay] Calling parent append...');
+      const result = await super.append(value);
+      console.log('[NostrRelay] Parent append completed');
+      
+      if (value.type === 'addWriter') {
+        console.log(`[NostrRelay] addWriter operation appended successfully`);
+        console.log('[NostrRelay] Triggering update to ensure new writer is recognized...');
+        await this.update();
+        console.log('[NostrRelay] Update completed');
+        console.log('[NostrRelay] Current state after addWriter:');
+        console.log('[NostrRelay] - Writable:', this.writable);
+        console.log('[NostrRelay] - Writers count:', this.writers?.length || 0);
+      }
+      
+      return result;
+    } catch (error) {
+      console.error(`[NostrRelay] Error appending value: ${error.message}`);
+      console.error('[NostrRelay] Stack trace:', error.stack);
+      throw error;
+    }
+  }
+
+  static async apply(batch, view, base) {
+    console.log('[NostrRelay] ========================================');
+    console.log('[NostrRelay] STATIC APPLY');
+    console.log('[NostrRelay] Batch size:', batch.length);
+    console.log('[NostrRelay] Processing batch for event storage');
+    console.log('[NostrRelay] ========================================');
+    
+    const b = view.bee.batch({ update: false });
+
+    try {
+      for (const node of batch) {
+        const op = node.value;
+        console.log('[NostrRelay] Processing operation type:', op.type);
+      
+      // Skip addWriter operations - they should be handled by the custom apply
+      if (op.type === 'addWriter') {
+        console.log(`[NostrRelay] Skipping addWriter operation (should be handled by custom apply)`);
+        continue;
+      }
+      
+      if (op.type === 'event') {
+        const event = JSON.parse(op.event);
+        console.log('[NostrRelay] Processing EVENT:', {
+          id: event.id?.substring(0, 8) + '...',
+          kind: event.kind,
+          pubkey: event.pubkey?.substring(0, 8) + '...'
+        });
+        
+        if (validateEvent(event)) {
+          // Store the full event under its ID
+          const eventKey = b4a.from(event.id, 'hex');
+          console.log(`[NostrRelay] Storing event with ID: ${event.id}`);
+          await b.put(eventKey, op.event);
+          
+          // Log index creation
+          console.log('[NostrRelay] Creating indexes for event...');
+          
+          // Store index references
+          const kindKey = NostrRelay.constructIndexKeyKind(event);
+          await b.put(b4a.from(kindKey, 'utf8'), event.id);
+          
+          const pubkeyKey = NostrRelay.constructIndexKeyPubkey(event);
+          await b.put(b4a.from(pubkeyKey, 'utf8'), event.id);
+          
+          const createdAtKey = NostrRelay.constructIndexKeyCreatedAt(event);
+          await b.put(b4a.from(createdAtKey, 'utf8'), event.id);
+          
+          // Store tag references
+          for (const tag of event.tags) {
+            if (tag.length >= 2 && /^[a-zA-Z]$/.test(tag[0])) {
+              const tagKey = NostrRelay.constructIndexKeyTagKey(event, tag[0], tag[1]);
+              await b.put(b4a.from(tagKey, 'utf8'), event.id);
+            }
+          }
+          
+          console.log('[NostrRelay] Event and indexes stored successfully');
+        } else {
+          console.log(`[NostrRelay] Invalid event, not storing. ID: ${event.id}`);
+        }
+        
+      } else if (op.type === 'subscriptions') {
+        const subscriptionData = JSON.parse(op.subscriptions);
+        console.log('[NostrRelay] Processing subscription data for connection:', 
+          subscriptionData.connection?.substring(0, 16) + '...');
+        const key = b4a.from(subscriptionData.connection, 'hex');
+        await b.put(key, op.subscriptions);
+        
+      } else if (op.type === 'blob-store') {
+        console.log(`[NostrRelay] Processing blob-store operation for hash: ${op.hash?.substring(0, 16)}...`);
+        console.log('[NostrRelay] Blob size:', op.size, 'bytes');
+        console.log('[NostrRelay] Has blobs view:', !!view.blobs);
+        
+        try {
+          // Decode base64 data from oplog
+          const blobData = b4a.from(op.data, 'base64');
+          console.log(`[NostrRelay] Decoded blob data, size: ${blobData.length} bytes`);
+          
+          // Store in local Hyperblobs
+          console.log('[NostrRelay] Storing blob in Hyperblobs...');
+          const localBlobId = await view.blobs.put(blobData);
+          console.log(`[NostrRelay] Stored in Hyperblobs with ID:`, localBlobId);
+          
+          // Extract writer key properly
+          let writerKey = 'unknown';
+          if (node.clock && node.clock.writer) {
+            writerKey = b4a.toString(node.clock.writer, 'hex');
+          } else if (node.writer && b4a.isBuffer(node.writer)) {
+            writerKey = b4a.toString(node.writer, 'hex');
+          }
+          console.log('[NostrRelay] Writer key:', writerKey.substring(0, 16) + '...');
+          
+          // Store metadata in Hyperbee
+          const blobKey = `blob:hash:${op.hash}`;
+          const blobMetadata = {
+            writer: writerKey,
+            localBlobId: {
+              blockOffset: localBlobId.blockOffset,
+              blockLength: localBlobId.blockLength,
+              byteOffset: localBlobId.byteOffset,
+              byteLength: localBlobId.byteLength
+            },
+            size: op.size,
+            metadata: op.metadata || {},
+            timestamp: op.timestamp
+          };
+          
+          await b.put(b4a.from(blobKey, 'utf8'), JSON.stringify(blobMetadata));
+          console.log(`[NostrRelay] Stored blob metadata under key: ${blobKey}`);
+          
+          // Create indexes
+          if (op.metadata && op.metadata.uploadedBy) {
+            const uploaderKey = `blob:uploader:${op.metadata.uploadedBy}:${op.hash}`;
+            await b.put(b4a.from(uploaderKey, 'utf8'), op.hash);
+            console.log(`[NostrRelay] Created uploader index: ${uploaderKey}`);
+          }
+          
+          if (op.metadata && op.metadata.mimeType) {
+            const typeKey = `blob:type:${op.metadata.mimeType.replace('/', '-')}:${op.hash}`;
+            await b.put(b4a.from(typeKey, 'utf8'), op.hash);
+            console.log(`[NostrRelay] Created type index: ${typeKey}`);
+          }
+          
+          console.log('[NostrRelay] Blob processing completed successfully');
+          
+        } catch (error) {
+          console.error(`[NostrRelay] Error processing blob-store:`, error);
+          console.error('[NostrRelay] Stack trace:', error.stack);
+          // Continue processing other operations even if this one fails
+        }
+      }
+    }
+
+      logWithTimestamp('NostrRelay.apply: Flushing batch');
+      await b.flush();
+      console.log('[NostrRelay] Batch flushed successfully');
+      console.log('[NostrRelay] ========================================');
+    } catch (error) {
+      console.error('[NostrRelay] Error applying batch:', error);
+      console.error('[NostrRelay] Stack trace:', error.stack);
+      throw error;
+    }
+  }
 
   /////////////////////////////////////////////////////////////////////////////////////////////////////////
   // PROCESSES TO <PUBLISH> EVENTS TO HYPERBEE: ///////////////////////////////////////////////////////////
@@ -319,7 +501,7 @@ export default class NostrRelay extends Autobee {
     logWithTimestamp(`getEvent: Converted key: ${key.toString('hex')}`);
     
     try {
-        const event = await this.view.get(key);
+        const event = await this.view.bee.get(key);
         if (event) {
             logWithTimestamp(`getEvent: Event found for ID ${id}`);
             try {
@@ -601,7 +783,7 @@ async executeQueries(queryGroups) {
             for (let j = 0; j < group.length; j++) {
                 const query = group[j];
                 logWithTimestamp(`executeQueries:  Query ${j + 1}/${group.length} in group ${i + 1}`);
-                for await (const entry of this.view.createReadStream(query)) {
+                for await (const entry of this.view.bee.createReadStream(query)) {
                     if (!entry || !entry.value) continue;
                     const eventId = entry.value; // direct event ID
                     unionIds.add(eventId);
@@ -733,7 +915,7 @@ async handleSubscription(connectionKey) {
     logWithTimestamp(`getSubscriptions: Attempting to retrieve subscriptions for connectionKey: ${connectionKey}`);
     const key = b4a.from(connectionKey, 'hex');
     logWithTimestamp(`getSubscriptions: Converted key: ${key.toString('hex')}`);
-    const subscriptionData = await this.view.get(key);
+    const subscriptionData = await this.view.bee.get(key);
     if (subscriptionData) {
       logWithTimestamp(`getSubscriptions: Subscriptions found for connection ${connectionKey}: ${JSON.stringify(subscriptionData)}`);
       try {
@@ -745,6 +927,154 @@ async handleSubscription(connectionKey) {
     } else {
       logWithTimestamp(`getSubscriptions: No subscriptions found for connection: ${connectionKey}`);
       return null;
+    }
+  }
+
+  async putBlob(data, metadata = {}) {
+    if (!this.blobs) {
+      throw new Error('Blobs view not initialized');
+    }
+
+    if (!b4a.isBuffer(data)) data = b4a.from(data);
+
+    const hashBytes = await nobleSecp256k1.utils.sha256(data);
+    const hash = NostrUtils.bytesToHex(hashBytes);
+
+    const key = b4a.from(`blob:hash:${hash}`, 'utf8');
+    const existing = await this.view.bee.get(key);
+    if (existing) {
+      logWithTimestamp('putBlob: Blob already exists', { hash });
+      return hash;
+    }
+
+    if (data.length > MAX_BLOB_SIZE) {
+      return this.putLargeBlob(data, metadata);
+    }
+
+    logWithTimestamp('putBlob: Storing new blob', { hash, size: data.length });
+
+    await this.append({
+      type: 'blob-store',
+      hash,
+      data: b4a.toString(data, 'base64'),
+      size: data.length,
+      metadata,
+      timestamp: Date.now()
+    });
+
+    return hash;
+  }
+
+  async putLargeBlob(data, metadata = {}, chunkSize = 1024 * 1024) {
+    const hashBytes = await nobleSecp256k1.utils.sha256(data)
+    const hash = NostrUtils.bytesToHex(hashBytes)
+
+    const key = b4a.from(`blob:hash:${hash}`, 'utf8')
+    const existing = await this.view.bee.get(key)
+    if (existing) {
+      logWithTimestamp('putLargeBlob: Blob already exists', { hash })
+      return hash
+    }
+
+    const chunks = []
+
+    logWithTimestamp('putLargeBlob: Storing large blob in chunks', {
+      hash,
+      totalSize: data.length,
+      chunkSize
+    })
+
+    for (let i = 0; i < data.length; i += chunkSize) {
+      const chunk = data.slice(i, Math.min(i + chunkSize, data.length))
+      const chunkHashBytes = await nobleSecp256k1.utils.sha256(chunk)
+      const chunkHash = NostrUtils.bytesToHex(chunkHashBytes)
+
+      await this.append({
+        type: 'blob-store',
+        hash: chunkHash,
+        data: b4a.toString(chunk, 'base64'),
+        size: chunk.length,
+        metadata: {
+          isChunk: true,
+          parentHash: hash,
+          chunkIndex: chunks.length
+        },
+        timestamp: Date.now()
+      })
+
+      chunks.push(chunkHash)
+    }
+
+    const manifest = {
+      type: 'manifest',
+      chunks,
+      totalSize: data.length,
+      chunkSize
+    }
+
+    await this.append({
+      type: 'blob-store',
+      hash,
+      data: b4a.from(JSON.stringify(manifest)).toString('base64'),
+      size: 0,
+      metadata: { ...metadata, isManifest: true },
+      timestamp: Date.now()
+    })
+
+    return hash
+  }
+
+  async getBlob(hash) {
+    if (!this.blobs || !this.bee) {
+      throw new Error('Views not initialized');
+    }
+
+    const entry = await this.view.bee.get(b4a.from(`blob:hash:${hash}`, 'utf8'));
+    if (!entry) return null;
+    
+    const metadata = JSON.parse(entry.value.toString());
+    
+    // Check if this is a manifest for a large blob
+    if (metadata.metadata && metadata.metadata.isManifest) {
+      return this.getLargeBlob(hash, metadata);
+    }
+
+    try {
+      const data = await this.view.blobs.get(metadata.localBlobId);
+      return {
+        data,
+        metadata: metadata.metadata,
+        writer: metadata.writer,
+        size: metadata.size,
+        timestamp: metadata.timestamp
+      };
+    } catch (err) {
+      logWithTimestamp(`getBlob: Blob ${hash} indexed but data not available locally:`, err);
+      return null;
+    }
+  }
+
+  async getLargeBlob(hash, manifestMetadata) {
+    logWithTimestamp('getLargeBlob: Retrieving large blob', { hash })
+
+    const manifestData = await this.view.blobs.get(manifestMetadata.localBlobId)
+    const manifest = JSON.parse(manifestData.toString())
+
+    const chunks = []
+    for (const chunkHash of manifest.chunks) {
+      const chunk = await this.getBlob(chunkHash)
+      if (!chunk) {
+        logWithTimestamp('getLargeBlob: Missing chunk', { parentHash: hash, chunkHash })
+        return null
+      }
+      chunks.push(chunk.data)
+    }
+
+    return {
+      data: b4a.concat(chunks),
+      metadata: manifestMetadata.metadata,
+      writer: manifestMetadata.writer,
+      size: manifest.totalSize
     }
   }
 
