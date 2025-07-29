@@ -190,9 +190,9 @@ export async function createRelay(options = {}) {
             const { getRelayAuthStore } = await import('./relay-auth-store.mjs');
             const authStore = getRelayAuthStore();
             
-            authStore.addAuth(relayKey, config.nostr_pubkey_hex, authToken, '');
+            authStore.addAuth(relayKey, config.nostr_pubkey_hex, authToken);
             if (publicIdentifier) {
-                authStore.addAuth(publicIdentifier, config.nostr_pubkey_hex, authToken, '');
+                authStore.addAuth(publicIdentifier, config.nostr_pubkey_hex, authToken);
             }
             
             console.log('[RelayAdapter] Added auth token to auth store');
@@ -560,7 +560,6 @@ export async function autoConnectStoredRelays(config) {
                         authorizedUsers.forEach(user => {
                             authData[user.pubkey] = {
                                 token: user.token,
-                                allowedSubnets: user.subnets || [],
                                 createdAt: Date.now(),
                                 lastUsed: Date.now()
                             };
@@ -641,7 +640,6 @@ export async function autoConnectStoredRelays(config) {
                     authorizedUsers.forEach(user => {
                         authData[user.pubkey] = {
                             token: user.token,
-                            allowedSubnets: user.subnets || [],
                             createdAt: Date.now(),
                             lastUsed: Date.now()
                         };
