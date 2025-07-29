@@ -209,9 +209,15 @@ export default class NostrRelay extends Autobee {
     console.log('[NostrRelay] APPEND OVERRIDE');
     console.log('[NostrRelay] Value:', JSON.stringify(value));
     console.log('[NostrRelay] ========================================');
+
+    // Return early if value is null or undefined
+    if (!value) {
+      console.log('[NostrRelay] append called with null value');
+      return await super.append(value);
+    }
     
     // If this is an addWriter operation, ensure we log it
-    if (value.type === 'addWriter') {
+    if (value?.type === 'addWriter') {
       console.log(`[NostrRelay] Appending addWriter operation for key: ${value.key}`);
     }
     
@@ -220,7 +226,7 @@ export default class NostrRelay extends Autobee {
       const result = await super.append(value);
       console.log('[NostrRelay] Parent append completed');
       
-      if (value.type === 'addWriter') {
+      if (value?.type === 'addWriter') {
         console.log(`[NostrRelay] addWriter operation appended successfully`);
         console.log('[NostrRelay] Triggering update to ensure new writer is recognized...');
         await this.update();
