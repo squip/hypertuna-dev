@@ -2321,6 +2321,7 @@ async fetchMultipleProfiles(pubkeys) {
      * @param {boolean} groupData.isPublic - Whether the group is public
      * @param {boolean} groupData.isOpen - Whether the group is open to join
      * @param {string} [groupData.authenticatedRelayUrl] - Tokenized relay URL returned by the worker
+     * @param {boolean} [groupData.fileSharing] - Whether file sharing is enabled
      * @returns {Promise<Object>} - Collection of created events
      */
     async createGroup(groupData) {
@@ -2342,7 +2343,8 @@ async fetchMultipleProfiles(pubkeys) {
             isOpen: Boolean(groupData.isOpen),
             identifier: groupData.identifier || null,
             proxyServer: groupData.proxyServer || '',
-            authenticatedRelayUrl: groupData.authenticatedRelayUrl || null
+            authenticatedRelayUrl: groupData.authenticatedRelayUrl || null,
+            fileSharing: Boolean(groupData.fileSharing)
         };
         
         console.log('Creating group with normalized data:', normalizedData);
@@ -2473,6 +2475,9 @@ async fetchMultipleProfiles(pubkeys) {
      * Join a group with authentication flow
      * @param {string} groupId - Group ID
      * @param {string} inviteCode - Optional invite code for closed groups
+     * @param {Object} [options] - Additional join options
+     * @param {boolean} [options.publish] - Whether to publish the join request
+     * @param {boolean} [options.fileSharing] - Enable file sharing for this join
      * @returns {Promise<Object>} - Join request event
      */
     async joinGroup(publicIdentifier, inviteCode = null, options = {}) {

@@ -823,7 +823,7 @@ async function createRelay() {
 }
 
 // Create a relay instance with provided parameters and return relay key
-async function createRelayInstance(name, description, isPublic, isOpen) {
+async function createRelayInstance(name, description, isPublic, isOpen, fileSharing = false) {
   return new Promise((resolve, reject) => {
     if (!workerPipe) {
       addLog('Worker not running', 'error')
@@ -839,13 +839,13 @@ async function createRelayInstance(name, description, isPublic, isOpen) {
 
     workerPipe.write(JSON.stringify({
       type: 'create-relay',
-      data: { name, description, isPublic, isOpen }
+      data: { name, description, isPublic, isOpen, fileSharing }
     }) + '\n')
   })
 }
 
 // Join a relay instance via the worker-driven authentication flow
-async function joinRelayInstance(publicIdentifier) {
+async function joinRelayInstance(publicIdentifier, fileSharing = false) {
   return new Promise((resolve, reject) => {
     if (!workerPipe) {
       addLog('Worker not running', 'error');
@@ -863,10 +863,12 @@ async function joinRelayInstance(publicIdentifier) {
     addLog(`Starting join flow for relay: ${publicIdentifier}`, 'status');
     
     // Send message to worker to start the process
-    workerPipe.write(JSON.stringify({
-      type: 'start-join-flow',
-      data: { publicIdentifier }
-    }) + '\n');
+    workerPipe.write(
+      JSON.stringify({
+        type: 'start-join-flow',
+        data: { publicIdentifier, fileSharing }
+      }) + '\n'
+    );
   });
 }
 

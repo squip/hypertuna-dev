@@ -1993,7 +1993,7 @@ async function createGroupJoinRequest(publicIdentifier, privateKey) {
 }
 
 export async function startJoinAuthentication(options) {
-  const { publicIdentifier } = options;
+  const { publicIdentifier, fileSharing = false } = options;
   const userNsec = config.nostr_nsec_hex;
   const userPubkey = NostrUtils.getPublicKey(userNsec);
   if (config.nostr_pubkey_hex && userPubkey !== config.nostr_pubkey_hex) {
@@ -2002,6 +2002,7 @@ export async function startJoinAuthentication(options) {
 
   console.log(`[RelayServer] Starting join authentication for: ${publicIdentifier}`);
   console.log(`[RelayServer] Using user pubkey: ${userPubkey.substring(0, 8)}...`);
+  console.log(`[RelayServer] File sharing enabled: ${fileSharing}`);
 
   if (!publicIdentifier || !userPubkey || !userNsec) {
     const errorMsg = 'Missing publicIdentifier or user credentials for join flow.';
