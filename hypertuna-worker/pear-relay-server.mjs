@@ -590,9 +590,9 @@ function setupProtocolHandlers(protocol) {
   protocol.handle('/relay/create', async (request) => {
     console.log('[RelayServer] Create relay requested');
     const body = JSON.parse(request.body.toString());
-    const { name, description, isPublic = false, isOpen = false } = body;
-    
-    console.log('[RelayServer] Creating relay:', { name, description });
+    const { name, description, isPublic = false, isOpen = false, fileSharing = false } = body;
+
+    console.log('[RelayServer] Creating relay:', { name, description, isPublic, isOpen, fileSharing });
     
     if (!name) {
       updateMetrics(false);
@@ -674,9 +674,9 @@ function setupProtocolHandlers(protocol) {
   protocol.handle('/relay/join', async (request) => {
     console.log('[RelayServer] Join relay requested');
     const body = JSON.parse(request.body.toString());
-    const { relayKey, name, description } = body;
-    
-    console.log('[RelayServer] Joining relay:', { relayKey, name, description });
+    const { relayKey, name, description, fileSharing = false } = body;
+
+    console.log('[RelayServer] Joining relay:', { relayKey, name, description, fileSharing });
     
     if (!relayKey) {
       updateMetrics(false);
@@ -692,6 +692,7 @@ function setupProtocolHandlers(protocol) {
         relayKey,
         name,
         description,
+        fileSharing,
         config
       });
       
@@ -2035,7 +2036,7 @@ export async function createRelay(options) {
 
 export async function joinRelay(options) {
   const { fileSharing = false } = options;
-  console.log('[RelayServer] Joining relay via adapter:', options);
+  console.log('[RelayServer] Joining relay via adapter:', { ...options, fileSharing });
   const result = await joinRelayManager({
     ...options,
     fileSharing,
