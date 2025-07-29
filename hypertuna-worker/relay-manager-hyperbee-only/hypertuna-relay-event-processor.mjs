@@ -4,8 +4,8 @@ import Autobee from './hypertuna-relay-helper.mjs';
 import b4a from 'b4a';
 import Hyperbee from 'hyperbee';
 import Hyperblobs from 'hyperblobs';
-import { nobleSecp256k1 } from './crypto-libraries.js';
-import { NostrUtils } from './nostr-utils.js';
+import { nobleSecp256k1 } from '../crypto-libraries.js';
+import { NostrUtils } from '../nostr-utils.js';
 
 const MAX_BLOB_SIZE = 10 * 1024 * 1024; // 10MB
 

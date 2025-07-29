@@ -7,8 +7,8 @@ import NostrRelay from './hypertuna-relay-event-processor.mjs';
 import b4a from 'b4a';
 import c from 'compact-encoding';
 import Protomux from 'protomux';
-import { nobleSecp256k1 } from './crypto-libraries.js';
-import { NostrUtils } from './nostr-utils.js';
+import { nobleSecp256k1 } from '../crypto-libraries.js';
+import { NostrUtils } from '../nostr-utils.js';
 import { setTimeout } from 'bare-timers';
 
 // File locking utility to handle concurrent access
