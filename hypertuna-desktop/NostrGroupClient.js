@@ -1547,7 +1547,7 @@ async fetchMultipleProfiles(pubkeys) {
             return;
         }
         
-        // Update group data
+        // Update group data including file sharing flag
         this.groups.set(publicIdentifier, groupData);
         
         // Store hypertuna mapping if available
