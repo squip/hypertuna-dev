@@ -2446,6 +2446,14 @@ async fetchMultipleProfiles(pubkeys) {
             // Continue even if this fails
         }
         
+        // Immediately store the group metadata locally
+        const parsedGroup = NostrEvents.parseGroupMetadata(metadataEvent);
+        if (parsedGroup) {
+            this.groups.set(groupId, parsedGroup);
+            this.hypertunaGroups.set(hypertunaId, groupId);
+            this.groupHypertunaIds.set(groupId, hypertunaId);
+        }
+
         // Subscribe to this group
         this.subscribeToGroup(groupId);
 
