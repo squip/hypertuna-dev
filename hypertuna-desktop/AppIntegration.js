@@ -1149,7 +1149,13 @@ App.syncHypertunaConfigToFile = async function() {
 
             const memberInviteBtn = document.getElementById('btn-member-invite');
             if (memberInviteBtn) memberInviteBtn.disabled = !(isMember && group.isOpen);
-            
+
+            const editFileSharingCheckbox = document.getElementById('edit-group-file-sharing');
+            if (editFileSharingCheckbox) {
+                editFileSharingCheckbox.checked = !!group.fileSharing;
+                editFileSharingCheckbox.disabled = true;
+            }
+
             // Update settings form
             const settingsForm = document.getElementById('group-settings-form');
             const noPermissionMsg = document.getElementById('group-settings-no-permission');
