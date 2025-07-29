@@ -244,6 +244,13 @@
                                                 <span class="toggle-text">Open to Join</span>
                                             </label>
                                         </div>
+                                        <div class="toggle-item">
+                                            <label class="toggle-label">
+                                                <input type="checkbox" id="edit-group-file-sharing" class="toggle-checkbox" disabled>
+                                                <span class="toggle-switch"></span>
+                                                <span class="toggle-text">Enable File Sharing</span>
+                                            </label>
+                                        </div>
                                     </div>
                                     <div class="settings-actions">
                                         <button id="btn-save-group-settings" class="btn btn-primary">Save Changes</button>
@@ -288,24 +295,31 @@
                             <label for="new-group-description">Description</label>
                             <textarea id="new-group-description" class="form-textarea" rows="4" placeholder="What's this relay about?"></textarea>
                         </div>
-                        <div class="settings-toggles">
-                            <div class="toggle-item">
-                                <label class="toggle-label">
-                                    <input type="checkbox" id="new-group-public" class="toggle-checkbox" checked>
+                            <div class="settings-toggles">
+                                <div class="toggle-item">
+                                    <label class="toggle-label">
+                                        <input type="checkbox" id="new-group-public" class="toggle-checkbox" checked>
                                     <span class="toggle-switch"></span>
                                     <span class="toggle-text">Public Relay</span>
                                 </label>
                                 <p class="toggle-description">Anyone can discover this relay</p>
                             </div>
-                            <div class="toggle-item">
-                                <label class="toggle-label">
-                                    <input type="checkbox" id="new-group-open" class="toggle-checkbox" checked>
-                                    <span class="toggle-switch"></span>
-                                    <span class="toggle-text">Open to Join</span>
-                                </label>
-                                <p class="toggle-description">No invite code required</p>
+                                <div class="toggle-item">
+                                    <label class="toggle-label">
+                                        <input type="checkbox" id="new-group-open" class="toggle-checkbox" checked>
+                                        <span class="toggle-switch"></span>
+                                        <span class="toggle-text">Open to Join</span>
+                                    </label>
+                                    <p class="toggle-description">No invite code required</p>
+                                </div>
+                                <div class="toggle-item">
+                                    <label class="toggle-label">
+                                        <input type="checkbox" id="new-group-file-sharing" class="toggle-checkbox">
+                                        <span class="toggle-switch"></span>
+                                        <span class="toggle-text">Enable File Sharing</span>
+                                    </label>
+                                </div>
                             </div>
-                        </div>
                         <button id="btn-create-group" type="button" class="btn btn-primary btn-block">Create Relay</button>
                     </form>
                 </div>
