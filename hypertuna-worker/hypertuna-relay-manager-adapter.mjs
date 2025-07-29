@@ -7,7 +7,22 @@ import crypto from 'bare-crypto';
 
 // Import the legacy modules (these need to be adapted for Bare)
 // We'll need to update their imports to use bare- modules
-import { RelayManager } from './hypertuna-relay-manager-bare.mjs';
+// Dynamically load the appropriate RelayManager depending on file sharing mode
+let HyperblobsRelayManager = null;
+let HyperbeeRelayManager = null;
+
+async function getRelayManager(fileSharing) {
+    if (fileSharing) {
+        if (!HyperblobsRelayManager) {
+            ({ RelayManager: HyperblobsRelayManager } = await import('./hypertuna-relay-manager-bare.mjs'));
+        }
+        return HyperblobsRelayManager;
+    }
+    if (!HyperbeeRelayManager) {
+        ({ RelayManager: HyperbeeRelayManager } = await import('./relay-manager-hyperbee-only/hypertuna-relay-manager-bare.mjs'));
+    }
+    return HyperbeeRelayManager;
+}
 import { 
     initRelayProfilesStorage, 
     getAllRelayProfiles, 
@@ -117,6 +132,7 @@ export async function createRelay(options = {}) {
         await fs.mkdir(defaultStorageDir, { recursive: true });
         
         // Create relay manager instance
+        const RelayManager = await getRelayManager(fileSharing);
         const relayManager = new RelayManager(defaultStorageDir, null);
         await relayManager.initialize();
         
@@ -259,7 +275,7 @@ function generatePublicIdentifier(npub, relayName) {
  * @returns {Promise<Object>} - Result object with relay information
  */
 export async function joinRelay(options = {}) {
-    const { relayKey, name, description, publicIdentifier, authToken = null, storageDir, config, fromAutoConnect = false } = options;
+    const { relayKey, name, description, publicIdentifier, authToken = null, storageDir, fileSharing = false, config, fromAutoConnect = false } = options;
     
     // Store config globally if provided
     if (config) {
@@ -330,6 +346,7 @@ export async function joinRelay(options = {}) {
         await fs.mkdir(defaultStorageDir, { recursive: true });
         
         // Create relay manager instance
+        const RelayManager = await getRelayManager(fileSharing);
         const relayManager = new RelayManager(defaultStorageDir, relayKey);
         await relayManager.initialize();
         
@@ -354,7 +371,8 @@ export async function joinRelay(options = {}) {
                 relay_storage: defaultStorageDir,
                 joined_at: new Date().toISOString(),
                 auto_connect: true,
-                is_active: true
+                is_active: true,
+                fileSharing
             };
 
             await saveRelayProfile(profileInfo);
@@ -368,6 +386,7 @@ export async function joinRelay(options = {}) {
             if (publicIdentifier && !profileInfo.public_identifier) {
                 profileInfo.public_identifier = publicIdentifier;
             }
+            profileInfo.fileSharing = fileSharing;
 
             await saveRelayProfile(profileInfo);
         }
