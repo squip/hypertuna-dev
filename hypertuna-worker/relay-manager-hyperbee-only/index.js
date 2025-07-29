@@ -20,7 +20,7 @@ import {
   calculateMembers,
   calculateAuthorizedUsers
 } from '../hypertuna-relay-profile-manager-bare.mjs'
-import { loadRelayKeyMappings } from './hypertuna-relay-manager-adapter.mjs'
+import { loadRelayKeyMappings } from '../hypertuna-relay-manager-adapter.mjs'
 import {
   queuePendingAuthUpdate,
   applyPendingAuthUpdates
@@ -634,7 +634,7 @@ async function main() {
     // Import and initialize the Hyperswarm-based relay server
     try {
       console.log('[Worker] Importing Hyperswarm relay server module...')
-      relayServer = await import('./pear-relay-server.mjs')
+      relayServer = await import('../pear-relay-server.mjs')
       
       console.log('[Worker] Initializing relay server...')
       await relayServer.initializeRelayServer(config)

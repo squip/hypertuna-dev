@@ -609,6 +609,7 @@ function setupProtocolHandlers(protocol) {
         description,
         isPublic,
         isOpen,
+        fileSharing,
         config
       });
       
@@ -1963,14 +1964,15 @@ async function registerWithGateway(relayProfileInfo = null) {
 // Export relay management functions for worker access
 export async function createRelay(options) {
   // The subnetHash is no longer passed in, it's retrieved from the config
-  const { name, description, isPublic = false, isOpen = false } = options;
-  console.log('[RelayServer] Creating relay via adapter:', { name, description, isPublic, isOpen });
+  const { name, description, isPublic = false, isOpen = false, fileSharing = false } = options;
+  console.log('[RelayServer] Creating relay via adapter:', { name, description, isPublic, isOpen, fileSharing });
 
   const result = await createRelayManager({
     name,
     description,
     isPublic,
     isOpen,
+    fileSharing,
     config
   });
   
@@ -2032,9 +2034,11 @@ export async function createRelay(options) {
 }
 
 export async function joinRelay(options) {
+  const { fileSharing = false } = options;
   console.log('[RelayServer] Joining relay via adapter:', options);
   const result = await joinRelayManager({
     ...options,
+    fileSharing,
     config
   });
   
@@ -2329,7 +2333,7 @@ export async function startJoinAuthentication(options) {
     }
 
     // Join the relay locally so we have a profile and key mapping
-    await joinRelayManager({ relayKey, config });
+    await joinRelayManager({ relayKey, config, fileSharing });
     await applyPendingAuthUpdates(updateRelayAuthToken, relayKey, finalIdentifier);
 
     // Ensure the joined relay profile has the public identifier recorded
