@@ -12,7 +12,7 @@ import { initializeChallengeManager, getChallengeManager } from './challenge-man
 import { getRelayAuthStore } from './relay-auth-store.mjs';
 import { nobleSecp256k1 } from './pure-secp256k1-bare.js';
 import { NostrUtils } from './nostr-utils.js';
-import { updateRelayAuthToken } from './hypertuna-relay-profile-manager-bare.mjs';
+import { updateRelayAuthToken } from '../hypertuna-relay-profile-manager-bare.mjs';
 import { applyPendingAuthUpdates } from './pending-auth.mjs';
 import {
   createRelay as createRelayManager,
@@ -40,7 +40,7 @@ import {
   getRelayProfileByPublicIdentifier,
   saveRelayProfile,
   calculateAuthorizedUsers
-} from './hypertuna-relay-profile-manager-bare.mjs';
+} from '../hypertuna-relay-profile-manager-bare.mjs';
 
 
 // Global state
@@ -961,7 +961,7 @@ function setupProtocolHandlers(protocol) {
       
       if (profile) {
         // Update profile with auth token
-        const { updateRelayAuthToken } = await import('./hypertuna-relay-profile-manager-bare.mjs'); 
+        const { updateRelayAuthToken } = await import('../hypertuna-relay-profile-manager-bare.mjs');
         // Pass subnetHash as an array to match the function signature
         await updateRelayAuthToken(identifier, pubkey, token, [subnetHash]);
         // Update member lists
