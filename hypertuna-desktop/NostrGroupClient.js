@@ -1659,7 +1659,8 @@ async fetchMultipleProfiles(pubkeys) {
                 relayKey: data.relayKey,
                 isPublic: data.isPublic !== false,
                 name: NostrEvents._getTagValue(event, 'name') || '',
-                about: NostrEvents._getTagValue(event, 'about') || ''
+                about: NostrEvents._getTagValue(event, 'about') || '',
+                fileSharing: NostrEvents._hasTag(event, 'file-sharing-on')
             };
 
             this.invites.set(event.id, invite);
@@ -3035,6 +3036,11 @@ async fetchMultipleProfiles(pubkeys) {
             ['name', group.name || ''],
             ['about', group.about || '']
         ];
+        if (group.fileSharing) {
+            tags.push(['file-sharing-on']);
+        } else {
+            tags.push(['file-sharing-off']);
+        }
 
         const event = await NostrEvents.createEvent(
             NostrEvents.KIND_GROUP_INVITE_CREATE,
@@ -3115,6 +3121,11 @@ async fetchMultipleProfiles(pubkeys) {
                 ['name', group.name || ''],
                 ['about', group.about || '']
             ];
+            if (group.fileSharing) {
+                tags.push(['file-sharing-on']);
+            } else {
+                tags.push(['file-sharing-off']);
+            }
 
             const inviteEvent = await NostrEvents.createEvent(
                 NostrEvents.KIND_GROUP_INVITE_CREATE,

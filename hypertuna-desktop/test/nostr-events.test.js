@@ -42,3 +42,14 @@ test('parseGroupMetadata detects file sharing tags', async t => {
   t.ok(groupOn.fileSharing)
   t.absent(groupOff.fileSharing)
 })
+
+test('createGroupInviteEvent includes file sharing tag', async t => {
+  global.window = {}
+  const { default: NostrEvents } = await import('../NostrEvents.js')
+
+  const eventOn = await NostrEvents.createGroupInviteEvent('group1', privKey, { fileSharing: true })
+  const eventOff = await NostrEvents.createGroupInviteEvent('group2', privKey, { fileSharing: false })
+
+  t.ok(eventOn.tags.some(tag => tag[0] === 'file-sharing-on'))
+  t.ok(eventOff.tags.some(tag => tag[0] === 'file-sharing-off'))
+})
