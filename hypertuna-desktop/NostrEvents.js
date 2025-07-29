@@ -212,10 +212,11 @@ class NostrEvents {
      * @param {string} about - Group description
      * @param {boolean} isPublic - Whether group is public
      * @param {boolean} isOpen - Whether group is open (anyone can join)
+     * @param {boolean} fileSharing - Whether file sharing is enabled
      * @param {string} privateKey - Private key for signing
      * @returns {Promise<Object>} - Collection of events for group creation
      */
-    static async createGroupCreationEvent(name, about, isPublic, isOpen, privateKey, relayKey = null, proxyServer = '', npub) {
+    static async createGroupCreationEvent(name, about, isPublic, isOpen, fileSharing, privateKey, relayKey = null, proxyServer = '', npub) {
         // Import the utility
         const { PublicIdentifierUtils } = await import('./PublicIdentifierUtils.js');
         
@@ -249,6 +250,12 @@ class NostrEvents {
         } else {
             groupTags.push(['closed']);
         }
+
+        if (fileSharing) {
+            groupTags.push(['file-sharing-on']);
+        } else {
+            groupTags.push(['file-sharing-off']);
+        }
         
         // Create the kind 9007 group creation event
         const groupCreateEvent = await this.createEvent(
@@ -277,6 +284,12 @@ class NostrEvents {
             metadataTags.push(['open']);
         } else {
             metadataTags.push(['closed']);
+        }
+
+        if (fileSharing) {
+            metadataTags.push(['file-sharing-on']);
+        } else {
+            metadataTags.push(['file-sharing-off']);
         }
         
         const metadataEvent = await this.createEvent(
