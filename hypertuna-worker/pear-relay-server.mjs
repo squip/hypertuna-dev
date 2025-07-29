@@ -963,9 +963,8 @@ function setupProtocolHandlers(protocol) {
       
       if (profile) {
         // Update profile with auth token
-        const { updateRelayAuthToken } = await import('./hypertuna-relay-profile-manager-bare.mjs'); 
-        // Pass subnetHash as an array to match the function signature
-        await updateRelayAuthToken(identifier, pubkey, token, [subnetHash]);
+        const { updateRelayAuthToken } = await import('./hypertuna-relay-profile-manager-bare.mjs');
+        await updateRelayAuthToken(identifier, pubkey, token);
         // Update member lists
         const currentAdds = profile.member_adds || [];
         const currentRemoves = profile.member_removes || [];
@@ -1976,7 +1975,7 @@ export async function createRelay(options) {
         
         // Persist the token to the relay's profile on disk.
         // This now adds the first auth entry.
-        const updatedProfile = await updateRelayAuthToken(result.relayKey, adminPubkey, authToken, subnetHashes);
+        const updatedProfile = await updateRelayAuthToken(result.relayKey, adminPubkey, authToken);
 
         // CRITICAL: Update the profile in the result object to ensure consistency.
         if (updatedProfile) {
@@ -2324,7 +2323,7 @@ export async function startJoinAuthentication(options) {
 
     // Persist the auth token and subnet hash to the local relay profile
     console.log(`[RelayServer] Persisting auth token for ${userPubkey.substring(0, 8)}...`);
-    await updateRelayAuthToken(relayKey, userPubkey, authToken, [requesterSubnetHash]);
+    await updateRelayAuthToken(relayKey, userPubkey, authToken);
 
     // Wait for the relay to become writable before announcing membership
     await waitForRelayWritable(relayKey);
