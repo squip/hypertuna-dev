@@ -1764,8 +1764,6 @@ App.syncHypertunaConfigToFile = async function() {
         document.getElementById('btn-close-auth-modal').classList.remove('hidden');
         document.getElementById('btn-cancel-auth').classList.add('hidden');
         
-        // Clear any previous mobile auth info
-        document.getElementById('auth-url').value = '';
     
         // IMPORTANT: Update the user's relay list with the FULL authenticated URL
         if (this.nostr && this.nostr.client) {
@@ -1834,18 +1832,6 @@ App.syncHypertunaConfigToFile = async function() {
             this.showJoinAuthModal();
         });
         
-        // Copy button for auth URL
-        document.querySelector('[data-copy="auth-url"]').addEventListener('click', function() {
-            const input = document.getElementById('auth-url');
-            input.select();
-            document.execCommand('copy');
-            
-            const originalText = this.textContent;
-            this.textContent = 'Copied!';
-            setTimeout(() => {
-                this.textContent = originalText;
-            }, 2000);
-        });
         
         // Click outside modal to close
         window.addEventListener('click', (e) => {
