@@ -13,9 +13,9 @@ import {
   getAllRelayProfiles,
   getRelayProfileByKey,
   saveRelayProfile,
-  removeRelayAuth, // <-- NEW IMPORT
+  removeRelayAuth,
   updateRelayMembers, // This is likely not used directly anymore for member_adds/removes
-  updateRelayAuthToken, // <-- NEW IMPORT
+  updateRelayAuthToken,
   updateRelayMemberSets,
   calculateMembers,
   calculateAuthorizedUsers
