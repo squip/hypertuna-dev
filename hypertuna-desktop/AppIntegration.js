@@ -1555,6 +1555,8 @@ App.syncHypertunaConfigToFile = async function() {
         const about = document.getElementById('new-group-description').value.trim();
         const isPublic = document.getElementById('new-group-public').checked;
         const isOpen = document.getElementById('new-group-open').checked;
+        const fileSharingEl = document.getElementById('new-group-file-sharing');
+        const fileSharing = fileSharingEl ? fileSharingEl.checked : false;
         
         if (!name) {
             alert('Please enter a group name.');
@@ -1579,7 +1581,7 @@ App.syncHypertunaConfigToFile = async function() {
             if (window.createRelayInstance) {
                 try {
                     // Pass all necessary metadata to the worker for profile creation
-                    relayKey = await window.createRelayInstance(name, about, isPublic, isOpen);
+                    relayKey = await window.createRelayInstance(name, about, isPublic, isOpen, fileSharing);
                 } catch (err) {
                     console.error('Failed to create relay instance:', err);
                 }
@@ -1601,7 +1603,8 @@ App.syncHypertunaConfigToFile = async function() {
                 relayKey,
                 proxyServer,
                 npub,
-                relayKey?.relayUrl || null
+                relayKey?.relayUrl || null,
+                fileSharing
             );
 
             console.log(`Group created successfully with public ID: ${eventsCollection.groupId}`);
@@ -1667,10 +1670,12 @@ App.syncHypertunaConfigToFile = async function() {
         this.resetAuthModal();
 
         try {
+            const group = this.nostr.getGroupById(this.currentGroupId) || {};
+            const fileSharing = !!group.fileSharing;
             // The new global function will handle communication with the worker
             // and return a promise that resolves with the auth result.
             // The UI will be updated by messages from the worker.
-            const authResult = await window.joinRelayInstance(this.currentGroupId);
+            const authResult = await window.joinRelayInstance(this.currentGroupId, fileSharing);
 
             // The 'join-auth-success' message from the worker will have already
             // called App.showAuthSuccess. We can just log the successful outcome.
@@ -1895,11 +1900,13 @@ App.syncHypertunaConfigToFile = async function() {
         }
 
         try {
+            const group = this.nostr.getGroupById(this.currentGroupId) || {};
+            const fileSharing = !!group.fileSharing;
             // Build the join request event without publishing
             const event = await this.nostr.joinGroup(
                 this.currentGroupId,
                 inviteCode,
-                { publish: false }
+                { publish: false, fileSharing }
             );
 
             // Send the event to the gateway
