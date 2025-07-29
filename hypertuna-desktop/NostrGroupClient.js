@@ -2355,6 +2355,7 @@ async fetchMultipleProfiles(pubkeys) {
             normalizedData.about,
             normalizedData.isPublic,
             normalizedData.isOpen,
+            normalizedData.fileSharing,
             this.user.privateKey,
             normalizedData.identifier,
             normalizedData.proxyServer,
