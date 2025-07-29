@@ -1825,10 +1825,9 @@ async fetchMultipleProfiles(pubkeys) {
         event.tags.forEach(tag => {
             if (tag[0] === 'p' && tag[1]) {
                 const pubkey = tag[1];
-                const rolesAndAuthData = tag.slice(2); // e.g., ['member', token, subnetHash]
-                const actualRoles = [rolesAndAuthData[0]]; // 'member' or 'admin'
-                const token = rolesAndAuthData[1]; // The auth token
-                const subnetHashes = rolesAndAuthData.slice(2); // All subsequent elements are subnet hashes
+                const role = tag[2];
+                const token = tag[3];
+                const actualRoles = [role];
 
                 // If this entry is for the current user and a token is provided
                 if (token && this.user && pubkey === this.user.pubkey) {
@@ -1850,8 +1849,7 @@ async fetchMultipleProfiles(pubkeys) {
                             relayKey,
                             publicIdentifier: groupId,
                             pubkey,
-                            token,
-                            subnetHashes 
+                            token
                         }
                     };
                     try {
