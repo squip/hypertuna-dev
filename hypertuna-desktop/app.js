@@ -48,6 +48,7 @@ let relayList = null
 let clearLogsButton = null
 let exportLogsButton = null
 let joinRelayButton = null
+let newGroupFileSharing = null
 
 // Log functions
 function addLog(message, type = 'info') {
@@ -1019,6 +1020,15 @@ function setupEventListeners() {
     joinRelayButton.addEventListener('click', joinRelay)
     console.log('[App] Join relay button listener added')
   }
+
+  if (newGroupFileSharing) {
+    newGroupFileSharing.addEventListener('change', (e) => {
+      if (e.target.checked) {
+        alert('Authorized members of this relay will be able to upload file attachments to their nostr events. Published file attachments will automatically sync across other relay member peers when connected. This setting cannot be disabled once the relay is created.')
+      }
+    })
+    console.log('[App] New group file sharing listener added')
+  }
   
   // Input field event listeners
   const relayNameInput = document.getElementById('relay-name')
@@ -1077,6 +1087,7 @@ function initializeDOMElements() {
   clearLogsButton = document.getElementById('clear-logs')
   exportLogsButton = document.getElementById('export-logs')
   joinRelayButton = document.getElementById('join-relay')
+  newGroupFileSharing = document.getElementById('new-group-file-sharing')
   
   // Log element status
   const elements = {
@@ -1089,7 +1100,8 @@ function initializeDOMElements() {
     relayList,
     clearLogsButton,
     exportLogsButton,
-    joinRelayButton
+    joinRelayButton,
+    newGroupFileSharing
   }
   
   console.log('[App] Element initialization results:');
