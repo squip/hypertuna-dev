@@ -69,7 +69,7 @@ function ensureProfileSchema(profile) {
         profile.auth_config = {
             requiresAuth: false,
             tokenProtected: false,
-            authorizedUsers: [], // Array of { pubkey, token, subnets }
+            authorizedUsers: [], // Array of { pubkey, token }
             auth_adds: [],
             auth_removes: []
         };
@@ -92,6 +92,22 @@ function ensureProfileSchema(profile) {
         delete profile.auth_removes;
     }
 
+    // Strip obsolete subnet data from auth entries
+    if (Array.isArray(profile.auth_config.auth_adds)) {
+        profile.auth_config.auth_adds = profile.auth_config.auth_adds.map(a => ({
+            pubkey: a.pubkey,
+            token: a.token,
+            ts: a.ts
+        }));
+    }
+    if (Array.isArray(profile.auth_config.authorizedUsers)) {
+        profile.auth_config.authorizedUsers = profile.auth_config.authorizedUsers.map(a => ({
+            pubkey: a.pubkey,
+            token: a.token,
+            ts: a.ts
+        }));
+    }
+
     // NEW: ensure visibility and join flags exist
     if (profile.isPublic === undefined) {
         profile.isPublic = false;
@@ -109,9 +125,10 @@ function ensureProfileSchema(profile) {
 
 // NEW FUNCTION: Calculate the final list of authorized users
 export function calculateAuthorizedUsers(auth_adds = [], auth_removes = []) {
-    const addMap = new Map(); // pubkey -> { token, subnets, ts }
+    const addMap = new Map(); // pubkey -> { token, ts }
     for (const auth of auth_adds) {
-        addMap.set(auth.pubkey, auth);
+        const sanitized = { pubkey: auth.pubkey, token: auth.token, ts: auth.ts };
+        addMap.set(auth.pubkey, sanitized);
     }
 
     const removeMap = new Map(); // pubkey -> ts
@@ -131,7 +148,7 @@ export function calculateAuthorizedUsers(auth_adds = [], auth_removes = []) {
 }
 
 // Add a function to update auth token for a user
-export async function updateRelayAuthToken(identifier, pubkey, token, newSubnetHashes = []) {
+export async function updateRelayAuthToken(identifier, pubkey, token) {
     try {
         const profile = await withProfileLock(async () => {
             let p = await getRelayProfileByKeyUnlocked(identifier);
@@ -145,18 +162,13 @@ export async function updateRelayAuthToken(identifier, pubkey, token, newSubnetH
 
             // NEW: Update auth_adds array
             const existingAuthAddIndex = p.auth_config.auth_adds.findIndex(a => a.pubkey === pubkey);
-            const newAuthEntry = { pubkey, token, subnets: newSubnetHashes, ts: Date.now() };
+            const newAuthEntry = { pubkey, token, ts: Date.now() };
 
             if (existingAuthAddIndex !== -1) {
                 const existingAuth = p.auth_config.auth_adds[existingAuthAddIndex];
                 existingAuth.token = token;
-                newSubnetHashes.forEach(newHash => {
-                    if (!existingAuth.subnets.includes(newHash)) {
-                        existingAuth.subnets.push(newHash);
-                    }
-                });
-                existingAuth.subnets = [...new Set(existingAuth.subnets)];
                 existingAuth.ts = newAuthEntry.ts;
+                delete existingAuth.subnets;
             } else {
                 p.auth_config.auth_adds.push(newAuthEntry);
             }
