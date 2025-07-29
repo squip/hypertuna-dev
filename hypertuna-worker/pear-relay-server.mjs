@@ -761,9 +761,9 @@ function setupProtocolHandlers(protocol) {
 
     try {
       const body = JSON.parse(request.body.toString());
-      const { event, requesterSubnetHash, callbackUrls } = body;
-      
-      if (!event || !requesterSubnetHash) {
+      const { event } = body;
+
+      if (!event) {
         updateMetrics(false);
         return {
           statusCode: 400,
@@ -816,12 +816,10 @@ function setupProtocolHandlers(protocol) {
       
       console.log(`[RelayServer] Generated challenge for ${event.pubkey.substring(0, 8)}...`);
       
-      // Prepare response with callback URLs
+      // Prepare response with challenge information only
       const response = {
         challenge,
-        relayPubkey,
-        verifyUrl: callbackUrls?.verifyUrl || `/verify-ownership`,
-        finalUrl: callbackUrls?.finalUrl || `/finalize-auth`
+        relayPubkey
       };
       
       updateMetrics(true);
@@ -882,16 +880,50 @@ function setupProtocolHandlers(protocol) {
       console.log(`[RelayServer] Verification SUCCESSFUL`);
       console.log(`[RelayServer] Token: ${result.token.substring(0, 16)}...`);
       console.log(`[RelayServer] Identifier: ${result.identifier}`);
-      console.log(`[RelayServer] ========================================`);
-      
+
+      // Finalize authentication locally (replaces /finalize-auth)
+
+      let internalRelayKey = result.identifier;
+      if (result.identifier.includes(':')) {
+        const resolvedKey = await getRelayKeyFromPublicIdentifier(result.identifier);
+        if (resolvedKey) {
+          internalRelayKey = resolvedKey;
+        }
+      }
+
+      const authStore = getRelayAuthStore();
+      authStore.addAuth(internalRelayKey, pubkey, result.token);
+
+      let profile = await getRelayProfileByKey(internalRelayKey);
+      if (!profile) {
+        profile = await getRelayProfileByPublicIdentifier(result.identifier);
+      }
+
+      if (profile) {
+        await updateRelayAuthToken(internalRelayKey, pubkey, result.token);
+        const currentAdds = profile.member_adds || [];
+        const currentRemoves = profile.member_removes || [];
+        const memberAdd = { pubkey, ts: Date.now() };
+        const existingIndex = currentAdds.findIndex(m => m.pubkey === pubkey);
+        if (existingIndex >= 0) currentAdds[existingIndex] = memberAdd;
+        else currentAdds.push(memberAdd);
+        await updateRelayMemberSets(internalRelayKey, currentAdds, currentRemoves);
+        await publishMemberAddEvent(result.identifier, pubkey, result.token);
+      }
+
+      const relayUrl = `wss://${config.proxy_server_address}/${result.identifier}?token=${result.token}`;
+
+      console.log(`[RelayServer] Auth finalized successfully`);
       updateMetrics(true);
       return {
         statusCode: 200,
         headers: { 'content-type': 'application/json' },
         body: b4a.from(JSON.stringify({
           success: true,
-          token: result.token,
-          identifier: result.identifier
+          relayKey: internalRelayKey,
+          publicIdentifier: result.identifier,
+          authToken: result.token,
+          relayUrl
         }))
       };
       
@@ -911,207 +943,7 @@ function setupProtocolHandlers(protocol) {
     }
   });
 
-  protocol.handle('/finalize-auth', async (request) => {
-    console.log(`[RelayServer] ========================================`);
-    console.log(`[RelayServer] FINALIZE AUTH REQUEST`);
-    
-    try {
-      const body = JSON.parse(request.body.toString());
-      const { pubkey, token, identifier, subnetHash } = body;
-      
-      // Resolve the public identifier to the internal relay key
-      let internalRelayKey = identifier;
-      if (identifier.includes(':')) {
-        const resolvedKey = await getRelayKeyFromPublicIdentifier(identifier);
-        if (resolvedKey) {
-          internalRelayKey = resolvedKey;
-          console.log(`[RelayServer] Resolved public identifier ${identifier} to internal relay key ${internalRelayKey.substring(0, 8)}...`);
-        } else {
-          console.warn(`[RelayServer] Could not resolve public identifier ${identifier} to an internal relay key. Using public identifier as key.`);
-        }
-      }
-      
-      if (!pubkey || !token || !identifier) {
-        // This check should ideally happen earlier, but for now, it's fine here.
-        // The `internalRelayKey` might still be the `identifier` if resolution failed.
-        console.error(`[RelayServer] Missing required fields for finalization`);
-        updateMetrics(false);
-        return {
-          statusCode: 400,
-          headers: { 'content-type': 'application/json' },
-          body: b4a.from(JSON.stringify({ error: 'Missing required fields for finalization' }))
-        };
-      }
-      
-      console.log(`[RelayServer] Finalizing for pubkey: ${pubkey.substring(0, 8)}...`);
-      console.log(`[RelayServer] Identifier: ${identifier}`);
-      if (subnetHash) {
-        console.log(`[RelayServer] Subnet hash: ${subnetHash.substring(0, 8)}...`);
-      }
-      
-      // Get auth store
-      const authStore = getRelayAuthStore();
-      
-      // Store the authentication
-      authStore.addAuth(internalRelayKey, pubkey, token);
-      
-      // Get relay profile to update members
-      let profile = await getRelayProfileByKey(identifier);
-      if (!profile) {
-        profile = await getRelayProfileByPublicIdentifier(identifier);
-      }
-      
-      if (profile) {
-        // Update profile with auth token
-        const { updateRelayAuthToken } = await import('./hypertuna-relay-profile-manager-bare.mjs');
-        await updateRelayAuthToken(identifier, pubkey, token);
-        // Update member lists
-        const currentAdds = profile.member_adds || [];
-        const currentRemoves = profile.member_removes || [];
-        
-        // Add new member
-        const memberAdd = {
-          pubkey: pubkey,
-          ts: Date.now()
-        };
-        
-        // Check if already in adds
-        const existingIndex = currentAdds.findIndex(m => m.pubkey === pubkey);
-        if (existingIndex >= 0) {
-          currentAdds[existingIndex] = memberAdd;
-        } else {
-          currentAdds.push(memberAdd);
-        }
-        
-        // Update profile
-        await updateRelayMemberSets(identifier, currentAdds, currentRemoves);
-        
-        // Publish kind 9000 event
-        // Pass subnetHash as an array
-        await publishMemberAddEvent(identifier, pubkey, token, [subnetHash]);
-      }
-      
-      // Generate relay connection URL
-      const relayUrl = `wss://${config.proxy_server_address}/${identifier}?token=${token}`;
-      
-      console.log(`[RelayServer] Auth finalized successfully`);
-      console.log(`[RelayServer] Relay URL: ${relayUrl}`);
-      console.log(`[RelayServer] ========================================`);
-      
-      updateMetrics(true);
-      return {
-        statusCode: 200,
-        headers: { 'content-type': 'application/json' },
-        body: b4a.from(JSON.stringify({
-          success: true,
-          relayKey: internalRelayKey,
-          publicIdentifier: identifier,
-          authToken: token,
-          relayUrl: relayUrl
-        }))
-      };
-      
-    } catch (error) {
-      console.error(`[RelayServer] ========================================`);
-      console.error(`[RelayServer] FINALIZE AUTH ERROR`);
-      console.error(`[RelayServer] Error:`, error.message);
-      console.error(`[RelayServer] Stack:`, error.stack);
-      console.error(`[RelayServer] ========================================`);
-      
-      updateMetrics(false);
-      return {
-        statusCode: 500,
-        headers: { 'content-type': 'application/json' },
-        body: b4a.from(JSON.stringify({ error: error.message }))
-      };
-    }
-  });
-
-  
-  // Add authorize endpoint for mobile subnet addition
-protocol.handle('/authorize', async (request) => {
-  console.log(`[RelayServer] ========================================`);
-  console.log(`[RelayServer] AUTHORIZE REQUEST`);
-  
-  try {
-    const body = JSON.parse(request.body.toString());
-    const { token, relayKey } = body;
-    
-    if (!token) {
-      console.error(`[RelayServer] Missing token`);
-      updateMetrics(false);
-      return {
-        statusCode: 400,
-        headers: { 'content-type': 'application/json' },
-        body: b4a.from(JSON.stringify({ error: 'Missing token' }))
-      };
-    }
-    
-    console.log(`[RelayServer] Token: ${token.substring(0, 16)}...`);
-    console.log(`[RelayServer] Relay: ${relayKey || 'not specified'}`);
-    
-    const authStore = getRelayAuthStore();
-    
-    // Find the auth entry by token
-    let foundAuth = null;
-    let foundRelay = null;
-    
-    if (relayKey) {
-      // Check specific relay
-      const auth = authStore.verifyAuth(relayKey, token);
-      if (auth) {
-        foundAuth = auth;
-        foundRelay = relayKey;
-      }
-    } else {
-      // Search all relays (less efficient but supports QR code without relay info)
-      const activeRelays = await getActiveRelays();
-      for (const relay of activeRelays) {
-        const auth = authStore.getAuthByToken(relay.relayKey, token);
-        if (auth) {
-          foundAuth = auth;
-          foundRelay = relay.relayKey;
-          break;
-        }
-      }
-    }
-    
-    if (!foundAuth) {
-      console.error(`[RelayServer] Invalid token`);
-      updateMetrics(false);
-      return {
-        statusCode: 403,
-        headers: { 'content-type': 'application/json' },
-        body: b4a.from(JSON.stringify({ error: 'Invalid token' }))
-      };
-    }
-    
-    console.log(`[RelayServer] Authorized token for ${foundAuth.pubkey.substring(0, 8)}...`);
-
-    updateMetrics(true);
-    return {
-      statusCode: 200,
-      headers: { 'content-type': 'application/json' },
-      body: b4a.from(JSON.stringify({
-        success: true,
-        message: 'Token authorized'
-      }))
-    };
-    
-  } catch (error) {
-    console.error(`[RelayServer] ========================================`);
-    console.error(`[RelayServer] AUTHORIZE ERROR`);
-    console.error(`[RelayServer] Error:`, error.message);
-    console.error(`[RelayServer] ========================================`);
-    
-    updateMetrics(false);
-    return {
-      statusCode: 500,
-      headers: { 'content-type': 'application/json' },
-      body: b4a.from(JSON.stringify({ error: error.message }))
-    };
-  }
-});
+  // Removed finalize-auth and authorize handlers (handled during verification)
 
   // Disconnect from relay
   protocol.handle('/relay/:identifier/disconnect', async (request) => {
@@ -2103,19 +1935,9 @@ export async function startJoinAuthentication(options) {
     const joinEvent = await createGroupJoinRequest(publicIdentifier, userNsec);
     console.log(`[RelayServer] Created join event ID: ${joinEvent.id.substring(0, 8)}...`);
     
-    // 2. Retrieve subnetHash (should have been stored during gateway registration)
-    const requesterSubnetHash = config.subnetHash;
-    if (!requesterSubnetHash) {
-      throw new Error('Subnet hash not available. Ensure worker is registered with gateway.');
-    }
-    console.log(`[RelayServer] Using subnet hash: ${requesterSubnetHash.substring(0, 8)}...`);
-    
-    // 3. Make an https.request to the gateway's /post/join/:identifier endpoint
+    // 2. Make an https.request to the gateway's /post/join/:identifier endpoint
     const gatewayUrl = new URL(config.gatewayUrl);
-    const postData = JSON.stringify({
-      event: joinEvent,
-      requesterSubnetHash: requesterSubnetHash
-    });
+    const postData = JSON.stringify({ event: joinEvent });
     
     const requestOptions = {
       hostname: gatewayUrl.hostname,
@@ -2160,13 +1982,11 @@ export async function startJoinAuthentication(options) {
     console.log('[RelayServer] Received response from gateway:', joinResponse);
 
     // Step 2.3: Handle challenge and verification callback
-    const { challenge, relayPubkey, verifyUrl, finalUrl } = joinResponse;
+    const { challenge, relayPubkey } = joinResponse;
 
     console.log(`[RelayServer] Challenge: ${challenge.substring(0, 16)}...`);
-    console.log(`[RelayServer] verifyUrl: ${verifyUrl}`);
-    console.log(`[RelayServer] finalUrl: ${finalUrl}`);
 
-    if (!challenge || !relayPubkey || !verifyUrl || !finalUrl) {
+    if (!challenge || !relayPubkey) {
       throw new Error('Invalid challenge response from gateway. Missing required fields.');
     }
 
@@ -2201,7 +2021,7 @@ export async function startJoinAuthentication(options) {
     console.log(`[RelayServer] IV base64: ${ivBase64}`);
 
     // Send the encrypted challenge to the verification URL
-    const verifyGatewayUrl = new URL(verifyUrl);
+    const verifyGatewayUrl = new URL(`/callback/verify-ownership/${publicIdentifier}`, config.gatewayUrl);
     const verifyPostData = JSON.stringify({
       pubkey: userPubkey,
       ciphertext: ciphertext,
@@ -2253,7 +2073,7 @@ export async function startJoinAuthentication(options) {
       console.log(`[RelayServer] Verification failed: ${verifyResponse.error}`);
     }
 
-    // Step 2.4: Finalization callback, token persistence, and success notification
+    // Treat verify response as the final result
     if (global.sendMessage) {
       global.sendMessage({
         type: 'join-auth-progress',
@@ -2261,50 +2081,7 @@ export async function startJoinAuthentication(options) {
       });
     }
 
-    const finalGatewayUrl = new URL(finalUrl);
-    const finalPostData = JSON.stringify({
-      pubkey: userPubkey
-    });
-
-    const finalOptions = {
-      hostname: finalGatewayUrl.hostname,
-      port: finalGatewayUrl.port || 443,
-      path: finalGatewayUrl.pathname,
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Content-Length': b4a.byteLength(finalPostData)
-      },
-      rejectUnauthorized: false // For self-signed certs in dev
-    };
-
-    console.log(`[RelayServer] Sending finalization request to gateway: ${finalOptions.hostname}${finalOptions.path}`);
-
-    const finalResponse = await new Promise((resolve, reject) => {
-      const req = https.request(finalOptions, (res) => {
-        let data = '';
-        res.on('data', (chunk) => data += chunk);
-        res.on('end', () => {
-          if (res.statusCode >= 200 && res.statusCode < 300) {
-            try {
-              resolve(JSON.parse(data));
-            } catch (e) {
-              reject(new Error(`Failed to parse JSON response from finalUrl: ${data}`));
-            }
-          } else {
-            reject(new Error(`Gateway finalization failed with status ${res.statusCode}: ${data}`));
-          }
-        });
-      });
-      req.on('error', (e) => reject(e));
-      req.write(finalPostData);
-      req.end();
-    });
-
-    console.log('[RelayServer] Received final response from gateway:', finalResponse);
-    console.log(`[RelayServer] Final authToken: ${finalResponse.authToken ? finalResponse.authToken.substring(0, 16) : 'none'}`);
-
-    const { authToken, relayUrl, relayKey, publicIdentifier: returnedIdentifier } = finalResponse;
+    const { authToken, relayUrl, relayKey, publicIdentifier: returnedIdentifier } = verifyResponse;
     const finalIdentifier = returnedIdentifier || publicIdentifier;
     if (!authToken || !relayUrl || !relayKey) {
       throw new Error('Final response from gateway missing authToken, relayKey, or relayUrl');
@@ -2330,7 +2107,7 @@ export async function startJoinAuthentication(options) {
 
     // Publish kind 9000 event to announce the new member
     console.log('[RelayServer] Publishing kind 9000 member add event...');
-    await publishMemberAddEvent(finalIdentifier, userPubkey, authToken, [requesterSubnetHash]);
+    await publishMemberAddEvent(finalIdentifier, userPubkey, authToken);
 
     // Notify the desktop UI of success
     if (global.sendMessage) {
