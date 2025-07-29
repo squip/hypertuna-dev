@@ -542,6 +542,7 @@ export async function autoConnectStoredRelays(config) {
         
         // Process each relay profile
         for (const profile of relayProfiles) {
+            const fileSharing = profile.fileSharing;
             try {
                 // Skip if already active or auto-connect disabled
                 if (activeRelays.has(profile.relay_key)) {
@@ -678,7 +679,7 @@ export async function autoConnectStoredRelays(config) {
                     name: profile.name,
                     description: profile.description,
                     storageDir: profile.relay_storage,
-                    fileSharing: profile.fileSharing || false,
+                    fileSharing,
                     config,
                     fromAutoConnect: true  // Add this flag
                 });
@@ -913,6 +914,7 @@ export async function getActiveRelays() {
             peerCount,
             name: profile?.name || `Relay ${key.substring(0, 8)}`,
             description: profile?.description || '',
+            fileSharing: profile?.fileSharing || false,
             connectionUrl: `wss://${globalConfig?.proxy_server_address || 'localhost'}/${identifierPath}`,
             createdAt: profile?.created_at || profile?.joined_at || null,
             isActive: true
