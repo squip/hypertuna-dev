@@ -55,53 +55,6 @@ function normalizeIp(ip) {
   return ip;
 }
 
-/**
- * Get /24 subnet from IP address
- * @param {string} ip - IP address
- * @returns {string} - First 3 octets of IP
- */
-function get24Subnet(ip) {
-  const normalized = normalizeIp(ip);
-  const parts = normalized.split('.');
-  
-  // Ensure we have a valid IPv4 address
-  if (parts.length !== 4) {
-    console.error(`[Gateway] Invalid IP format for subnet calculation: ${normalized}`);
-    return normalized; // Return as-is if not valid IPv4
-  }
-  
-  return parts.slice(0, 3).join('.');
-}
-
-/**
- * Generate SHA256 hash of subnet
- * @param {string} subnet - Subnet string
- * @returns {string} - Hex hash of subnet
- */
-function hashSubnet(subnet) {
-  return crypto.createHash('sha256').update(subnet).digest('hex');
-}
-
-/**
- * Extract and hash client subnet from request
- * @param {Object} req - Express request object
- * @returns {string} - Hashed subnet
- */
-function getHashedClientSubnet(req) {
-  // Try various headers for client IP (useful when behind proxies)
-  const clientIp = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || 
-                   req.headers['x-real-ip'] ||
-                   req.socket.remoteAddress ||
-                   req.connection.remoteAddress;
-  
-  const subnet = get24Subnet(clientIp);
-  const hashedSubnet = hashSubnet(subnet);
-  
-  console.log(`[Gateway] Client IP: ${normalizeIp(clientIp)}, Subnet: ${subnet}, Hash: ${hashedSubnet.substring(0, 8)}...`);
-  
-  return hashedSubnet;
-}
-
 // ============================
 // Core Classes (Enhanced for Hyperswarm)
 // ============================
@@ -330,10 +283,7 @@ const wss = new WebSocket.Server({ server });
 app.use(express.json());
 app.use((req, res, next) => {
   console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
-  
-  // Add hashed subnet to request object
-  req.hashedSubnet = getHashedClientSubnet(req);
-  
+
   next();
 });
 
@@ -385,18 +335,16 @@ async function forwardMessageToPeer(peerPublicKey, identifier, message, connecti
       peer = healthyPeer;
     }
 
-    // Get the connection's subnet hash from wsConnections
+    // Get connection data
     const wsConnection = wsConnections.get(connectionKey);
-    const subnetHash = wsConnection?.subnetHash || '';
 
-    // Use Hyperswarm to forward message with subnet hash
+    // Use Hyperswarm to forward message
     return await forwardMessageToPeerHyperswarm(
       peer.publicKey,
       identifier,
       message,
       connectionKey,
       connectionPool,
-      subnetHash, // Add this parameter
       authToken
     );
   } catch (error) {
@@ -432,19 +380,16 @@ wss.on('connection', (ws, req) => {
 // Update handleWebSocket to accept and store the auth token
 function handleWebSocket(ws, req, identifier, authToken = null) {
   const connectionKey = generateConnectionKey();
-  const subnetHash = getHashedClientSubnet(req);
-  
+
   console.log(`[${new Date().toISOString()}] New WebSocket connection established:`, {
     identifier,
     connectionKey,
-    subnetHash: subnetHash.substring(0, 8) + '...',
     hasAuthToken: !!authToken
   });
 
-  wsConnections.set(connectionKey, { 
-    ws, 
+  wsConnections.set(connectionKey, {
+    ws,
     relayKey: identifier,
-    subnetHash,
     authToken // Store the auth token
   });
   
@@ -544,7 +489,7 @@ async function startEventChecking(connectionKey) {
       return;
     }
 
-    const { ws, relayKey: identifier, authToken, subnetHash } = connectionData;
+    const { ws, relayKey: identifier, authToken } = connectionData;
     
     if (ws.readyState !== WebSocket.OPEN) {
       console.log(`[${new Date().toISOString()}] WebSocket for ${connectionKey} not open (state: ${ws.readyState}), stopping event checking`);
@@ -600,8 +545,7 @@ async function startEventChecking(connectionKey) {
         identifier,
         connectionKey,
         connectionPool,
-        authToken, // Pass auth token to the client function
-        subnetHash // Pass subnet hash to the client function
+        authToken
       );
       
       if (events && events.length > 0) {
@@ -797,13 +741,12 @@ app.post('/register', async (req, res) => {
     await updateNetworkStats();
 
     const driveKey = b4a.toString(drive.key, 'hex');
-    res.json({ 
-      message: 'Registered successfully (Hyperswarm mode)', 
+    res.json({
+      message: 'Registered successfully (Hyperswarm mode)',
       driveKey,
       status: 'active',
       mode: 'hyperswarm',
-      timestamp: new Date().toISOString(),
-      subnetHash: req.hashedSubnet
+      timestamp: new Date().toISOString()
     });
     
     return;
@@ -869,118 +812,13 @@ app.post('/register', async (req, res) => {
   await updateNetworkStats();
 
   const driveKey = b4a.toString(drive.key, 'hex');
-  res.json({ 
-    message: 'Registered successfully', 
+  res.json({
+    message: 'Registered successfully',
     driveKey,
     status: 'active',
-    timestamp: new Date().toISOString(),
-    subnetHash: req.hashedSubnet
+    timestamp: new Date().toISOString()
   });
 });
-
-// NEW: Add endpoint for clients to get their own hashed subnet
-app.get('/get-subnet-hash', (req, res) => {
-  console.log(`[${new Date().toISOString()}] Subnet hash requested. Returning: ${req.hashedSubnet.substring(0, 8)}...`);
-  res.json({ subnetHash: req.hashedSubnet });
-});
-
-// ============================
-// Authorization Endpoints
-// ============================
-
-/**
- * Shared function to process authorization requests from both GET and POST
- * @param {Object} req - Express request object
- * @param {Object} res - Express response object
- * @param {string|null} initialToken - Token from GET query
- * @param {string|null} initialRelayKey - Relay key from POST body
- */
-async function processAuthorizeRequest(req, res, initialToken = null, initialRelayKey = null) {
-  console.log(`[${new Date().toISOString()}] ========================================`);
-  console.log(`[${new Date().toISOString()}] AUTHORIZE REQUEST`);
-
-  let token = initialToken;
-  let relayKey = initialRelayKey;
-  const subnetHash = req.hashedSubnet; // Already computed by middleware
-
-  // If it's a POST request, try to get token/relayKey from body
-  if (req.method === 'POST' && req.body) {
-    try {
-      const body = req.body;
-      token = body.token || token;
-      relayKey = body.relayKey || relayKey;
-    } catch (e) {
-      console.warn(`[${new Date().toISOString()}] Could not parse request body for /authorize POST:`, e.message);
-    }
-  }
-
-  if (!token) {
-    console.error(`[${new Date().toISOString()}] Missing token for authorization`);
-    return res.status(400).send('<h1>Authorization Failed</h1><p>Missing token.</p>');
-  }
-
-  console.log(`[${new Date().toISOString()}] Token: ${token.substring(0, 16)}...`);
-  console.log(`[${new Date().toISOString()}] Relay: ${relayKey || 'not specified'}`);
-  console.log(`[${new Date().toISOString()}] Subnet: ${subnetHash?.substring(0, 8)}...`);
-
-  try {
-    let healthyPeer = null;
-
-    if (relayKey) {
-      healthyPeer = await findHealthyPeerForRelay(relayKey);
-    } else {
-      // For QR code flow, no specific relay is known. Find any healthy peer.
-      const hyperswarmPeers = activePeers.filter(p => p && p.mode === 'hyperswarm');
-      console.log(`[${new Date().toISOString()}] Searching for any healthy peer among ${hyperswarmPeers.length} candidates...`);
-      for (const peer of hyperswarmPeers) {
-        if (peerHealthManager.isPeerHealthy(peer.publicKey)) {
-          healthyPeer = peer;
-          console.log(`[${new Date().toISOString()}] Found already healthy peer ${peer.publicKey.substring(0, 8)}`);
-          break;
-        }
-      }
-    }
-
-    if (!healthyPeer) {
-      console.error(`[${new Date().toISOString()}] No healthy peers available to process /authorize request`);
-      return res.status(503).send('<h1>Service Unavailable</h1><p>No healthy peers available to process the authorization.</p>');
-    }
-    
-    console.log(`[${new Date().toISOString()}] Selected peer for /authorize: ${healthyPeer.publicKey.substring(0, 8)}...`);
-
-    // Forward the request to the peer's /authorize endpoint
-    const result = await forwardCallbackToPeer(
-      healthyPeer,
-      '/authorize',
-      { token, relayKey, subnetHash }, // Pass data in body for worker
-      connectionPool
-    );
-
-    // Respond to the client (mobile browser) with user-friendly HTML
-    if (result.success) {
-      res.status(200).send('<h1>Mobile Device Authorized</h1><p>You can now close this window.</p>');
-    } else {
-      res.status(result.statusCode || 500).send(`<h1>Authorization Failed</h1><p>${result.error || 'An unknown error occurred.'}</p>`);
-    }
-  } catch (error) {
-    console.error(`[${new Date().toISOString()}] Error processing /authorize request:`, error.message);
-    res.status(500).send(`<h1>Internal Server Error</h1><p>${error.message}</p>`);
-  }
-}
-
-// Handle GET requests for /authorize (from QR code scan)
-app.get('/authorize', async (req, res) => {
-  console.log(`[${new Date().toISOString()}] AUTHORIZE GET REQUEST (Mobile subnet via QR)`);
-  const token = req.query.token || null; // Token is in query for GET
-  await processAuthorizeRequest(req, res, token, null); // relayKey is null for QR code
-});
-
-// Handle POST requests for /authorize (if a client sends POST directly)
-app.post('/authorize', async (req, res) => {
-  console.log(`[${new Date().toISOString()}] AUTHORIZE POST REQUEST (Mobile subnet)`);
-  await processAuthorizeRequest(req, res, null, null); // Token and relayKey will be in req.body
-});
-
 
 // ============================
 // Join Relay Endpoint
@@ -991,7 +829,6 @@ app.post('/post/join/:identifier', async (req, res) => {
   console.log(`[${new Date().toISOString()}] ========================================`);
   console.log(`[${new Date().toISOString()}] JOIN REQUEST RECEIVED`);
   console.log(`[${new Date().toISOString()}] Relay: ${identifier}`);
-  console.log(`[${new Date().toISOString()}] Client subnet hash: ${req.hashedSubnet?.substring(0, 8)}...`);
   
   try {
     // Extract request data
@@ -1033,7 +870,6 @@ app.post('/post/join/:identifier', async (req, res) => {
     // Forward the join request to the peer
     const requestData = {
       event,
-      requesterSubnetHash: req.hashedSubnet,
       callbackUrls
     };
     
@@ -1054,7 +890,6 @@ app.post('/post/join/:identifier', async (req, res) => {
       peerPublicKey: healthyPeer.publicKey,
       identifier,
       pubkey: event.pubkey,
-      subnetHash: req.hashedSubnet,
       timestamp: Date.now()
     });
     
@@ -1116,7 +951,6 @@ app.post('/callback/verify-ownership/:identifier', async (req, res) => {
     }
 
     console.log(`[${new Date().toISOString()}] Found session for peer: ${session.peerPublicKey.substring(0, 8)}...`);
-    console.log(`[${new Date().toISOString()}] Stored subnet: ${session.subnetHash.substring(0, 8)}...`);
     
     // Find the peer
     const peer = activePeers.find(p => p.publicKey === session.peerPublicKey);
@@ -1197,11 +1031,10 @@ app.post('/callback/finalize-auth/:identifier', async (req, res) => {
     const result = await forwardCallbackToPeer(
       peer,
       '/finalize-auth',
-      { 
-        pubkey, 
+      {
+        pubkey,
         token: session.token,
-        identifier,
-        subnetHash: session.subnetHash
+        identifier
       },
       connectionPool
     );
