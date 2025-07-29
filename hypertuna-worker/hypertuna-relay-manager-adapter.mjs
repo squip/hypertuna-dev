@@ -557,9 +557,10 @@ export async function autoConnectStoredRelays(config) {
                             profile.auth_config.auth_adds || [],
                             profile.auth_config.auth_removes || []
                         );
-                        authorizedUsers.forEach(user => {
-                            authData[user.pubkey] = {
-                                token: user.token,
+                        // Only tokens are imported for auto-connect
+                        authorizedUsers.forEach(({ pubkey, token }) => {
+                            authData[pubkey] = {
+                                token,
                                 createdAt: Date.now(),
                                 lastUsed: Date.now()
                             };
@@ -637,9 +638,10 @@ export async function autoConnectStoredRelays(config) {
                         profile.auth_config.auth_removes || []
                     );
                     const authData = {};
-                    authorizedUsers.forEach(user => {
-                        authData[user.pubkey] = {
-                            token: user.token,
+                    // Only tokens are imported for auto-connect
+                    authorizedUsers.forEach(({ pubkey, token }) => {
+                        authData[pubkey] = {
+                            token,
                             createdAt: Date.now(),
                             lastUsed: Date.now()
                         };
