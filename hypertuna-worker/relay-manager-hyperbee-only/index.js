@@ -250,7 +250,8 @@ if (workerPipe) {
               if (relayServer) {
                 try {
                   // Call the relay server's create relay function
-                  const result = await relayServer.createRelay(message.data);
+                  const { fileSharing = false, ...options } = message.data || {};
+                  const result = await relayServer.createRelay({ ...options, fileSharing });
                   relayMembers.set(result.relayKey, result.profile?.members || [])
                   await applyPendingAuthUpdates(updateRelayAuthToken, result.relayKey, result.profile?.public_identifier);
 
@@ -288,7 +289,8 @@ if (workerPipe) {
               if (relayServer) {
                 try {
                   // Call the relay server's join relay function
-                  const result = await relayServer.joinRelay(message.data)
+                  const { fileSharing: joinFileSharing = false, ...joinOpts } = message.data || {};
+                  const result = await relayServer.joinRelay({ ...joinOpts, fileSharing: joinFileSharing })
                   relayMembers.set(result.relayKey, result.profile?.members || [])
                   await applyPendingAuthUpdates(updateRelayAuthToken, result.relayKey, result.profile?.public_identifier);
 

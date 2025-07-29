@@ -807,9 +807,10 @@ async function createRelay() {
     
     // Send create relay command to worker
     if (workerPipe) {
+      const fileSharing = newGroupFileSharing ? newGroupFileSharing.checked : false
       workerPipe.write(JSON.stringify({
         type: 'create-relay',
-        data: { name, description }
+        data: { name, description, fileSharing }
       }) + '\n')
     }
     
@@ -873,7 +874,7 @@ async function joinRelayInstance(publicIdentifier, fileSharing = false) {
 }
 
 // Join a relay using data from an invite event
-async function joinRelayFromInvite(relayKey, name = '', description = '', publicIdentifier = '', authToken = '') {
+async function joinRelayFromInvite(relayKey, name = '', description = '', publicIdentifier = '', authToken = '', fileSharing = false) {
   return new Promise((resolve, reject) => {
     if (!workerPipe) {
       addLog('Worker not running', 'error');
@@ -884,7 +885,7 @@ async function joinRelayFromInvite(relayKey, name = '', description = '', public
       workerPipe.write(
         JSON.stringify({
           type: 'join-relay',
-          data: { relayKey, name, description, publicIdentifier, authToken }
+          data: { relayKey, name, description, publicIdentifier, authToken, fileSharing }
         }) + '\n'
       );
       resolve();
@@ -926,9 +927,10 @@ async function joinRelay() {
     
     // Send join relay command to worker
     if (workerPipe) {
+      const fileSharing = false
       workerPipe.write(JSON.stringify({
         type: 'join-relay',
-        data: { relayKey, name, description }
+        data: { relayKey, name, description, fileSharing }
       }) + '\n')
     }
     
