@@ -1417,7 +1417,7 @@
               try {
                   const invite = await this.nostr.client.acceptInvite(inviteId);
                   if (window.joinRelayFromInvite) {
-                      await window.joinRelayFromInvite(invite.relayKey, invite.name, invite.about, invite.publicIdentifier || invite.groupId, invite.token);
+                      await window.joinRelayFromInvite(invite.relayKey, invite.name, invite.about, invite.publicIdentifier || invite.groupId, invite.token, invite.fileSharing);
                   } else if (window.joinRelayInstance) {
                       await window.joinRelayInstance(invite.relayKey);
                   }

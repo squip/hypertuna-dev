@@ -508,6 +508,12 @@ class NostrEvents {
             tags.push(['about', metadata.about]);
         }
 
+        if (metadata.fileSharing) {
+            tags.push(['file-sharing-on']);
+        } else {
+            tags.push(['file-sharing-off']);
+        }
+
         return this.createEvent(
             this.KIND_GROUP_INVITE_CREATE,
             'Creating invite code',
