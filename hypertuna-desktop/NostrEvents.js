@@ -638,9 +638,17 @@ class NostrEvents {
         // Extract hypertunaId and check for identifier tag
         const hypertunaId = this._getTagValue(event, 'hypertuna');
         const hasIdentifierTag = event.tags.some(tag => tag[0] === 'i' && tag[1] === 'hypertuna:relay');
-        
+
+        // Determine file sharing status from tags
+        let fileSharing = false;
+        if (this._hasTag(event, 'file-sharing-on')) {
+            fileSharing = true;
+        } else if (this._hasTag(event, 'file-sharing-off')) {
+            fileSharing = false;
+        }
+
         console.log(`Parsing group metadata: id=${groupId}, hypertunaId=${hypertunaId}, hasIdentifierTag=${hasIdentifierTag}`);
-        
+
         return {
             id: groupId,
             name: this._getTagValue(event, 'name') || 'Unnamed Group',
@@ -651,7 +659,8 @@ class NostrEvents {
             relay: event.pubkey,
             event: event,
             hypertunaId: hypertunaId,
-            isHypertunaRelay: hasIdentifierTag
+            isHypertunaRelay: hasIdentifierTag,
+            fileSharing
         };
     }
     
