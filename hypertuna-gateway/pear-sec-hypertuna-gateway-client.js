@@ -572,7 +572,6 @@ async function forwardMessageToPeerHyperswarm(peerPublicKey, identifier, message
     console.log(`[ForwardJoin] Relay: ${identifier}`);
     console.log(`[ForwardJoin] Peer: ${peer.publicKey.substring(0, 8)}...`);
     console.log(`[ForwardJoin] Has event: ${!!requestData.event}`);
-    console.log(`[ForwardJoin] Subnet hash: ${requestData.requesterSubnetHash?.substring(0, 8)}...`);
     
     const connection = await connectionPool.getConnection(peer.publicKey);
     
