@@ -100,6 +100,10 @@ function ensureProfileSchema(profile) {
         profile.isOpen = false;
     }
 
+    if (profile.fileSharing === undefined) {
+        profile.fileSharing = false;
+    }
+
     return profile;
 }
 

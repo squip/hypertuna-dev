@@ -18,7 +18,7 @@ import {
 importLegacyRelayProfiles,
 updateRelayMemberSets,
 calculateMembers
-} from './hypertuna-relay-profile-manager-bare.mjs';
+} from '../hypertuna-relay-profile-manager-bare.mjs';
 
 import { ChallengeManager } from './challenge-manager.mjs';
 

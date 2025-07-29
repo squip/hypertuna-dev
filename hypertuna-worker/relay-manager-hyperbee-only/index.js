@@ -19,7 +19,7 @@ import {
   updateRelayMemberSets,
   calculateMembers,
   calculateAuthorizedUsers
-} from './hypertuna-relay-profile-manager-bare.mjs'
+} from '../hypertuna-relay-profile-manager-bare.mjs'
 import { loadRelayKeyMappings } from './hypertuna-relay-manager-adapter.mjs'
 import {
   queuePendingAuthUpdate,
@@ -148,7 +148,7 @@ async function addAuthInfoToRelays(relays) {
       let token = null
       if (profile.auth_config?.requiresAuth && config.nostr_pubkey_hex) {
         // Calculate authorized users from auth_adds and auth_removes
-        // const { calculateAuthorizedUsers } = require('./hypertuna-relay-profile-manager-bare.mjs')
+        // const { calculateAuthorizedUsers } = require('../hypertuna-relay-profile-manager-bare.mjs')
         const authorizedUsers = calculateAuthorizedUsers(
           profile.auth_config.auth_adds || [],
           profile.auth_config.auth_removes || []
