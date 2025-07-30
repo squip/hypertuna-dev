@@ -108,6 +108,7 @@ export class RelayManager {
     this.blobs = null;
     this.swarm = null;
     this.peers = new Map(); // Track connected peers
+    this.pendingWriterKeys = []; // store writer keys received while not writable
   }
 
   async initialize() {
@@ -521,12 +522,14 @@ export class RelayManager {
     }
     
     if (!this.relay.writable) {
-      console.warn('[RelayManager] Warning: Relay is not writable, but attempting to add writer anyway');
+      console.warn(`[RelayManager] Relay not writable. Received writer key: ${key}`);
+      this.pendingWriterKeys.push(key);
+      return;
     }
-    
+
     try {
       console.log('[RelayManager] Appending addWriter operation to oplog...');
-      
+
       // Append the addWriter operation
       const result = await this.relay.append({
         type: 'addWriter',
