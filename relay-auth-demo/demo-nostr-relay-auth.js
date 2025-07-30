@@ -148,10 +148,7 @@ server.on('request', async (req, res) => {
           const subnet = get24Subnet(normalizeIp(req.socket.remoteAddress));
           const subnetHash = sha256(subnet);
 
-          allowlist[pubkey] = {
-            token,
-            allowedSubnets: [subnetHash]
-          };
+          allowlist[pubkey] = { token };
 
           delete pendingChallenges[pubkey];
           res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -191,8 +188,8 @@ server.on('request', async (req, res) => {
     const mobileIp = normalizeIp(req.socket.remoteAddress);
     const subnetHash = sha256(get24Subnet(mobileIp));
     const entry = allowlist[session.pubkey];
-    if (entry && !entry.allowedSubnets.includes(subnetHash)) {
-      entry.allowedSubnets.push(subnetHash);
+    if (entry) {
+      entry.subnetHash = subnetHash;
     }
     return res.end('✅ Mobile IP authorized.');
   }
