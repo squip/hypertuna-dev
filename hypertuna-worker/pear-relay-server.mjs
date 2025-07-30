@@ -909,216 +909,6 @@ function setupProtocolHandlers(protocol) {
     }
   });
 
-  protocol.handle('/finalize-auth', async (request) => {
-    console.log(`[RelayServer] ========================================`);
-    console.log(`[RelayServer] FINALIZE AUTH REQUEST`);
-    
-    try {
-      const body = JSON.parse(request.body.toString());
-      const { pubkey, token, identifier, subnetHash } = body;
-      
-      // Resolve the public identifier to the internal relay key
-      let internalRelayKey = identifier;
-      if (identifier.includes(':')) {
-        const resolvedKey = await getRelayKeyFromPublicIdentifier(identifier);
-        if (resolvedKey) {
-          internalRelayKey = resolvedKey;
-          console.log(`[RelayServer] Resolved public identifier ${identifier} to internal relay key ${internalRelayKey.substring(0, 8)}...`);
-        } else {
-          console.warn(`[RelayServer] Could not resolve public identifier ${identifier} to an internal relay key. Using public identifier as key.`);
-        }
-      }
-      
-      if (!pubkey || !token || !identifier) {
-        // This check should ideally happen earlier, but for now, it's fine here.
-        // The `internalRelayKey` might still be the `identifier` if resolution failed.
-        console.error(`[RelayServer] Missing required fields for finalization`);
-        updateMetrics(false);
-        return {
-          statusCode: 400,
-          headers: { 'content-type': 'application/json' },
-          body: b4a.from(JSON.stringify({ error: 'Missing required fields for finalization' }))
-        };
-      }
-      
-      console.log(`[RelayServer] Finalizing for pubkey: ${pubkey.substring(0, 8)}...`);
-      console.log(`[RelayServer] Identifier: ${identifier}`);
-      if (subnetHash) {
-        console.log(`[RelayServer] Subnet hash: ${subnetHash.substring(0, 8)}...`);
-      }
-      
-      // Get auth store
-      const authStore = getRelayAuthStore();
-      
-      // Store the authentication
-      authStore.addAuth(internalRelayKey, pubkey, token);
-      
-      // Get relay profile to update members
-      let profile = await getRelayProfileByKey(identifier);
-      if (!profile) {
-        profile = await getRelayProfileByPublicIdentifier(identifier);
-      }
-      
-      if (profile) {
-        // Update profile with auth token
-        const { updateRelayAuthToken } = await import('./hypertuna-relay-profile-manager-bare.mjs'); 
-        // Pass subnetHash as an array to match the function signature
-        await updateRelayAuthToken(identifier, pubkey, token, [subnetHash]);
-        // Update member lists
-        const currentAdds = profile.member_adds || [];
-        const currentRemoves = profile.member_removes || [];
-        
-        // Add new member
-        const memberAdd = {
-          pubkey: pubkey,
-          ts: Date.now()
-        };
-        
-        // Check if already in adds
-        const existingIndex = currentAdds.findIndex(m => m.pubkey === pubkey);
-        if (existingIndex >= 0) {
-          currentAdds[existingIndex] = memberAdd;
-        } else {
-          currentAdds.push(memberAdd);
-        }
-        
-        // Update profile
-        await updateRelayMemberSets(identifier, currentAdds, currentRemoves);
-        
-        // Publish kind 9000 event
-        // Pass subnetHash as an array
-        await publishMemberAddEvent(identifier, pubkey, token, [subnetHash]);
-      }
-      
-      // Generate relay connection URL
-      const relayUrl = `wss://${config.proxy_server_address}/${identifier}?token=${token}`;
-      
-      console.log(`[RelayServer] Auth finalized successfully`);
-      console.log(`[RelayServer] Relay URL: ${relayUrl}`);
-      console.log(`[RelayServer] ========================================`);
-      
-      updateMetrics(true);
-      return {
-        statusCode: 200,
-        headers: { 'content-type': 'application/json' },
-        body: b4a.from(JSON.stringify({
-          success: true,
-          relayKey: internalRelayKey,
-          publicIdentifier: identifier,
-          authToken: token,
-          relayUrl: relayUrl
-        }))
-      };
-      
-    } catch (error) {
-      console.error(`[RelayServer] ========================================`);
-      console.error(`[RelayServer] FINALIZE AUTH ERROR`);
-      console.error(`[RelayServer] Error:`, error.message);
-      console.error(`[RelayServer] Stack:`, error.stack);
-      console.error(`[RelayServer] ========================================`);
-      
-      updateMetrics(false);
-      return {
-        statusCode: 500,
-        headers: { 'content-type': 'application/json' },
-        body: b4a.from(JSON.stringify({ error: error.message }))
-      };
-    }
-  });
-
-  
-  // Add authorize endpoint for mobile subnet addition
-protocol.handle('/authorize', async (request) => {
-  console.log(`[RelayServer] ========================================`);
-  console.log(`[RelayServer] AUTHORIZE REQUEST (Mobile subnet)`);
-  
-  try {
-    const body = JSON.parse(request.body.toString());
-    const { token, relayKey, subnetHash } = body;
-    
-    if (!token) {
-      console.error(`[RelayServer] Missing token`);
-      updateMetrics(false);
-      return {
-        statusCode: 400,
-        headers: { 'content-type': 'application/json' },
-        body: b4a.from(JSON.stringify({ error: 'Missing token' }))
-      };
-    }
-    
-    console.log(`[RelayServer] Token: ${token.substring(0, 16)}...`);
-    console.log(`[RelayServer] Relay: ${relayKey || 'not specified'}`);
-    console.log(`[RelayServer] Subnet: ${subnetHash?.substring(0, 8)}...`);
-    
-    const authStore = getRelayAuthStore();
-    
-    // Find the auth entry by token
-    let foundAuth = null;
-    let foundRelay = null;
-    
-    if (relayKey) {
-      // Check specific relay
-      const auth = authStore.verifyAuth(relayKey, token);
-      if (auth) {
-        foundAuth = auth;
-        foundRelay = relayKey;
-      }
-    } else {
-      // Search all relays (less efficient but supports QR code without relay info)
-      const activeRelays = await getActiveRelays();
-      for (const relay of activeRelays) {
-        const auth = authStore.getAuthByToken(relay.relayKey, token);
-        if (auth) {
-          foundAuth = auth;
-          foundRelay = relay.relayKey;
-          break;
-        }
-      }
-    }
-    
-    if (!foundAuth) {
-      console.error(`[RelayServer] Invalid token`);
-      updateMetrics(false);
-      return {
-        statusCode: 403,
-        headers: { 'content-type': 'application/json' },
-        body: b4a.from(JSON.stringify({ error: 'Invalid token' }))
-      };
-    }
-    
-    try {
-      await updateRelayAuthToken(foundRelay, foundAuth.pubkey, token, [subnetHash]);
-      await publishMemberAddEvent(foundRelay, foundAuth.pubkey, token, [subnetHash]);
-    } catch (persistErr) {
-      console.error('[RelayServer] Failed to persist mobile subnet:', persistErr.message);
-    }
-
-    console.log(`[RelayServer] ========================================`);
-
-    updateMetrics(true);
-    return {
-      statusCode: 200,
-      headers: { 'content-type': 'application/json' },
-      body: b4a.from(JSON.stringify({
-        success: true,
-        message: 'Mobile device authorized'
-      }))
-    };
-    
-  } catch (error) {
-    console.error(`[RelayServer] ========================================`);
-    console.error(`[RelayServer] AUTHORIZE ERROR`);
-    console.error(`[RelayServer] Error:`, error.message);
-    console.error(`[RelayServer] ========================================`);
-    
-    updateMetrics(false);
-    return {
-      statusCode: 500,
-      headers: { 'content-type': 'application/json' },
-      body: b4a.from(JSON.stringify({ error: error.message }))
-    };
-  }
-});
 
   // Disconnect from relay
   protocol.handle('/relay/:identifier/disconnect', async (request) => {
@@ -2021,19 +1811,9 @@ export async function startJoinAuthentication(options) {
     const joinEvent = await createGroupJoinRequest(publicIdentifier, userNsec);
     console.log(`[RelayServer] Created join event ID: ${joinEvent.id.substring(0, 8)}...`);
     
-    // 2. Retrieve subnetHash (should have been stored during gateway registration)
-    const requesterSubnetHash = config.subnetHash;
-    if (!requesterSubnetHash) {
-      throw new Error('Subnet hash not available. Ensure worker is registered with gateway.');
-    }
-    console.log(`[RelayServer] Using subnet hash: ${requesterSubnetHash.substring(0, 8)}...`);
-    
-    // 3. Make an https.request to the gateway's /post/join/:identifier endpoint
+    // 2. Make an https.request to the gateway's /post/join/:identifier endpoint
     const gatewayUrl = new URL(config.gatewayUrl);
-    const postData = JSON.stringify({
-      event: joinEvent,
-      requesterSubnetHash: requesterSubnetHash
-    });
+    const postData = JSON.stringify({ event: joinEvent });
     
     const requestOptions = {
       hostname: gatewayUrl.hostname,
@@ -2078,13 +1858,11 @@ export async function startJoinAuthentication(options) {
     console.log('[RelayServer] Received response from gateway:', joinResponse);
 
     // Step 2.3: Handle challenge and verification callback
-    const { challenge, relayPubkey, verifyUrl, finalUrl } = joinResponse;
+    const { challenge, relayPubkey, verifyUrl } = joinResponse;
 
     console.log(`[RelayServer] Challenge: ${challenge.substring(0, 16)}...`);
     console.log(`[RelayServer] verifyUrl: ${verifyUrl}`);
-    console.log(`[RelayServer] finalUrl: ${finalUrl}`);
-
-    if (!challenge || !relayPubkey || !verifyUrl || !finalUrl) {
+    if (!challenge || !relayPubkey || !verifyUrl) {
       throw new Error('Invalid challenge response from gateway. Missing required fields.');
     }
 
@@ -2179,85 +1957,39 @@ export async function startJoinAuthentication(options) {
       });
     }
 
-    const finalGatewayUrl = new URL(finalUrl);
-    const finalPostData = JSON.stringify({
-      pubkey: userPubkey
-    });
 
-    const finalOptions = {
-      hostname: finalGatewayUrl.hostname,
-      port: finalGatewayUrl.port || 443,
-      path: finalGatewayUrl.pathname,
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Content-Length': b4a.byteLength(finalPostData)
-      },
-      rejectUnauthorized: false // For self-signed certs in dev
-    };
-
-    console.log(`[RelayServer] Sending finalization request to gateway: ${finalOptions.hostname}${finalOptions.path}`);
-
-    const finalResponse = await new Promise((resolve, reject) => {
-      const req = https.request(finalOptions, (res) => {
-        let data = '';
-        res.on('data', (chunk) => data += chunk);
-        res.on('end', () => {
-          if (res.statusCode >= 200 && res.statusCode < 300) {
-            try {
-              resolve(JSON.parse(data));
-            } catch (e) {
-              reject(new Error(`Failed to parse JSON response from finalUrl: ${data}`));
-            }
-          } else {
-            reject(new Error(`Gateway finalization failed with status ${res.statusCode}: ${data}`));
-          }
-        });
-      });
-      req.on('error', (e) => reject(e));
-      req.write(finalPostData);
-      req.end();
-    });
-
-    console.log('[RelayServer] Received final response from gateway:', finalResponse);
-    console.log(`[RelayServer] Final authToken: ${finalResponse.authToken ? finalResponse.authToken.substring(0, 16) : 'none'}`);
-
-    const { authToken, relayUrl, relayKey, publicIdentifier: returnedIdentifier } = finalResponse;
+    const { token: authToken, relayKey, relayUrl, identifier: returnedIdentifier } = verifyResponse;
     const finalIdentifier = returnedIdentifier || publicIdentifier;
-    if (!authToken || !relayUrl || !relayKey) {
-      throw new Error('Final response from gateway missing authToken, relayKey, or relayUrl');
+    if (!authToken) {
+      throw new Error('Verification response missing auth token');
     }
 
-    // Join the relay locally so we have a profile and key mapping
-    await joinRelayManager({ relayKey, config });
-    await applyPendingAuthUpdates(updateRelayAuthToken, relayKey, finalIdentifier);
+    const resolvedRelayKey = relayKey || (await getRelayKeyFromPublicIdentifier(finalIdentifier)) || finalIdentifier;
+    const finalRelayUrl = relayUrl || `wss://${config.proxy_server_address}/${finalIdentifier}?token=${authToken}`;
 
-    // Ensure the joined relay profile has the public identifier recorded
-    let joinedProfile = await getRelayProfileByKey(relayKey);
+    await joinRelayManager({ relayKey: resolvedRelayKey, config });
+    await applyPendingAuthUpdates(updateRelayAuthToken, resolvedRelayKey, finalIdentifier);
+
+    let joinedProfile = await getRelayProfileByKey(resolvedRelayKey);
     if (joinedProfile && !joinedProfile.public_identifier) {
       joinedProfile.public_identifier = finalIdentifier;
       await saveRelayProfile(joinedProfile);
     }
 
-    // Persist the auth token and subnet hash to the local relay profile
     console.log(`[RelayServer] Persisting auth token for ${userPubkey.substring(0, 8)}...`);
-    await updateRelayAuthToken(relayKey, userPubkey, authToken, [requesterSubnetHash]);
+    await updateRelayAuthToken(resolvedRelayKey, userPubkey, authToken);
 
-    // Wait for the relay to become writable before announcing membership
-    await waitForRelayWritable(relayKey);
+    await waitForRelayWritable(resolvedRelayKey);
 
-    // Publish kind 9000 event to announce the new member
     console.log('[RelayServer] Publishing kind 9000 member add event...');
-    await publishMemberAddEvent(finalIdentifier, userPubkey, authToken, [requesterSubnetHash]);
+    await publishMemberAddEvent(finalIdentifier, userPubkey, authToken);
 
-    // Notify the desktop UI of success
     if (global.sendMessage) {
       global.sendMessage({
         type: 'join-auth-success',
-        data: { publicIdentifier: finalIdentifier, relayKey, authToken, relayUrl }
+        data: { publicIdentifier: finalIdentifier, relayKey: resolvedRelayKey, authToken, relayUrl: finalRelayUrl }
       });
     }
-
     console.log(`[RelayServer] Join flow for ${finalIdentifier} completed successfully.`);
 
   } catch (error) {
