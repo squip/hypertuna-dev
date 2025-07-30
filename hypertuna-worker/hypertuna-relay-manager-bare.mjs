@@ -170,6 +170,17 @@ export class RelayManager {
       // Initial update with logging
       console.log('[RelayManager] Performing initial relay update...');
       await this.relay.update();
+
+      // Wait for the underlying Hyperbee/Hyperblobs views to be ready
+      if (this.relay.view?.bee) {
+        await this.relay.view.bee.ready();
+        console.log('[RelayManager] View bee is ready');
+      }
+      if (this.relay.view?.blobs && typeof this.relay.view.blobs.ready === 'function') {
+        await this.relay.view.blobs.ready();
+        console.log('[RelayManager] View blobs are ready');
+      }
+
       console.log('[RelayManager] Initial update completed');
       
       // Log state after update

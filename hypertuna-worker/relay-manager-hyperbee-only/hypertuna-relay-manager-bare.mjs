@@ -138,6 +138,12 @@ export class RelayManager {
 
         await this.relay.update();
 
+        // Ensure the Hyperbee view is fully ready before proceeding
+        if (this.relay.view && typeof this.relay.view.ready === 'function') {
+          await this.relay.view.ready();
+          console.log('Hyperbee view is ready');
+        }
+
         this.relay.view.core.on('append', async () => {
           if (this.relay.view.version === 1) return;
           console.log('\rRelay event appended. Current version:', this.relay.view.version);
