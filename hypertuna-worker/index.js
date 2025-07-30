@@ -403,15 +403,14 @@ if (workerPipe) {
               console.log('[Worker] Update auth data requested:', message.data);
               if (relayServer) {
                 try {
-                  const { relayKey, publicIdentifier, pubkey, token, subnetHashes } = message.data;
+                  const { relayKey, publicIdentifier, pubkey, token } = message.data;
                   const identifier = relayKey || publicIdentifier;
                   if (!identifier) {
                     throw new Error('No identifier provided for auth data update');
                   }
-                  const hashes = Array.isArray(subnetHashes) ? subnetHashes : (subnetHashes ? [subnetHashes] : []);
-                  const updated = await updateRelayAuthToken(identifier, pubkey, token, hashes);
+                  const updated = await updateRelayAuthToken(identifier, pubkey, token);
                   if (!updated) {
-                    queuePendingAuthUpdate(identifier, pubkey, token, hashes);
+                    queuePendingAuthUpdate(identifier, pubkey, token);
                     console.log(`[Worker] Queued pending auth update for ${identifier}`);
                   }
                   sendMessage({

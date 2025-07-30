@@ -69,7 +69,7 @@ function ensureProfileSchema(profile) {
         profile.auth_config = {
             requiresAuth: false,
             tokenProtected: false,
-            authorizedUsers: [], // Array of { pubkey, token, subnets }
+            authorizedUsers: [], // Array of { pubkey, token }
             auth_adds: [],
             auth_removes: []
         };
@@ -105,7 +105,7 @@ function ensureProfileSchema(profile) {
 
 // NEW FUNCTION: Calculate the final list of authorized users
 export function calculateAuthorizedUsers(auth_adds = [], auth_removes = []) {
-    const addMap = new Map(); // pubkey -> { token, subnets, ts }
+    const addMap = new Map(); // pubkey -> { token, ts }
     for (const auth of auth_adds) {
         addMap.set(auth.pubkey, auth);
     }
@@ -120,7 +120,7 @@ export function calculateAuthorizedUsers(auth_adds = [], auth_removes = []) {
         const removeTs = removeMap.get(pubkey);
         // An authorization is valid if it hasn't been removed, or if it was re-added after removal
         if (!removeTs || auth.ts > removeTs) {
-            finalAuthorizedUsers.push(auth);
+            finalAuthorizedUsers.push({ pubkey, token: auth.token });
         }
     }
     return finalAuthorizedUsers;
@@ -141,17 +141,11 @@ export async function updateRelayAuthToken(identifier, pubkey, token, newSubnetH
 
             // NEW: Update auth_adds array
             const existingAuthAddIndex = p.auth_config.auth_adds.findIndex(a => a.pubkey === pubkey);
-            const newAuthEntry = { pubkey, token, subnets: newSubnetHashes, ts: Date.now() };
+            const newAuthEntry = { pubkey, token, ts: Date.now() };
 
             if (existingAuthAddIndex !== -1) {
                 const existingAuth = p.auth_config.auth_adds[existingAuthAddIndex];
                 existingAuth.token = token;
-                newSubnetHashes.forEach(newHash => {
-                    if (!existingAuth.subnets.includes(newHash)) {
-                        existingAuth.subnets.push(newHash);
-                    }
-                });
-                existingAuth.subnets = [...new Set(existingAuth.subnets)];
                 existingAuth.ts = newAuthEntry.ts;
             } else {
                 p.auth_config.auth_adds.push(newAuthEntry);
