@@ -424,7 +424,9 @@ export default class NostrRelay extends Autobee {
     logWithTimestamp(`queryEvents: Starting query with filter:`, JSON.stringify(filter, null, 2));
     logWithTimestamp(`queryEvents: Last returned event timestamp:`, last_returned_event_timestamp);
     const queries = this.constructQueries(filter, last_returned_event_timestamp);
-    logWithTimestamp(`queryEvents: Constructed query groups:`, JSON.stringify(queries, null, 2));
+    // logWithTimestamp(`queryEvents: Constructed query groups:`, JSON.stringify(queries, null, 2));
+    logWithTimestamp(`queryEvents: Constructed query groups`);
+
     
     const results = await this.executeQueries(queries);
     logWithTimestamp(`queryEvents: Raw query results count:`, results.length);
@@ -468,7 +470,9 @@ export default class NostrRelay extends Autobee {
       !this.hasTagFilters(filter)
     ) {
       const query = this.constructor.constructTimeRangeQuery(since, until);
-      logWithTimestamp(`constructQueries: Constructed time-based query:`, query);
+      // logWithTimestamp(`constructQueries: Constructed time-based query:`, query);
+      logWithTimestamp(`constructQueries: Constructed time-based query`);
+
       groups.push([query]);
       return groups;
     }
@@ -478,7 +482,8 @@ export default class NostrRelay extends Autobee {
       const kindGroup = [];
       for (const kind of filter.kinds) {
         const query = this.constructor.constructKindRangeQuery(kind, since, until);
-        logWithTimestamp(`constructQueries: Constructed kind query for ${kind}:`, query);
+        // logWithTimestamp(`constructQueries: Constructed kind query for ${kind}:`, query);
+        logWithTimestamp(`constructQueries: Constructed kind query for ${kind}`);
         kindGroup.push(query);
       }
       groups.push(kindGroup);
@@ -489,9 +494,12 @@ export default class NostrRelay extends Autobee {
       const authorGroup = [];
       for (const author of filter.authors) {
         const query = this.constructor.constructAuthorRangeQuery(author, since, until);
+        // logWithTimestamp(
+        //   `constructQueries: Constructed author query for ${author}:`,
+        //   query
+        // );
         logWithTimestamp(
-          `constructQueries: Constructed author query for ${author}:`,
-          query
+          `constructQueries: Constructed author query for ${author}`
         );
         authorGroup.push(query);
       }
@@ -553,9 +561,12 @@ export default class NostrRelay extends Autobee {
             since,
             until
           );
+          // logWithTimestamp(
+          //   `constructTagQueries: Constructed query for tag ${tagName}=${tagValue}:`,
+          //   query
+          // );
           logWithTimestamp(
-            `constructTagQueries: Constructed query for tag ${tagName}=${tagValue}:`,
-            query
+            `constructTagQueries: Constructed query for tag ${tagName}=${tagValue}`
           );
           group.push(query);
         }
