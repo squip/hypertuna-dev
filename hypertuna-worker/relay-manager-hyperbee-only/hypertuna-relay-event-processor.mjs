@@ -601,11 +601,25 @@ async executeQueries(queryGroups) {
             for (let j = 0; j < group.length; j++) {
                 const query = group[j];
                 logWithTimestamp(`executeQueries:  Query ${j + 1}/${group.length} in group ${i + 1}`);
+                logWithTimestamp('executeQueries:   range', {
+                    gte: query.gte.toString(),
+                    lte: query.lte.toString()
+                });
+                logWithTimestamp('executeQueries:   starting read stream');
+
+                let processed = 0;
                 for await (const entry of this.view.createReadStream(query)) {
                     if (!entry || !entry.value) continue;
                     const eventId = entry.value; // direct event ID
                     unionIds.add(eventId);
+
+                    processed++;
+                    if (processed % 100 === 0) {
+                        logWithTimestamp(`executeQueries:  Query ${j + 1}/${group.length} in group ${i + 1} processed ${processed} entries`);
+                    }
                 }
+
+                logWithTimestamp(`executeQueries:  Query ${j + 1}/${group.length} in group ${i + 1} finished with ${processed} entries`);
             }
             logWithTimestamp(`executeQueries: Group ${i + 1} produced ${unionIds.size} unique IDs`);
             groupResultSets.push(unionIds);
