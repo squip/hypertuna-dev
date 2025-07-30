@@ -1,4 +1,4 @@
-// relay-auth-store.mjs - Token and subnet management for relay authentication
+// relay-auth-store.mjs - In-memory token management for relay authentication
 
 import { promises as fs } from 'bare-fs';
 import { join } from 'bare-path';
@@ -36,17 +36,15 @@ getAuthByToken(relayKey, token) {
    * @param {string} relayKey - Relay identifier
    * @param {string} pubkey - User public key
    * @param {string} token - Authentication token
-   * @param {string} subnetHash - Initial subnet hash
    */
-  addAuth(relayKey, pubkey, token, subnetHash = '') {
+  addAuth(relayKey, pubkey, token) {
     if (!this.relayAuths.has(relayKey)) {
       this.relayAuths.set(relayKey, new Map());
     }
-    
+
     const relayAuth = this.relayAuths.get(relayKey);
     relayAuth.set(pubkey, {
       token,
-      allowedSubnets: subnetHash ? [subnetHash] : [],
       createdAt: Date.now(),
       lastUsed: Date.now()
     });
@@ -54,37 +52,14 @@ getAuthByToken(relayKey, token) {
     console.log(`[RelayAuthStore] Added auth for ${pubkey.substring(0, 8)}... on relay ${relayKey}`);
   }
   
-  /**
-   * Add a subnet to existing auth
-   * @param {string} relayKey - Relay identifier
-   * @param {string} pubkey - User public key
-   * @param {string} subnetHash - Subnet hash to add
-   * @returns {boolean} - Success
-   */
-  addSubnet(relayKey, pubkey, subnetHash) {
-    const relayAuth = this.relayAuths.get(relayKey);
-    if (!relayAuth) return false;
-    
-    const userAuth = relayAuth.get(pubkey);
-    if (!userAuth) return false;
-    
-    if (!userAuth.allowedSubnets.includes(subnetHash)) {
-      userAuth.allowedSubnets.push(subnetHash);
-      userAuth.lastUsed = Date.now();
-      console.log(`[RelayAuthStore] Added subnet for ${pubkey.substring(0, 8)}... on relay ${relayKey}`);
-    }
-    
-    return true;
-  }
   
   /**
-   * Verify token only (subnet is ignored)
+   * Verify a token for a relay
    * @param {string} relayKey - Relay identifier
    * @param {string} token - Auth token
-   * @param {string} [subnetHash] - Client subnet hash (ignored)
    * @returns {Object|null} - User auth data or null
    */
-  verifyAuth(relayKey, token, subnetHash) {
+  verifyAuth(relayKey, token) {
     const relayAuth = this.relayAuths.get(relayKey);
     if (!relayAuth) return null;
 
@@ -159,7 +134,11 @@ getAuthByToken(relayKey, token) {
     
     const exported = {};
     for (const [pubkey, auth] of relayAuth) {
-      exported[pubkey] = { ...auth };
+      exported[pubkey] = {
+        token: auth.token,
+        createdAt: auth.createdAt,
+        lastUsed: auth.lastUsed
+      };
     }
     
     return exported;
@@ -172,9 +151,13 @@ getAuthByToken(relayKey, token) {
    */
   importRelayAuth(relayKey, authData) {
     const relayAuth = new Map();
-    
+
     for (const [pubkey, auth] of Object.entries(authData)) {
-      relayAuth.set(pubkey, auth);
+      relayAuth.set(pubkey, {
+        token: auth.token,
+        createdAt: auth.createdAt,
+        lastUsed: auth.lastUsed
+      });
     }
     
     this.relayAuths.set(relayKey, relayAuth);

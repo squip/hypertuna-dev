@@ -951,7 +951,7 @@ function setupProtocolHandlers(protocol) {
       const authStore = getRelayAuthStore();
       
       // Store the authentication
-      authStore.addAuth(internalRelayKey, pubkey, token, subnetHash);
+      authStore.addAuth(internalRelayKey, pubkey, token);
       
       // Get relay profile to update members
       let profile = await getRelayProfileByKey(identifier);
@@ -1086,38 +1086,24 @@ protocol.handle('/authorize', async (request) => {
       };
     }
     
-    // Add the new subnet
-    const added = authStore.addSubnet(foundRelay, foundAuth.pubkey, subnetHash);
-    
-    if (added) {
-      console.log(`[RelayServer] Added subnet for ${foundAuth.pubkey.substring(0, 8)}...`);
-      // Persist subnet update to profile
-      try {
-        await updateRelayAuthToken(foundRelay, foundAuth.pubkey, token, [subnetHash]);
-        await publishMemberAddEvent(foundRelay, foundAuth.pubkey, token, [subnetHash]);
-      } catch (persistErr) {
-        console.error('[RelayServer] Failed to persist mobile subnet:', persistErr.message);
-      }
-      
-      console.log(`[RelayServer] ========================================`);
-      
-      updateMetrics(true);
-      return {
-        statusCode: 200,
-        headers: { 'content-type': 'application/json' },
-        body: b4a.from(JSON.stringify({
-          success: true,
-          message: 'Mobile device authorized'
-        }))
-      };
-    } else {
-      updateMetrics(false);
-      return {
-        statusCode: 400,
-        headers: { 'content-type': 'application/json' },
-        body: b4a.from(JSON.stringify({ error: 'Failed to add subnet' }))
-      };
+    try {
+      await updateRelayAuthToken(foundRelay, foundAuth.pubkey, token, [subnetHash]);
+      await publishMemberAddEvent(foundRelay, foundAuth.pubkey, token, [subnetHash]);
+    } catch (persistErr) {
+      console.error('[RelayServer] Failed to persist mobile subnet:', persistErr.message);
     }
+
+    console.log(`[RelayServer] ========================================`);
+
+    updateMetrics(true);
+    return {
+      statusCode: 200,
+      headers: { 'content-type': 'application/json' },
+      body: b4a.from(JSON.stringify({
+        success: true,
+        message: 'Mobile device authorized'
+      }))
+    };
     
   } catch (error) {
     console.error(`[RelayServer] ========================================`);
@@ -1906,7 +1892,7 @@ export async function createRelay(options) {
         const subnetHashes = config.subnetHash ? [config.subnetHash] : [];
 
         // Add auth to the in-memory store
-        authStore.addAuth(result.relayKey, adminPubkey, authToken, subnetHashes[0] || '');
+        authStore.addAuth(result.relayKey, adminPubkey, authToken);
         
         // Persist the token to the relay's profile on disk.
         // This now adds the first auth entry.
