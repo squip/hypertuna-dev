@@ -159,6 +159,8 @@ export class RelayManager {
         console.log('Joining swarm with discovery key:', b4a.toString(this.relay.discoveryKey, 'hex'));
         const discovery = this.swarm.join(this.relay.discoveryKey);
         await discovery.flushed();
+        await this.swarm.flush();
+        console.log('Swarm joined and flushed');
 
         console.log('Initializing relay');
         if (this.relay.writable) {
