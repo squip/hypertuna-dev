@@ -121,3 +121,32 @@ export default test('multiple connections each replicate once', async t => {
 
   t.is(storeReplicateCount, 2)
 })
+
+export default test('non-writable peer skips addWriter but syncs later', async t => {
+  let appendCount = 0
+  let updateCount = 0
+  const relay = {
+    append: async () => { appendCount++ },
+    update: async () => { updateCount++ },
+    writable: false,
+    writers: [],
+    local: { key: b4a.alloc(32) }
+  }
+
+  const manager = new RelayManager('/tmp/test', null)
+  manager.relay = relay
+
+  const writerKey = 'a'.repeat(64)
+
+  await manager.addWriter(writerKey)
+
+  t.is(appendCount, 0)
+  t.is(updateCount, 0)
+  t.ok(manager.pendingWriterKeys.includes(writerKey))
+
+  // simulate remote append replication
+  relay.writers.push({ key: b4a.from(writerKey, 'hex') })
+  await relay.update()
+
+  t.is(relay.writers.length, 1)
+})
