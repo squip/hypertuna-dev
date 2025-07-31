@@ -262,7 +262,8 @@ const activeRelays = new Map();
 const wsConnections = new Map();
 const messageQueues = new Map();
 // Map storing join verification sessions keyed by user pubkey
-const joinSessions = new Map();
+const joinSessions = global.joinSessions || new Map();
+global.joinSessions = joinSessions;
 const peerHealthManager = new PeerHealthManager();
 
 // Initialize Hyperswarm connection pool
@@ -872,6 +873,19 @@ app.post('/post/join/:identifier', async (req, res) => {
       connectionPool
     );
 
+    // Store join verification session
+    const now = Date.now();
+    for (const [key, session] of joinSessions.entries()) {
+      if (now - session.timestamp > 5 * 60 * 1000) {
+        joinSessions.delete(key);
+      }
+    }
+    joinSessions.set(event.pubkey, {
+      peerPublicKey: healthyPeer.publicKey,
+      identifier,
+      timestamp: now
+    });
+
     console.log(`[${new Date().toISOString()}] Returning challenge to client`);
     console.log(`[${new Date().toISOString()}] ========================================`);
 
@@ -903,13 +917,17 @@ app.post('/verify-ownership', async (req, res) => {
   }
 
   const session = joinSessions.get(pubkey);
-  if (!session || !session.peer) {
+  if (!session || !session.peerPublicKey) {
+    return res.status(404).json({ error: 'Unknown or expired session' });
+  }
+  if (Date.now() - session.timestamp > 5 * 60 * 1000) {
+    joinSessions.delete(pubkey);
     return res.status(404).json({ error: 'Unknown or expired session' });
   }
 
   try {
     const verifyResponse = await forwardCallbackToPeer(
-      session.peer,
+      session.peerPublicKey,
       '/verify-ownership',
       { pubkey, ciphertext, iv },
       connectionPool
