@@ -261,6 +261,8 @@ let activePeers = [];
 const activeRelays = new Map();
 const wsConnections = new Map();
 const messageQueues = new Map();
+// Map storing join verification sessions keyed by user pubkey
+const joinSessions = new Map();
 const peerHealthManager = new PeerHealthManager();
 
 // Initialize Hyperswarm connection pool
@@ -889,6 +891,38 @@ app.post('/post/join/:identifier', async (req, res) => {
   }
 });
 
+// ============================
+// Verify Ownership Endpoint
+// ============================
+
+app.post('/verify-ownership', async (req, res) => {
+  const { pubkey, ciphertext, iv } = req.body || {};
+
+  if (!pubkey || !ciphertext || !iv) {
+    return res.status(400).json({ error: 'Missing required fields' });
+  }
+
+  const session = joinSessions.get(pubkey);
+  if (!session || !session.peer) {
+    return res.status(404).json({ error: 'Unknown or expired session' });
+  }
+
+  try {
+    const verifyResponse = await forwardCallbackToPeer(
+      session.peer,
+      '/verify-ownership',
+      { pubkey, ciphertext, iv },
+      connectionPool
+    );
+
+    joinSessions.delete(pubkey);
+    res.json(verifyResponse);
+  } catch (error) {
+    console.error(`[${new Date().toISOString()}] Verify ownership error:`, error.message);
+    res.status(502).json({ error: 'Peer verification failed', message: error.message });
+  }
+});
+
 
 // HTTP Request Handling for non-WebSocket paths
 app.use(async (req, res, next) => {
@@ -1409,5 +1443,6 @@ module.exports = {
   activePeers,
   wsConnections,
   connectionPool,
-  messageQueues
+  messageQueues,
+  joinSessions
 };
