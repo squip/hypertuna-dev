@@ -1821,12 +1821,13 @@ async fetchMultipleProfiles(pubkeys) {
         if (!groupId) return;
 
         const addMap = this.kind9000Sets.get(groupId) || new Map();
+        // Tag format: ['p', pubkey, role, token]
         event.tags.forEach(tag => {
             if (tag[0] === 'p' && tag[1]) {
                 const pubkey = tag[1];
-                const rolesAndAuthData = tag.slice(2); // e.g., ['member', token]
-                const actualRoles = [rolesAndAuthData[0]]; // 'member' or 'admin'
-                const token = rolesAndAuthData[1]; // The auth token
+                const role = tag[2];
+                const token = tag[3];
+                const actualRoles = [role];
 
                 // If this entry is for the current user and a token is provided
                 if (token && this.user && pubkey === this.user.pubkey) {
@@ -2283,7 +2284,8 @@ async fetchMultipleProfiles(pubkeys) {
             addEvents.forEach(ev => {
                 ev.tags.forEach(tag => {
                     if (tag[0] === 'p' && tag[1]) {
-                        addMap.set(tag[1], { ts: ev.created_at, roles: tag.slice(2) });
+                        const role = tag[2];
+                        addMap.set(tag[1], { ts: ev.created_at, roles: [role] });
                     }
                 });
             });
