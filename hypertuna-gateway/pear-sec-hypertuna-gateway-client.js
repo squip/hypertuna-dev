@@ -642,7 +642,23 @@ async function getEventsFromPeerHyperswarm(peerPublicKey, relayKey, connectionKe
     console.error(`[GetEvents] Error with peer ${peerPublicKey.substring(0, 8)}:`, error.message);
     throw error;
   }
- }
+}
+
+async function forwardCallbackToPeer(peer, path, data, pool) {
+  const connection = await pool.getConnection(peer.publicKey);
+  const response = await connection.sendRequest({
+    method: 'POST',
+    path,
+    headers: { 'content-type': 'application/json' },
+    body: Buffer.from(JSON.stringify(data))
+  });
+
+  if (response.statusCode !== 200) {
+    throw new Error(`Peer returned status ${response.statusCode}`);
+  }
+
+  return JSON.parse(response.body.toString());
+}
  
  module.exports = {
   EnhancedHyperswarmPool,
@@ -650,6 +666,7 @@ async function getEventsFromPeerHyperswarm(peerPublicKey, relayKey, connectionKe
   forwardRequestToPeer,
   forwardMessageToPeerHyperswarm,
   getEventsFromPeerHyperswarm,
-  forwardJoinRequestToPeer
+  forwardJoinRequestToPeer,
+  forwardCallbackToPeer
 };
  
