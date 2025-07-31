@@ -23,7 +23,8 @@ const {
   forwardRequestToPeer,
   forwardMessageToPeerHyperswarm,
   getEventsFromPeerHyperswarm,
-  forwardJoinRequestToPeer
+  forwardJoinRequestToPeer,
+  forwardCallbackToPeer
 } = require('./pear-sec-hypertuna-gateway-client');
 
 let nostrClient = null;
@@ -907,9 +908,11 @@ app.post('/verify-ownership', async (req, res) => {
     return res.status(404).json({ error: 'Unknown or expired session' });
   }
 
+  const peer = session.peer;
+
   try {
     const verifyResponse = await forwardCallbackToPeer(
-      session.peer,
+      peer,
       '/verify-ownership',
       { pubkey, ciphertext, iv },
       connectionPool
@@ -919,7 +922,11 @@ app.post('/verify-ownership', async (req, res) => {
     res.json(verifyResponse);
   } catch (error) {
     console.error(`[${new Date().toISOString()}] Verify ownership error:`, error.message);
-    res.status(502).json({ error: 'Peer verification failed', message: error.message });
+    const status = typeof error.statusCode === 'number' ? error.statusCode : 502;
+    res.status(status).json({
+      error: 'Peer verification failed',
+      message: error.message
+    });
   }
 });
 
