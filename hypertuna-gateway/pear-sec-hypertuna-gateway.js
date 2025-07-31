@@ -263,7 +263,19 @@ const activeRelays = new Map();
 const wsConnections = new Map();
 const messageQueues = new Map();
 // Map storing join verification sessions keyed by user pubkey
-const joinSessions = new Map();
+const joinSessions = global.joinSessions || new Map();
+global.joinSessions = joinSessions;
+
+// Cleanup expired join sessions every minute
+const JOIN_SESSION_TTL = 5 * 60 * 1000; // 5 minutes
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, s] of joinSessions) {
+    if (s.timestamp && now - s.timestamp > JOIN_SESSION_TTL) {
+      joinSessions.delete(key);
+    }
+  }
+}, 60 * 1000);
 const peerHealthManager = new PeerHealthManager();
 
 // Initialize Hyperswarm connection pool
@@ -873,6 +885,12 @@ app.post('/post/join/:identifier', async (req, res) => {
       connectionPool
     );
 
+    // Track session for ownership verification
+    joinSessions.set(event.pubkey, {
+      peer: healthyPeer,
+      timestamp: Date.now()
+    });
+
     console.log(`[${new Date().toISOString()}] Returning challenge to client`);
     console.log(`[${new Date().toISOString()}] ========================================`);
 
@@ -918,7 +936,7 @@ app.post('/verify-ownership', async (req, res) => {
       connectionPool
     );
 
-    joinSessions.delete(pubkey);
+    global.joinSessions.delete(pubkey);
     res.json(verifyResponse);
   } catch (error) {
     console.error(`[${new Date().toISOString()}] Verify ownership error:`, error.message);
