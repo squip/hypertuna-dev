@@ -1354,7 +1354,7 @@ function setupProtocolHandlers(protocol) {
 
 // Helper function to publish member add event (kind 9000)
 // role can be 'admin' when the creator is automatically authorized during relay creation
-async function publishMemberAddEvent(identifier, pubkey, token, subnetHashes = [], role = 'member') {
+async function publishMemberAddEvent(identifier, pubkey, token, role = 'member') {
   try {
     console.log(`[RelayServer] Publishing kind 9000 event for ${pubkey.substring(0, 8)}...`);
     
@@ -1365,7 +1365,7 @@ async function publishMemberAddEvent(identifier, pubkey, token, subnetHashes = [
       created_at: Math.floor(Date.now() / 1000),
       tags: [
         ['h', identifier],
-        ['p', pubkey, role, token, ...subnetHashes] // Spread all subnet hashes
+        ['p', pubkey, role, token]
       ],
       pubkey: config.nostr_pubkey_hex
     };
@@ -1678,15 +1678,12 @@ export async function createRelay(options) {
         const authToken = challengeManager.generateAuthToken(adminPubkey);
         const authStore = getRelayAuthStore();
         
-        // The subnet hash might not be available immediately, but we can still create the token.
-        const subnetHashes = config.subnetHash ? [config.subnetHash] : [];
-
         // Add auth to the in-memory store
         authStore.addAuth(result.relayKey, adminPubkey, authToken);
         
         // Persist the token to the relay's profile on disk.
         // This now adds the first auth entry.
-        const updatedProfile = await updateRelayAuthToken(result.relayKey, adminPubkey, authToken, subnetHashes);
+        const updatedProfile = await updateRelayAuthToken(result.relayKey, adminPubkey, authToken);
 
         // CRITICAL: Update the profile in the result object to ensure consistency.
         if (updatedProfile) {
@@ -1697,7 +1694,7 @@ export async function createRelay(options) {
         result.authToken = authToken;
         result.relayUrl = `wss://${config.proxy_server_address}/${result.publicIdentifier.replace(':', '/')}?token=${authToken}`;
 
-        await publishMemberAddEvent(result.publicIdentifier, adminPubkey, authToken, subnetHashes, 'admin');
+        await publishMemberAddEvent(result.publicIdentifier, adminPubkey, authToken, 'admin');
         console.log(`[RelayServer] Auto-authorized creator ${adminPubkey.substring(0, 8)}...`);
       } catch (authError) {
         console.error('[RelayServer] Failed to auto-authorize creator:', authError);
