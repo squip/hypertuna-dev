@@ -758,10 +758,10 @@ function setupProtocolHandlers(protocol) {
     console.log(`[RelayServer] Join request for relay: ${identifier}`);
 
     try {
-      const body = JSON.parse(request.body.toString());
-      const { event, requesterSubnetHash, callbackUrls } = body;
-      
-      if (!event || !requesterSubnetHash) {
+    const body = JSON.parse(request.body.toString());
+      const { event } = body;
+
+      if (!event) {
         updateMetrics(false);
         return {
           statusCode: 400,
@@ -818,8 +818,7 @@ function setupProtocolHandlers(protocol) {
       const response = {
         challenge,
         relayPubkey,
-        verifyUrl: callbackUrls?.verifyUrl || `/verify-ownership`,
-        finalUrl: callbackUrls?.finalUrl || `/finalize-auth`
+        verifyUrl: `/verify-ownership`
       };
       
       updateMetrics(true);
@@ -1628,12 +1627,7 @@ async function registerWithGateway(relayProfileInfo = null) {
       console.log('[RelayServer] Gateway HTTP registration response:', response);
       console.log('[RelayServer] Registration SUCCESSFUL');
 
-      // Store subnet hash from gateway response if provided
-      if (response && response.subnetHash) {
-          config.subnetHash = response.subnetHash;
-          await saveConfig(config);
-          console.log(`[RelayServer] Stored subnet hash: ${config.subnetHash.substring(0, 8)}...`);
-      }
+
 
       // Notify parent process
       if (global.sendMessage) {

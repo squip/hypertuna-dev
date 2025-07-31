@@ -127,7 +127,7 @@ export function calculateAuthorizedUsers(auth_adds = [], auth_removes = []) {
 }
 
 // Add a function to update auth token for a user
-export async function updateRelayAuthToken(identifier, pubkey, token, newSubnetHashes = []) {
+export async function updateRelayAuthToken(identifier, pubkey, token) {
     try {
         const profile = await withProfileLock(async () => {
             let p = await getRelayProfileByKeyUnlocked(identifier);
