@@ -814,11 +814,10 @@ function setupProtocolHandlers(protocol) {
       
       console.log(`[RelayServer] Generated challenge for ${event.pubkey.substring(0, 8)}...`);
       
-      // Prepare response with callback URLs
+      // Prepare simplified response
       const response = {
         challenge,
-        relayPubkey,
-        verifyUrl: `/verify-ownership`
+        relayPubkey
       };
       
       updateMetrics(true);
@@ -1848,12 +1847,11 @@ export async function startJoinAuthentication(options) {
 
     console.log('[RelayServer] Received response from gateway:', joinResponse);
 
-    // Step 2.3: Handle challenge and verification callback
-    const { challenge, relayPubkey, verifyUrl } = joinResponse;
+    // Step 2.3: Handle challenge response
+    const { challenge, relayPubkey } = joinResponse;
 
     console.log(`[RelayServer] Challenge: ${challenge.substring(0, 16)}...`);
-    console.log(`[RelayServer] verifyUrl: ${verifyUrl}`);
-    if (!challenge || !relayPubkey || !verifyUrl) {
+    if (!challenge || !relayPubkey) {
       throw new Error('Invalid challenge response from gateway. Missing required fields.');
     }
 
@@ -1887,8 +1885,8 @@ export async function startJoinAuthentication(options) {
     console.log(`[RelayServer] Ciphertext length: ${ciphertext.length}`);
     console.log(`[RelayServer] IV base64: ${ivBase64}`);
 
-    // Send the encrypted challenge to the verification URL
-    const verifyGatewayUrl = new URL(verifyUrl);
+    // Send the encrypted challenge to the gateway verification endpoint
+    const verifyGatewayUrl = new URL('/verify-ownership', config.gatewayUrl);
     const verifyPostData = JSON.stringify({
       pubkey: userPubkey,
       ciphertext: ciphertext,
@@ -1918,7 +1916,7 @@ export async function startJoinAuthentication(options) {
             try {
               resolve(JSON.parse(data));
             } catch (e) {
-              reject(new Error(`Failed to parse JSON response from verifyUrl: ${data}`));
+              reject(new Error(`Failed to parse JSON response from verification endpoint: ${data}`));
             }
           } else {
             reject(new Error(`Gateway verification failed with status ${res.statusCode}: ${data}`));
