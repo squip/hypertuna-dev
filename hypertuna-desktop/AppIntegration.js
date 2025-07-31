@@ -1753,26 +1753,7 @@ App.syncHypertunaConfigToFile = async function() {
         document.getElementById('btn-close-auth-modal').classList.remove('hidden');
         document.getElementById('btn-cancel-auth').classList.add('hidden');
         
-        // Generate QR code for mobile authorization
-        const gatewayUrl = this.currentUser.hypertunaConfig?.gatewayUrl || HypertunaUtils.DEFAULT_GATEWAY_URL;
-        const mobileAuthUrl = `${gatewayUrl}/authorize?token=${authResult.authToken}`;
-    
-        document.getElementById('auth-url').value = mobileAuthUrl;
-        
-        // Generate QR code
-        if (window.QRCode) {
-            const qrContainer = document.getElementById('auth-qr-code');
-            qrContainer.innerHTML = ''; // Clear existing QR code
-            
-            new QRCode(qrContainer, {
-                text: mobileAuthUrl,
-                width: 200,
-                height: 200,
-                colorDark: '#000000',
-                colorLight: '#ffffff',
-                correctLevel: QRCode.CorrectLevel.H
-            });
-        }
+        // QRCode and mobile authorization have been removed, only show success message
     
         // IMPORTANT: Update the user's relay list with the FULL authenticated URL
         if (this.nostr && this.nostr.client) {
@@ -1841,18 +1822,7 @@ App.syncHypertunaConfigToFile = async function() {
             this.showJoinAuthModal();
         });
         
-        // Copy button for auth URL
-        document.querySelector('[data-copy="auth-url"]').addEventListener('click', function() {
-            const input = document.getElementById('auth-url');
-            input.select();
-            document.execCommand('copy');
-            
-            const originalText = this.textContent;
-            this.textContent = 'Copied!';
-            setTimeout(() => {
-                this.textContent = originalText;
-            }, 2000);
-        });
+
         
         // Click outside modal to close
         window.addEventListener('click', (e) => {
@@ -1866,16 +1836,6 @@ App.syncHypertunaConfigToFile = async function() {
         });
     };
 
-    // Add QR code library dynamically if not already loaded
-    if (!window.QRCode) {
-        const script = document.createElement('script');
-        script.src = 'https://cdn.jsdelivr.net/npm/qrcode@1.5.1/build/qrcode.min.js';
-        script.onload = () => {
-            console.log('QRCode library loaded');
-        };
-        document.head.appendChild(script);
-    }
-    
     /**
      * Replace send join request method
      * Sends a join request via the nostr client
