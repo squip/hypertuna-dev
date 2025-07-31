@@ -590,9 +590,9 @@ function setupProtocolHandlers(protocol) {
   protocol.handle('/relay/create', async (request) => {
     console.log('[RelayServer] Create relay requested');
     const body = JSON.parse(request.body.toString());
-    const { name, description, isPublic = false, isOpen = false } = body;
-    
-    console.log('[RelayServer] Creating relay:', { name, description });
+    const { name, description, isPublic = false, isOpen = false, fileSharing = false } = body;
+
+    console.log('[RelayServer] Creating relay:', { name, description, isPublic, isOpen, fileSharing });
     
     if (!name) {
       updateMetrics(false);
@@ -609,6 +609,7 @@ function setupProtocolHandlers(protocol) {
         description,
         isPublic,
         isOpen,
+        fileSharing,
         config
       });
       
@@ -673,9 +674,9 @@ function setupProtocolHandlers(protocol) {
   protocol.handle('/relay/join', async (request) => {
     console.log('[RelayServer] Join relay requested');
     const body = JSON.parse(request.body.toString());
-    const { relayKey, name, description } = body;
-    
-    console.log('[RelayServer] Joining relay:', { relayKey, name, description });
+    const { relayKey, name, description, fileSharing = false } = body;
+
+    console.log('[RelayServer] Joining relay:', { relayKey, name, description, fileSharing });
     
     if (!relayKey) {
       updateMetrics(false);
@@ -691,6 +692,7 @@ function setupProtocolHandlers(protocol) {
         relayKey,
         name,
         description,
+        fileSharing,
         config
       });
       
@@ -758,7 +760,7 @@ function setupProtocolHandlers(protocol) {
     console.log(`[RelayServer] Join request for relay: ${identifier}`);
 
     try {
-    const body = JSON.parse(request.body.toString());
+      const body = JSON.parse(request.body.toString());
       const { event } = body;
 
       if (!event) {
@@ -814,7 +816,7 @@ function setupProtocolHandlers(protocol) {
       
       console.log(`[RelayServer] Generated challenge for ${event.pubkey.substring(0, 8)}...`);
       
-      // Prepare simplified response
+      // Prepare response with challenge information only
       const response = {
         challenge,
         relayPubkey
@@ -878,16 +880,50 @@ function setupProtocolHandlers(protocol) {
       console.log(`[RelayServer] Verification SUCCESSFUL`);
       console.log(`[RelayServer] Token: ${result.token.substring(0, 16)}...`);
       console.log(`[RelayServer] Identifier: ${result.identifier}`);
-      console.log(`[RelayServer] ========================================`);
-      
+
+      // Finalize authentication locally (replaces /finalize-auth)
+
+      let internalRelayKey = result.identifier;
+      if (result.identifier.includes(':')) {
+        const resolvedKey = await getRelayKeyFromPublicIdentifier(result.identifier);
+        if (resolvedKey) {
+          internalRelayKey = resolvedKey;
+        }
+      }
+
+      const authStore = getRelayAuthStore();
+      authStore.addAuth(internalRelayKey, pubkey, result.token);
+
+      let profile = await getRelayProfileByKey(internalRelayKey);
+      if (!profile) {
+        profile = await getRelayProfileByPublicIdentifier(result.identifier);
+      }
+
+      if (profile) {
+        await updateRelayAuthToken(internalRelayKey, pubkey, result.token);
+        const currentAdds = profile.member_adds || [];
+        const currentRemoves = profile.member_removes || [];
+        const memberAdd = { pubkey, ts: Date.now() };
+        const existingIndex = currentAdds.findIndex(m => m.pubkey === pubkey);
+        if (existingIndex >= 0) currentAdds[existingIndex] = memberAdd;
+        else currentAdds.push(memberAdd);
+        await updateRelayMemberSets(internalRelayKey, currentAdds, currentRemoves);
+        await publishMemberAddEvent(result.identifier, pubkey, result.token);
+      }
+
+      const relayUrl = `wss://${config.proxy_server_address}/${result.identifier}?token=${result.token}`;
+
+      console.log(`[RelayServer] Auth finalized successfully`);
       updateMetrics(true);
       return {
         statusCode: 200,
         headers: { 'content-type': 'application/json' },
         body: b4a.from(JSON.stringify({
           success: true,
-          token: result.token,
-          identifier: result.identifier
+          relayKey: internalRelayKey,
+          publicIdentifier: result.identifier,
+          authToken: result.token,
+          relayUrl
         }))
       };
       
@@ -907,6 +943,7 @@ function setupProtocolHandlers(protocol) {
     }
   });
 
+  // Removed finalize-auth and authorize handlers (handled during verification)
 
   // Disconnect from relay
   protocol.handle('/relay/:identifier/disconnect', async (request) => {
@@ -1346,13 +1383,98 @@ function setupProtocolHandlers(protocol) {
       }))
     };
   });
+
+  // Serve files from a relay's Hyperblobs storage
+  protocol.handle('/drive/:identifier/:file', async (request) => {
+    const identifier = request.params.identifier;
+    const fileId = request.params.file;
+  
+    console.log(`[RelayServer] Drive file requested: ${identifier}/${fileId}`);
+  
+    try {
+      let relayKey = identifier;
+      if (identifier.includes(':')) {
+        relayKey = await getRelayKeyFromPublicIdentifier(identifier);
+        if (!relayKey) {
+          updateMetrics(false);
+          return {
+            statusCode: 404,
+            headers: { 'content-type': 'application/json' },
+            body: b4a.from(JSON.stringify({ error: 'Relay not found' }))
+          };
+        }
+      }
+  
+      const { activeRelays } = await import('./hypertuna-relay-manager-adapter.mjs');
+      const relayManager = activeRelays.get(relayKey);
+      if (!relayManager || !relayManager.relay) {
+        updateMetrics(false);
+        return {
+          statusCode: 404,
+          headers: { 'content-type': 'application/json' },
+          body: b4a.from(JSON.stringify({ error: 'Relay not found' }))
+        };
+      }
+  
+      // Extract hash from fileId (remove extension if present)
+      const hash = fileId.split('.')[0];
+      console.log(`[RelayServer] Fetching blob with hash: ${hash}`);
+      
+      const blob = await relayManager.relay.getBlob(hash);
+      if (!blob || !blob.data) {
+        updateMetrics(false);
+        return {
+          statusCode: 404,
+          headers: { 'content-type': 'application/json' },
+          body: b4a.from(JSON.stringify({ error: 'File not found' }))
+        };
+      }
+  
+      console.log(`[RelayServer] Retrieved blob ${hash} (${blob.size} bytes)`);
+  
+      // Determine content type from metadata or fileId
+      let contentType = 'application/octet-stream';
+      if (blob.metadata?.mimeType) {
+        contentType = blob.metadata.mimeType;
+      } else if (fileId.includes('.')) {
+        const ext = fileId.split('.').pop().toLowerCase();
+        const mimeTypes = {
+          'jpg': 'image/jpeg',
+          'jpeg': 'image/jpeg',
+          'png': 'image/png',
+          'gif': 'image/gif',
+          'pdf': 'application/pdf',
+          'txt': 'text/plain'
+        };
+        contentType = mimeTypes[ext] || contentType;
+      }
+  
+      updateMetrics(true);
+      return {
+        statusCode: 200,
+        headers: { 
+          'content-type': contentType,
+          'content-length': blob.size.toString()
+        },
+        body: blob.data // Should already be a buffer
+      };
+    } catch (error) {
+      console.error('[RelayServer] Error fetching blob file:', error);
+      updateMetrics(false);
+      return {
+        statusCode: 500,
+        headers: { 'content-type': 'application/json' },
+        body: b4a.from(JSON.stringify({ error: error.message }))
+      };
+    }
+  });
   
   console.log('[RelayServer] Protocol handlers setup complete');
 }
 
 // Helper function to publish member add event (kind 9000)
 // role can be 'admin' when the creator is automatically authorized during relay creation
-async function publishMemberAddEvent(identifier, pubkey, token, role = 'member') {
+async function publishMemberAddEvent(identifier, pubkey, token, subnetHashes = [], role = 'member') {
   try {
     console.log(`[RelayServer] Publishing kind 9000 event for ${pubkey.substring(0, 8)}...`);
     
@@ -1363,7 +1485,7 @@ async function publishMemberAddEvent(identifier, pubkey, token, role = 'member')
       created_at: Math.floor(Date.now() / 1000),
       tags: [
         ['h', identifier],
-        ['p', pubkey, role, token]
+        ['p', pubkey, role, token, ...subnetHashes] // Spread all subnet hashes
       ],
       pubkey: config.nostr_pubkey_hex
     };
@@ -1626,7 +1748,12 @@ async function registerWithGateway(relayProfileInfo = null) {
       console.log('[RelayServer] Gateway HTTP registration response:', response);
       console.log('[RelayServer] Registration SUCCESSFUL');
 
-
+      // Store subnet hash from gateway response if provided
+      if (response && response.subnetHash) {
+          config.subnetHash = response.subnetHash;
+          await saveConfig(config);
+          console.log(`[RelayServer] Stored subnet hash: ${config.subnetHash.substring(0, 8)}...`);
+      }
 
       // Notify parent process
       if (global.sendMessage) {
@@ -1647,14 +1774,15 @@ async function registerWithGateway(relayProfileInfo = null) {
 // Export relay management functions for worker access
 export async function createRelay(options) {
   // The subnetHash is no longer passed in, it's retrieved from the config
-  const { name, description, isPublic = false, isOpen = false } = options;
-  console.log('[RelayServer] Creating relay via adapter:', { name, description, isPublic, isOpen });
+  const { name, description, isPublic = false, isOpen = false, fileSharing = false } = options;
+  console.log('[RelayServer] Creating relay via adapter:', { name, description, isPublic, isOpen, fileSharing });
 
   const result = await createRelayManager({
     name,
     description,
     isPublic,
     isOpen,
+    fileSharing,
     config
   });
   
@@ -1671,6 +1799,9 @@ export async function createRelay(options) {
         const authToken = challengeManager.generateAuthToken(adminPubkey);
         const authStore = getRelayAuthStore();
         
+        // The subnet hash might not be available immediately, but we can still create the token.
+        const subnetHashes = config.subnetHash ? [config.subnetHash] : [];
+
         // Add auth to the in-memory store
         authStore.addAuth(result.relayKey, adminPubkey, authToken);
         
@@ -1687,7 +1818,7 @@ export async function createRelay(options) {
         result.authToken = authToken;
         result.relayUrl = `wss://${config.proxy_server_address}/${result.publicIdentifier.replace(':', '/')}?token=${authToken}`;
 
-        await publishMemberAddEvent(result.publicIdentifier, adminPubkey, authToken, 'admin');
+        await publishMemberAddEvent(result.publicIdentifier, adminPubkey, authToken, subnetHashes, 'admin');
         console.log(`[RelayServer] Auto-authorized creator ${adminPubkey.substring(0, 8)}...`);
       } catch (authError) {
         console.error('[RelayServer] Failed to auto-authorize creator:', authError);
@@ -1713,9 +1844,11 @@ export async function createRelay(options) {
 }
 
 export async function joinRelay(options) {
-  console.log('[RelayServer] Joining relay via adapter:', options);
+  const { fileSharing = false } = options;
+  console.log('[RelayServer] Joining relay via adapter:', { ...options, fileSharing });
   const result = await joinRelayManager({
     ...options,
+    fileSharing,
     config
   });
   
@@ -1759,7 +1892,7 @@ async function createGroupJoinRequest(publicIdentifier, privateKey) {
 }
 
 export async function startJoinAuthentication(options) {
-  const { publicIdentifier } = options;
+  const { publicIdentifier, fileSharing = false } = options;
   const userNsec = config.nostr_nsec_hex;
   const userPubkey = NostrUtils.getPublicKey(userNsec);
   if (config.nostr_pubkey_hex && userPubkey !== config.nostr_pubkey_hex) {
@@ -1768,6 +1901,7 @@ export async function startJoinAuthentication(options) {
 
   console.log(`[RelayServer] Starting join authentication for: ${publicIdentifier}`);
   console.log(`[RelayServer] Using user pubkey: ${userPubkey.substring(0, 8)}...`);
+  console.log(`[RelayServer] File sharing enabled: ${fileSharing}`);
 
   if (!publicIdentifier || !userPubkey || !userNsec) {
     const errorMsg = 'Missing publicIdentifier or user credentials for join flow.';
@@ -1847,10 +1981,11 @@ export async function startJoinAuthentication(options) {
 
     console.log('[RelayServer] Received response from gateway:', joinResponse);
 
-    // Step 2.3: Handle challenge response
+    // Step 2.3: Handle challenge and verification callback
     const { challenge, relayPubkey } = joinResponse;
 
     console.log(`[RelayServer] Challenge: ${challenge.substring(0, 16)}...`);
+
     if (!challenge || !relayPubkey) {
       throw new Error('Invalid challenge response from gateway. Missing required fields.');
     }
@@ -1885,8 +2020,8 @@ export async function startJoinAuthentication(options) {
     console.log(`[RelayServer] Ciphertext length: ${ciphertext.length}`);
     console.log(`[RelayServer] IV base64: ${ivBase64}`);
 
-    // Send the encrypted challenge to the gateway verification endpoint
-    const verifyGatewayUrl = new URL('/verify-ownership', config.gatewayUrl);
+    // Send the encrypted challenge to the verification URL
+    const verifyGatewayUrl = new URL(`/callback/verify-ownership/${publicIdentifier}`, config.gatewayUrl);
     const verifyPostData = JSON.stringify({
       pubkey: userPubkey,
       ciphertext: ciphertext,
@@ -1916,7 +2051,7 @@ export async function startJoinAuthentication(options) {
             try {
               resolve(JSON.parse(data));
             } catch (e) {
-              reject(new Error(`Failed to parse JSON response from verification endpoint: ${data}`));
+              reject(new Error(`Failed to parse JSON response from verifyUrl: ${data}`));
             }
           } else {
             reject(new Error(`Gateway verification failed with status ${res.statusCode}: ${data}`));
@@ -1938,7 +2073,7 @@ export async function startJoinAuthentication(options) {
       console.log(`[RelayServer] Verification failed: ${verifyResponse.error}`);
     }
 
-    // Step 2.4: Finalization callback, token persistence, and success notification
+    // Treat verify response as the final result
     if (global.sendMessage) {
       global.sendMessage({
         type: 'join-auth-progress',
@@ -1946,39 +2081,42 @@ export async function startJoinAuthentication(options) {
       });
     }
 
-
-    const { token: authToken, relayKey, relayUrl, identifier: returnedIdentifier } = verifyResponse;
+    const { authToken, relayUrl, relayKey, publicIdentifier: returnedIdentifier } = verifyResponse;
     const finalIdentifier = returnedIdentifier || publicIdentifier;
-    if (!authToken) {
-      throw new Error('Verification response missing auth token');
+    if (!authToken || !relayUrl || !relayKey) {
+      throw new Error('Final response from gateway missing authToken, relayKey, or relayUrl');
     }
 
-    const resolvedRelayKey = relayKey || (await getRelayKeyFromPublicIdentifier(finalIdentifier)) || finalIdentifier;
-    const finalRelayUrl = relayUrl || `wss://${config.proxy_server_address}/${finalIdentifier}?token=${authToken}`;
+    // Join the relay locally so we have a profile and key mapping
+    await joinRelayManager({ relayKey, config, fileSharing });
+    await applyPendingAuthUpdates(updateRelayAuthToken, relayKey, finalIdentifier);
 
-    await joinRelayManager({ relayKey: resolvedRelayKey, config });
-    await applyPendingAuthUpdates(updateRelayAuthToken, resolvedRelayKey, finalIdentifier);
-
-    let joinedProfile = await getRelayProfileByKey(resolvedRelayKey);
+    // Ensure the joined relay profile has the public identifier recorded
+    let joinedProfile = await getRelayProfileByKey(relayKey);
     if (joinedProfile && !joinedProfile.public_identifier) {
       joinedProfile.public_identifier = finalIdentifier;
       await saveRelayProfile(joinedProfile);
     }
 
+    // Persist the auth token and subnet hash to the local relay profile
     console.log(`[RelayServer] Persisting auth token for ${userPubkey.substring(0, 8)}...`);
-    await updateRelayAuthToken(resolvedRelayKey, userPubkey, authToken);
+    await updateRelayAuthToken(relayKey, userPubkey, authToken);
 
-    await waitForRelayWritable(resolvedRelayKey);
+    // Wait for the relay to become writable before announcing membership
+    await waitForRelayWritable(relayKey);
 
+    // Publish kind 9000 event to announce the new member
     console.log('[RelayServer] Publishing kind 9000 member add event...');
     await publishMemberAddEvent(finalIdentifier, userPubkey, authToken);
 
+    // Notify the desktop UI of success
     if (global.sendMessage) {
       global.sendMessage({
         type: 'join-auth-success',
-        data: { publicIdentifier: finalIdentifier, relayKey: resolvedRelayKey, authToken, relayUrl: finalRelayUrl }
+        data: { publicIdentifier: finalIdentifier, relayKey, authToken, relayUrl }
       });
     }
+
     console.log(`[RelayServer] Join flow for ${finalIdentifier} completed successfully.`);
 
   } catch (error) {

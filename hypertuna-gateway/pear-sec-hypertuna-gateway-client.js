@@ -2,7 +2,7 @@
 const Hyperswarm = require('hyperswarm');
 const crypto = require('hypercore-crypto');
 const c = require('compact-encoding');
-const RelayProtocol = require('./pear-sec-hypertuna-gateway-protocol.js');
+const RelayProtocol = require('./sushi-hypertuna-gateway-protocol.js');
 
 class HyperswarmConnection {
   constructor(publicKey, swarm, pool) {
@@ -527,7 +527,6 @@ async function forwardMessageToPeerHyperswarm(peerPublicKey, identifier, message
     console.log(`[ForwardMessage] Connection: ${connectionKey}`);
     console.log(`[ForwardMessage] Peer: ${peerPublicKey.substring(0, 8)}...`);
     console.log(`[ForwardMessage] Has auth: ${!!authToken}`);
-  // No subnet information forwarded
     
     const connection = await connectionPool.getConnection(peerPublicKey);
     
@@ -594,7 +593,9 @@ async function forwardMessageToPeerHyperswarm(peerPublicKey, identifier, message
     const joinResponse = JSON.parse(response.body.toString());
     console.log(`[ForwardJoin] Response received:`, {
       hasChallenge: !!joinResponse.challenge,
-      hasRelayPubkey: !!joinResponse.relayPubkey
+      hasRelayPubkey: !!joinResponse.relayPubkey,
+      verifyUrl: joinResponse.verifyUrl,
+      finalUrl: joinResponse.finalUrl
     });
     
     console.log(`[ForwardJoin] ========================================`);
@@ -611,6 +612,33 @@ async function forwardMessageToPeerHyperswarm(peerPublicKey, identifier, message
 }
 
 // Add callback endpoint forwarding
+async function forwardCallbackToPeer(peer, path, requestData, connectionPool) {
+  try {
+    console.log(`[ForwardCallback] Forwarding ${path} to peer ${peer.publicKey.substring(0, 8)}...`);
+    
+    const connection = await connectionPool.getConnection(peer.publicKey);
+    
+    const response = await connection.sendRequest({
+      method: 'POST',
+      path: path,
+      headers: { 'content-type': 'application/json' },
+      body: Buffer.from(JSON.stringify(requestData))
+    });
+    
+    console.log(`[ForwardCallback] Response status: ${response.statusCode}`);
+    
+    if (response.statusCode !== 200) {
+      const errorBody = response.body.toString();
+      throw new Error(`Callback failed: ${errorBody}`);
+    }
+    
+    return JSON.parse(response.body.toString());
+    
+  } catch (error) {
+    console.error(`[ForwardCallback] Error:`, error.message);
+    throw error;
+  }
+}
  
 async function getEventsFromPeerHyperswarm(peerPublicKey, relayKey, connectionKey, connectionPool, authToken = null) {
   try {
@@ -642,23 +670,7 @@ async function getEventsFromPeerHyperswarm(peerPublicKey, relayKey, connectionKe
     console.error(`[GetEvents] Error with peer ${peerPublicKey.substring(0, 8)}:`, error.message);
     throw error;
   }
-}
-
-async function forwardCallbackToPeer(peer, path, data, pool) {
-  const connection = await pool.getConnection(peer.publicKey);
-  const response = await connection.sendRequest({
-    method: 'POST',
-    path,
-    headers: { 'content-type': 'application/json' },
-    body: Buffer.from(JSON.stringify(data))
-  });
-
-  if (response.statusCode !== 200) {
-    throw new Error(`Peer returned status ${response.statusCode}`);
-  }
-
-  return JSON.parse(response.body.toString());
-}
+ }
  
  module.exports = {
   EnhancedHyperswarmPool,
