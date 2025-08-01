@@ -149,6 +149,8 @@ export async function createRelay(options = {}) {
             public_identifier: publicIdentifier, // New public-facing identifier
             relay_storage: defaultStorageDir,
             created_at: new Date().toISOString(),
+            isWriter: true,
+            initialSyncComplete: true,
             auto_connect: true,
             is_active: true,
             isPublic,
@@ -352,6 +354,8 @@ export async function joinRelay(options = {}) {
                 public_identifier: publicIdentifier || null,
                 relay_storage: defaultStorageDir,
                 joined_at: new Date().toISOString(),
+                isWriter: false,
+                initialSyncComplete: false,
                 auto_connect: true,
                 is_active: true
             };
