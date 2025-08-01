@@ -3,7 +3,13 @@ import fs from 'fs/promises'
 import path from 'path'
 import os from 'os'
 
-import { updateRelayAuthToken, updateRelayMemberSets, getAllRelayProfiles } from '../hypertuna-relay-profile-manager-bare.mjs'
+import {
+  updateRelayAuthToken,
+  updateRelayMemberSets,
+  getAllRelayProfiles,
+  markRelayWriter,
+  markRelaySyncComplete
+} from '../hypertuna-relay-profile-manager-bare.mjs'
 
 // Helper to create temporary storage and seed legacy profile
 async function setupLegacyProfile() {
@@ -86,5 +92,28 @@ test('concurrent member set updates do not lose updates', async t => {
   const profiles = await getAllRelayProfiles()
   const members = profiles[0].members.sort()
   t.alike(members, ['alice', 'bob'])
+  await fs.rm(tmp, { recursive: true, force: true })
+})
+
+test('default writer and sync flags are false', async t => {
+  const tmp = await setupProfile()
+
+  const profiles = await getAllRelayProfiles()
+  t.is(profiles[0].isWriter, false)
+  t.is(profiles[0].initialSyncComplete, false)
+
+  await fs.rm(tmp, { recursive: true, force: true })
+})
+
+test('markRelayWriter and markRelaySyncComplete update flags', async t => {
+  const tmp = await setupProfile()
+
+  await markRelayWriter('relay1')
+  await markRelaySyncComplete('relay1')
+
+  const profiles = await getAllRelayProfiles()
+  t.ok(profiles[0].isWriter)
+  t.ok(profiles[0].initialSyncComplete)
+
   await fs.rm(tmp, { recursive: true, force: true })
 })
