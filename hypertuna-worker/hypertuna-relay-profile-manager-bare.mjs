@@ -100,6 +100,14 @@ function ensureProfileSchema(profile) {
         profile.isOpen = false;
     }
 
+    // Ensure writer and sync flags exist
+    if (profile.isWriter === undefined) {
+        profile.isWriter = false;
+    }
+    if (profile.initialSyncComplete === undefined) {
+        profile.initialSyncComplete = false;
+    }
+
     return profile;
 }
 
@@ -681,6 +689,48 @@ export async function updateRelayMemberSets(identifier, adds = [], removes = [])
         return profile;
     } catch (error) {
         console.error(`[ProfileManager] Error updating member sets for ${identifier}:`, error);
+        return null;
+    }
+}
+
+export async function markRelayWriter(identifier) {
+    try {
+        const profile = await withProfileLock(async () => {
+            let p = await getRelayProfileByKeyUnlocked(identifier);
+            if (!p) {
+                p = await getRelayProfileByPublicIdentifierUnlocked(identifier);
+            }
+            if (!p) return null;
+            p.isWriter = true;
+            p.updated_at = new Date().toISOString();
+            const saved = await _saveRelayProfile(p);
+            return saved ? p : null;
+        });
+
+        return profile;
+    } catch (error) {
+        console.error(`[ProfileManager] Error marking writer for ${identifier}:`, error);
+        return null;
+    }
+}
+
+export async function markRelaySyncComplete(identifier) {
+    try {
+        const profile = await withProfileLock(async () => {
+            let p = await getRelayProfileByKeyUnlocked(identifier);
+            if (!p) {
+                p = await getRelayProfileByPublicIdentifierUnlocked(identifier);
+            }
+            if (!p) return null;
+            p.initialSyncComplete = true;
+            p.updated_at = new Date().toISOString();
+            const saved = await _saveRelayProfile(p);
+            return saved ? p : null;
+        });
+
+        return profile;
+    } catch (error) {
+        console.error(`[ProfileManager] Error marking sync complete for ${identifier}:`, error);
         return null;
     }
 }
