@@ -10,6 +10,11 @@ import Protomux from 'protomux';
 import { nobleSecp256k1 } from './crypto-libraries.js';
 import { NostrUtils } from './nostr-utils.js';
 import { setTimeout } from 'bare-timers';
+import {
+  getRelayProfileByKey,
+  markRelayWriter,
+  markRelaySyncComplete
+} from './hypertuna-relay-profile-manager-bare.mjs';
 
 // File locking utility to handle concurrent access
 const fileLocks = new Map();
@@ -105,10 +110,14 @@ export class RelayManager {
       this.relay = null;
       this.swarm = null;
       this.peers = new Map(); // Track connected peers
+      this.profile = null;
+      this.reconnectInProgress = false;
     }
   
-    async initialize() {
-      console.log('Initializing relay with bootstrap:', this.bootstrap);
+  async initialize() {
+    console.log('Initializing relay with bootstrap:', this.bootstrap);
+
+    this.reconnectInProgress = false;
   
       try {
         // Acquire lock for the storage directory
@@ -137,6 +146,27 @@ export class RelayManager {
         this.relay.on('error', console.error);
 
         await this.relay.update();
+
+        const relayKey = this.bootstrap || b4a.toString(this.relay.key, 'hex');
+        this.profile = await getRelayProfileByKey(relayKey);
+
+        this.relay.on('writable', async () => {
+          if (!this.profile || this.reconnectInProgress) return;
+
+          if (!this.profile.isWriter) {
+            await markRelayWriter(relayKey);
+            this.profile.isWriter = true;
+          }
+
+          if (!this.profile.initialSyncComplete) {
+            this.reconnectInProgress = true;
+            await this.close();
+            await this.initialize();
+            await markRelaySyncComplete(relayKey);
+            this.profile.initialSyncComplete = true;
+            this.reconnectInProgress = false;
+          }
+        });
 
         this.relay.view.core.on('append', async () => {
           if (this.relay.view.version === 1) return;
