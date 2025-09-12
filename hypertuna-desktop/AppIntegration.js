@@ -1149,7 +1149,13 @@ App.syncHypertunaConfigToFile = async function() {
 
             const memberInviteBtn = document.getElementById('btn-member-invite');
             if (memberInviteBtn) memberInviteBtn.disabled = !(isMember && group.isOpen);
-            
+
+            const editFileSharingCheckbox = document.getElementById('edit-group-file-sharing');
+            if (editFileSharingCheckbox) {
+                editFileSharingCheckbox.checked = !!group.fileSharing;
+                editFileSharingCheckbox.disabled = true;
+            }
+
             // Update settings form
             const settingsForm = document.getElementById('group-settings-form');
             const noPermissionMsg = document.getElementById('group-settings-no-permission');
@@ -1549,6 +1555,8 @@ App.syncHypertunaConfigToFile = async function() {
         const about = document.getElementById('new-group-description').value.trim();
         const isPublic = document.getElementById('new-group-public').checked;
         const isOpen = document.getElementById('new-group-open').checked;
+        const fileSharingEl = document.getElementById('new-group-file-sharing');
+        const fileSharing = fileSharingEl ? fileSharingEl.checked : false;
         
         if (!name) {
             alert('Please enter a group name.');
@@ -1573,7 +1581,7 @@ App.syncHypertunaConfigToFile = async function() {
             if (window.createRelayInstance) {
                 try {
                     // Pass all necessary metadata to the worker for profile creation
-                    relayKey = await window.createRelayInstance(name, about, isPublic, isOpen);
+                    relayKey = await window.createRelayInstance(name, about, isPublic, isOpen, fileSharing);
                 } catch (err) {
                     console.error('Failed to create relay instance:', err);
                 }
@@ -1595,7 +1603,8 @@ App.syncHypertunaConfigToFile = async function() {
                 relayKey,
                 proxyServer,
                 npub,
-                relayKey?.relayUrl || null
+                relayKey?.relayUrl || null,
+                fileSharing
             );
 
             console.log(`Group created successfully with public ID: ${eventsCollection.groupId}`);
@@ -1661,10 +1670,12 @@ App.syncHypertunaConfigToFile = async function() {
         this.resetAuthModal();
 
         try {
+            const group = this.nostr.getGroupById(this.currentGroupId) || {};
+            const fileSharing = !!group.fileSharing;
             // The new global function will handle communication with the worker
             // and return a promise that resolves with the auth result.
             // The UI will be updated by messages from the worker.
-            const authResult = await window.joinRelayInstance(this.currentGroupId);
+            const authResult = await window.joinRelayInstance(this.currentGroupId, fileSharing);
 
             // The 'join-auth-success' message from the worker will have already
             // called App.showAuthSuccess. We can just log the successful outcome.
@@ -1753,7 +1764,6 @@ App.syncHypertunaConfigToFile = async function() {
         document.getElementById('btn-close-auth-modal').classList.remove('hidden');
         document.getElementById('btn-cancel-auth').classList.add('hidden');
         
-        // QRCode and mobile authorization have been removed, only show success message
     
         // IMPORTANT: Update the user's relay list with the FULL authenticated URL
         if (this.nostr && this.nostr.client) {
@@ -1822,7 +1832,6 @@ App.syncHypertunaConfigToFile = async function() {
             this.showJoinAuthModal();
         });
         
-
         
         // Click outside modal to close
         window.addEventListener('click', (e) => {
@@ -1849,11 +1858,13 @@ App.syncHypertunaConfigToFile = async function() {
         }
 
         try {
+            const group = this.nostr.getGroupById(this.currentGroupId) || {};
+            const fileSharing = !!group.fileSharing;
             // Build the join request event without publishing
             const event = await this.nostr.joinGroup(
                 this.currentGroupId,
                 inviteCode,
-                { publish: false }
+                { publish: false, fileSharing }
             );
 
             // Send the event to the gateway
@@ -1925,21 +1936,38 @@ App.syncHypertunaConfigToFile = async function() {
         if (!this.currentUser || !this.currentGroupId) return;
         
         const messageInput = document.getElementById('message-input');
+        const fileInput = document.getElementById('message-file');
         const sendButton = document.getElementById('btn-send-message');
         const messageText = messageInput.value.trim();
-        
-        if (!messageText) return;
+
+        const file = fileInput.files[0];
+        let filePath = '';
+        if (file) {
+            try {
+                filePath = Pear.media.getPathForFile(file);
+            } catch (e) {
+                console.error('Error getting file path:', e);
+            }
+        }
+
+        if (!messageText && !filePath) return;
         
         try {
             // Disable input and button while sending
             messageInput.disabled = true;
+            fileInput.disabled = true;
             sendButton.disabled = true;
             
-            await this.nostr.sendGroupMessage(this.currentGroupId, messageText);
+            await this.nostr.sendGroupMessage(
+                this.currentGroupId,
+                messageText,
+                filePath
+            );
             
-            // Clear input
+            // Clear inputs
             messageInput.value = '';
             messageInput.style.height = 'auto';
+            fileInput.value = '';
             
             // Reload messages
             this.loadGroupMessages();
@@ -1950,6 +1978,7 @@ App.syncHypertunaConfigToFile = async function() {
         } finally {
             // Re-enable input and button
             messageInput.disabled = false;
+            fileInput.disabled = false;
             sendButton.disabled = false;
             messageInput.focus();
         }

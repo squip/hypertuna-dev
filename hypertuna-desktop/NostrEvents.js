@@ -5,6 +5,7 @@
  */
 
 import { NostrUtils } from './NostrUtils.js';
+import { HypertunaUtils } from './HypertunaUtils.js';
 
 class NostrEvents {
     /**
@@ -127,8 +128,8 @@ class NostrEvents {
      * @param {string} privateKey - Private key for signing
      * @returns {Promise<Object>} - Signed event
      */
-    static async createTextNote(content, tags, privateKey) {
-        const eventTags = Array.isArray(tags) ? tags : [];
+    static async createTextNote(content, tags, privateKey, filePath = '') {
+        const eventTags = Array.isArray(tags) ? [...tags] : [];
         const urls = NostrUtils.extractUrls(content);
         for (const url of urls) {
             if (!eventTags.some(t => t[0] === 'r' && t[1] === url)) {
@@ -136,12 +137,44 @@ class NostrEvents {
             }
         }
 
-        return this.createEvent(
+        let fileId = null;
+        let fileDataHash = null;
+        let finalContent = content;
+        if (filePath) {
+            const { promises: fs } = await import('fs');
+            const fileBuffer = await fs.readFile(filePath);
+            fileDataHash = await NostrUtils.computeSha256(fileBuffer);
+            const extPart = filePath.split('.').pop();
+            const ext = extPart && extPart !== filePath ? `.${extPart}` : '';
+            fileId = `${fileDataHash}${ext}`;
+
+            let gatewayDomain;
+            try {
+                gatewayDomain = new URL(HypertunaUtils.DEFAULT_GATEWAY_URL).hostname;
+            } catch (e) {
+                gatewayDomain = HypertunaUtils.DEFAULT_GATEWAY_URL.replace(/^https?:\/\//, '');
+            }
+
+            const publicIdentifier = eventTags.find(t => t[0] === 'h')?.[1] || '';
+            const fileUrl = `https://${gatewayDomain}/drive/${publicIdentifier}/${fileId}`;
+            eventTags.push(['r', fileUrl, 'hypertuna:drive']);
+            eventTags.push(['i', 'hypertuna:drive']);
+
+            // Append the file URL to the content so media loads in the UI
+            if (finalContent && !/\s$/.test(finalContent)) {
+                finalContent += ' ';
+            }
+            finalContent += fileUrl;
+        }
+
+        const event = await this.createEvent(
             this.KIND_TEXT_NOTE,
-            content,
+            finalContent,
             eventTags,
             privateKey
         );
+
+        return { event, fileId, fileDataHash };
     }
     
     /**
@@ -152,7 +185,7 @@ class NostrEvents {
      * @param {string} privateKey - Private key for signing
      * @returns {Promise<Object>} - Signed event
      */
-    static async createGroupMessage(groupId, content, previousEvents, privateKey) {
+    static async createGroupMessage(groupId, content, previousEvents, privateKey, filePath = '') {
         console.log(`Creating group message for group ${groupId.substring(0, 8)}...`);
         console.log(`Message content length: ${content.length}`);
         
@@ -170,7 +203,7 @@ class NostrEvents {
             });
         }
         
-        return this.createTextNote(content, tags, privateKey);
+        return this.createTextNote(content, tags, privateKey, filePath);
     }
     
     /**
@@ -179,10 +212,11 @@ class NostrEvents {
      * @param {string} about - Group description
      * @param {boolean} isPublic - Whether group is public
      * @param {boolean} isOpen - Whether group is open (anyone can join)
+     * @param {boolean} fileSharing - Whether file sharing is enabled
      * @param {string} privateKey - Private key for signing
      * @returns {Promise<Object>} - Collection of events for group creation
      */
-    static async createGroupCreationEvent(name, about, isPublic, isOpen, privateKey, relayKey = null, proxyServer = '', npub) {
+    static async createGroupCreationEvent(name, about, isPublic, isOpen, fileSharing, privateKey, relayKey = null, proxyServer = '', npub) {
         // Import the utility
         const { PublicIdentifierUtils } = await import('./PublicIdentifierUtils.js');
         
@@ -216,6 +250,12 @@ class NostrEvents {
         } else {
             groupTags.push(['closed']);
         }
+
+        if (fileSharing) {
+            groupTags.push(['file-sharing-on']);
+        } else {
+            groupTags.push(['file-sharing-off']);
+        }
         
         // Create the kind 9007 group creation event
         const groupCreateEvent = await this.createEvent(
@@ -244,6 +284,12 @@ class NostrEvents {
             metadataTags.push(['open']);
         } else {
             metadataTags.push(['closed']);
+        }
+
+        if (fileSharing) {
+            metadataTags.push(['file-sharing-on']);
+        } else {
+            metadataTags.push(['file-sharing-off']);
         }
         
         const metadataEvent = await this.createEvent(
@@ -462,6 +508,12 @@ class NostrEvents {
             tags.push(['about', metadata.about]);
         }
 
+        if (metadata.fileSharing) {
+            tags.push(['file-sharing-on']);
+        } else {
+            tags.push(['file-sharing-off']);
+        }
+
         return this.createEvent(
             this.KIND_GROUP_INVITE_CREATE,
             'Creating invite code',
@@ -592,9 +644,17 @@ class NostrEvents {
         // Extract hypertunaId and check for identifier tag
         const hypertunaId = this._getTagValue(event, 'hypertuna');
         const hasIdentifierTag = event.tags.some(tag => tag[0] === 'i' && tag[1] === 'hypertuna:relay');
-        
+
+        // Determine file sharing status from tags
+        let fileSharing = false;
+        if (this._hasTag(event, 'file-sharing-on')) {
+            fileSharing = true;
+        } else if (this._hasTag(event, 'file-sharing-off')) {
+            fileSharing = false;
+        }
+
         console.log(`Parsing group metadata: id=${groupId}, hypertunaId=${hypertunaId}, hasIdentifierTag=${hasIdentifierTag}`);
-        
+
         return {
             id: groupId,
             name: this._getTagValue(event, 'name') || 'Unnamed Group',
@@ -605,7 +665,8 @@ class NostrEvents {
             relay: event.pubkey,
             event: event,
             hypertunaId: hypertunaId,
-            isHypertunaRelay: hasIdentifierTag
+            isHypertunaRelay: hasIdentifierTag,
+            fileSharing
         };
     }
     

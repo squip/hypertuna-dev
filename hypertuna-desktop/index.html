@@ -178,6 +178,7 @@
                                 <div class="message-input-container">
                                     <div class="message-input-wrapper">
                                         <textarea id="message-input" class="message-input" placeholder="Type a message..." rows="1"></textarea>
+                                        <input type="file" id="message-file" accept="*/*">
                                         <button id="btn-send-message" class="send-btn" aria-label="Send message">
                                             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                                 <line x1="22" y1="2" x2="11" y2="13"></line>
@@ -243,6 +244,13 @@
                                                 <span class="toggle-text">Open to Join</span>
                                             </label>
                                         </div>
+                                        <div class="toggle-item">
+                                            <label class="toggle-label">
+                                                <input type="checkbox" id="edit-group-file-sharing" class="toggle-checkbox" disabled>
+                                                <span class="toggle-switch"></span>
+                                                <span class="toggle-text">Enable File Sharing</span>
+                                            </label>
+                                        </div>
                                     </div>
                                     <div class="settings-actions">
                                         <button id="btn-save-group-settings" class="btn btn-primary">Save Changes</button>
@@ -287,24 +295,31 @@
                             <label for="new-group-description">Description</label>
                             <textarea id="new-group-description" class="form-textarea" rows="4" placeholder="What's this relay about?"></textarea>
                         </div>
-                        <div class="settings-toggles">
-                            <div class="toggle-item">
-                                <label class="toggle-label">
-                                    <input type="checkbox" id="new-group-public" class="toggle-checkbox" checked>
+                            <div class="settings-toggles">
+                                <div class="toggle-item">
+                                    <label class="toggle-label">
+                                        <input type="checkbox" id="new-group-public" class="toggle-checkbox" checked>
                                     <span class="toggle-switch"></span>
                                     <span class="toggle-text">Public Relay</span>
                                 </label>
                                 <p class="toggle-description">Anyone can discover this relay</p>
                             </div>
-                            <div class="toggle-item">
-                                <label class="toggle-label">
-                                    <input type="checkbox" id="new-group-open" class="toggle-checkbox" checked>
-                                    <span class="toggle-switch"></span>
-                                    <span class="toggle-text">Open to Join</span>
-                                </label>
-                                <p class="toggle-description">No invite code required</p>
+                                <div class="toggle-item">
+                                    <label class="toggle-label">
+                                        <input type="checkbox" id="new-group-open" class="toggle-checkbox" checked>
+                                        <span class="toggle-switch"></span>
+                                        <span class="toggle-text">Open to Join</span>
+                                    </label>
+                                    <p class="toggle-description">No invite code required</p>
+                                </div>
+                                <div class="toggle-item">
+                                    <label class="toggle-label">
+                                        <input type="checkbox" id="new-group-file-sharing" class="toggle-checkbox">
+                                        <span class="toggle-switch"></span>
+                                        <span class="toggle-text">Enable File Sharing</span>
+                                    </label>
+                                </div>
                             </div>
-                        </div>
                         <button id="btn-create-group" type="button" class="btn btn-primary btn-block">Create Relay</button>
                     </form>
                 </div>
@@ -636,7 +651,6 @@
                     <h4>Authentication Successful!</h4>
                     <p>You now have write access to this relay.</p>
                     
-
                 </div>
                 
                 <!-- Error Section (hidden initially) -->
@@ -1393,7 +1407,7 @@
               try {
                   const invite = await this.nostr.client.acceptInvite(inviteId);
                   if (window.joinRelayFromInvite) {
-                      await window.joinRelayFromInvite(invite.relayKey, invite.name, invite.about, invite.publicIdentifier || invite.groupId, invite.token);
+                      await window.joinRelayFromInvite(invite.relayKey, invite.name, invite.about, invite.publicIdentifier || invite.groupId, invite.token, invite.fileSharing);
                   } else if (window.joinRelayInstance) {
                       await window.joinRelayInstance(invite.relayKey);
                   }
@@ -1483,6 +1497,24 @@
       document.addEventListener('DOMContentLoaded', async () => {
         console.log('[Index] DOMContentLoaded event fired at:', new Date().toISOString());
 
+        // Pre-load QRCode library early
+        if (!window.QRCode) {
+            console.log('[Index] Pre-loading QRCode library...');
+            const script = document.createElement('script');
+            script.src = 'https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js';
+            script.async = true;
+            
+            script.onload = () => {
+                console.log('[Index] QRCode library pre-loaded successfully');
+            };
+            
+            script.onerror = () => {
+                console.error('[Index] Failed to pre-load QRCode library');
+            };
+            
+            document.head.appendChild(script);
+        }
+        
         // Integrate with real nostr relays FIRST, so App.init() uses the real methods
         integrateNostrRelays(App);
 

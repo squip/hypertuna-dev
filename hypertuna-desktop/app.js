@@ -48,6 +48,7 @@ let relayList = null
 let clearLogsButton = null
 let exportLogsButton = null
 let joinRelayButton = null
+let newGroupFileSharing = null
 
 // Log functions
 function addLog(message, type = 'info') {
@@ -806,9 +807,10 @@ async function createRelay() {
     
     // Send create relay command to worker
     if (workerPipe) {
+      const fileSharing = newGroupFileSharing ? newGroupFileSharing.checked : false
       workerPipe.write(JSON.stringify({
         type: 'create-relay',
-        data: { name, description }
+        data: { name, description, fileSharing }
       }) + '\n')
     }
     
@@ -822,7 +824,7 @@ async function createRelay() {
 }
 
 // Create a relay instance with provided parameters and return relay key
-async function createRelayInstance(name, description, isPublic, isOpen) {
+async function createRelayInstance(name, description, isPublic, isOpen, fileSharing = false) {
   return new Promise((resolve, reject) => {
     if (!workerPipe) {
       addLog('Worker not running', 'error')
@@ -838,13 +840,13 @@ async function createRelayInstance(name, description, isPublic, isOpen) {
 
     workerPipe.write(JSON.stringify({
       type: 'create-relay',
-      data: { name, description, isPublic, isOpen }
+      data: { name, description, isPublic, isOpen, fileSharing }
     }) + '\n')
   })
 }
 
 // Join a relay instance via the worker-driven authentication flow
-async function joinRelayInstance(publicIdentifier) {
+async function joinRelayInstance(publicIdentifier, fileSharing = false) {
   return new Promise((resolve, reject) => {
     if (!workerPipe) {
       addLog('Worker not running', 'error');
@@ -862,15 +864,17 @@ async function joinRelayInstance(publicIdentifier) {
     addLog(`Starting join flow for relay: ${publicIdentifier}`, 'status');
     
     // Send message to worker to start the process
-    workerPipe.write(JSON.stringify({
-      type: 'start-join-flow',
-      data: { publicIdentifier }
-    }) + '\n');
+    workerPipe.write(
+      JSON.stringify({
+        type: 'start-join-flow',
+        data: { publicIdentifier, fileSharing }
+      }) + '\n'
+    );
   });
 }
 
 // Join a relay using data from an invite event
-async function joinRelayFromInvite(relayKey, name = '', description = '', publicIdentifier = '', authToken = '') {
+async function joinRelayFromInvite(relayKey, name = '', description = '', publicIdentifier = '', authToken = '', fileSharing = false) {
   return new Promise((resolve, reject) => {
     if (!workerPipe) {
       addLog('Worker not running', 'error');
@@ -881,7 +885,7 @@ async function joinRelayFromInvite(relayKey, name = '', description = '', public
       workerPipe.write(
         JSON.stringify({
           type: 'join-relay',
-          data: { relayKey, name, description, publicIdentifier, authToken }
+          data: { relayKey, name, description, publicIdentifier, authToken, fileSharing }
         }) + '\n'
       );
       resolve();
@@ -923,9 +927,10 @@ async function joinRelay() {
     
     // Send join relay command to worker
     if (workerPipe) {
+      const fileSharing = false
       workerPipe.write(JSON.stringify({
         type: 'join-relay',
-        data: { relayKey, name, description }
+        data: { relayKey, name, description, fileSharing }
       }) + '\n')
     }
     
@@ -1019,6 +1024,15 @@ function setupEventListeners() {
     joinRelayButton.addEventListener('click', joinRelay)
     console.log('[App] Join relay button listener added')
   }
+
+  if (newGroupFileSharing) {
+    newGroupFileSharing.addEventListener('change', (e) => {
+      if (e.target.checked) {
+        alert('Authorized members of this relay will be able to upload file attachments to their nostr events. Published file attachments will automatically sync across other relay member peers when connected. This setting cannot be disabled once the relay is created.')
+      }
+    })
+    console.log('[App] New group file sharing listener added')
+  }
   
   // Input field event listeners
   const relayNameInput = document.getElementById('relay-name')
@@ -1077,6 +1091,7 @@ function initializeDOMElements() {
   clearLogsButton = document.getElementById('clear-logs')
   exportLogsButton = document.getElementById('export-logs')
   joinRelayButton = document.getElementById('join-relay')
+  newGroupFileSharing = document.getElementById('new-group-file-sharing')
   
   // Log element status
   const elements = {
@@ -1089,7 +1104,8 @@ function initializeDOMElements() {
     relayList,
     clearLogsButton,
     exportLogsButton,
-    joinRelayButton
+    joinRelayButton,
+    newGroupFileSharing
   }
   
   console.log('[App] Element initialization results:');

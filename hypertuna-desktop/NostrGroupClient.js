@@ -1547,7 +1547,7 @@ async fetchMultipleProfiles(pubkeys) {
             return;
         }
         
-        // Update group data
+        // Update group data including file sharing flag
         this.groups.set(publicIdentifier, groupData);
         
         // Store hypertuna mapping if available
@@ -1659,7 +1659,8 @@ async fetchMultipleProfiles(pubkeys) {
                 relayKey: data.relayKey,
                 isPublic: data.isPublic !== false,
                 name: NostrEvents._getTagValue(event, 'name') || '',
-                about: NostrEvents._getTagValue(event, 'about') || ''
+                about: NostrEvents._getTagValue(event, 'about') || '',
+                fileSharing: NostrEvents._hasTag(event, 'file-sharing-on')
             };
 
             this.invites.set(event.id, invite);
@@ -1821,7 +1822,6 @@ async fetchMultipleProfiles(pubkeys) {
         if (!groupId) return;
 
         const addMap = this.kind9000Sets.get(groupId) || new Map();
-        // Tag format: ['p', pubkey, role, token]
         event.tags.forEach(tag => {
             if (tag[0] === 'p' && tag[1]) {
                 const pubkey = tag[1];
@@ -2284,8 +2284,7 @@ async fetchMultipleProfiles(pubkeys) {
             addEvents.forEach(ev => {
                 ev.tags.forEach(tag => {
                     if (tag[0] === 'p' && tag[1]) {
-                        const role = tag[2];
-                        addMap.set(tag[1], { ts: ev.created_at, roles: [role] });
+                        addMap.set(tag[1], { ts: ev.created_at, roles: tag.slice(2) });
                     }
                 });
             });
@@ -2321,6 +2320,7 @@ async fetchMultipleProfiles(pubkeys) {
      * @param {boolean} groupData.isPublic - Whether the group is public
      * @param {boolean} groupData.isOpen - Whether the group is open to join
      * @param {string} [groupData.authenticatedRelayUrl] - Tokenized relay URL returned by the worker
+     * @param {boolean} [groupData.fileSharing] - Whether file sharing is enabled
      * @returns {Promise<Object>} - Collection of created events
      */
     async createGroup(groupData) {
@@ -2342,7 +2342,8 @@ async fetchMultipleProfiles(pubkeys) {
             isOpen: Boolean(groupData.isOpen),
             identifier: groupData.identifier || null,
             proxyServer: groupData.proxyServer || '',
-            authenticatedRelayUrl: groupData.authenticatedRelayUrl || null
+            authenticatedRelayUrl: groupData.authenticatedRelayUrl || null,
+            fileSharing: Boolean(groupData.fileSharing)
         };
         
         console.log('Creating group with normalized data:', normalizedData);
@@ -2353,6 +2354,7 @@ async fetchMultipleProfiles(pubkeys) {
             normalizedData.about,
             normalizedData.isPublic,
             normalizedData.isOpen,
+            normalizedData.fileSharing,
             this.user.privateKey,
             normalizedData.identifier,
             normalizedData.proxyServer,
@@ -2443,6 +2445,14 @@ async fetchMultipleProfiles(pubkeys) {
             // Continue even if this fails
         }
         
+        // Immediately store the group metadata locally
+        const parsedGroup = NostrEvents.parseGroupMetadata(metadataEvent);
+        if (parsedGroup) {
+            this.groups.set(groupId, parsedGroup);
+            this.hypertunaGroups.set(hypertunaId, groupId);
+            this.groupHypertunaIds.set(groupId, hypertunaId);
+        }
+
         // Subscribe to this group
         this.subscribeToGroup(groupId);
 
@@ -2473,6 +2483,9 @@ async fetchMultipleProfiles(pubkeys) {
      * Join a group with authentication flow
      * @param {string} groupId - Group ID
      * @param {string} inviteCode - Optional invite code for closed groups
+     * @param {Object} [options] - Additional join options
+     * @param {boolean} [options.publish] - Whether to publish the join request
+     * @param {boolean} [options.fileSharing] - Enable file sharing for this join
      * @returns {Promise<Object>} - Join request event
      */
     async joinGroup(publicIdentifier, inviteCode = null, options = {}) {
@@ -2599,7 +2612,7 @@ async fetchMultipleProfiles(pubkeys) {
      * @param {string} content - Message content
      * @returns {Promise<Object>} - Message event
      */
-    async sendGroupMessage(groupId, content) {
+    async sendGroupMessage(groupId, content, filePath = '') {
         if (!this.user || !this.user.privateKey) {
             throw new Error('User not logged in');
         }
@@ -2617,11 +2630,12 @@ async fetchMultipleProfiles(pubkeys) {
         );
         
         // Create message event
-        const event = await NostrEvents.createGroupMessage(
+        const { event, fileId, fileDataHash } = await NostrEvents.createGroupMessage(
             groupId,
             content,
             previousRefs,
-            this.user.privateKey
+            this.user.privateKey,
+            filePath
         );
         
         // Publish only to the group's relay
@@ -2632,6 +2646,20 @@ async fetchMultipleProfiles(pubkeys) {
             throw new Error('Group relay not connected');
         }
         
+        // If a file was attached, send upload instruction to worker
+        if (fileId && window.workerPipe) {
+            const relayKey = this.publicToInternalMap.get(groupId) || null;
+            const msg = {
+                type: 'upload-file',
+                data: { relayKey, filePath, fileId, fileHash: fileDataHash }
+            };
+            try {
+                window.workerPipe.write(JSON.stringify(msg) + '\n');
+            } catch (e) {
+                console.error('Failed to send upload-file to worker', e);
+            }
+        }
+
         return event;
     }
     
@@ -3006,6 +3034,11 @@ async fetchMultipleProfiles(pubkeys) {
             ['name', group.name || ''],
             ['about', group.about || '']
         ];
+        if (group.fileSharing) {
+            tags.push(['file-sharing-on']);
+        } else {
+            tags.push(['file-sharing-off']);
+        }
 
         const event = await NostrEvents.createEvent(
             NostrEvents.KIND_GROUP_INVITE_CREATE,
@@ -3086,6 +3119,11 @@ async fetchMultipleProfiles(pubkeys) {
                 ['name', group.name || ''],
                 ['about', group.about || '']
             ];
+            if (group.fileSharing) {
+                tags.push(['file-sharing-on']);
+            } else {
+                tags.push(['file-sharing-off']);
+            }
 
             const inviteEvent = await NostrEvents.createEvent(
                 NostrEvents.KIND_GROUP_INVITE_CREATE,
