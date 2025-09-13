@@ -1,6 +1,14 @@
 // hypertuna-worker/hyperdrive-manager.mjs
-// Placeholder module for Hyperdrive integration
-// TODO: Replace with real implementation using Hyperdrive and Corestore APIs.
+
+import Corestore from 'corestore'
+import Hyperdrive from 'hyperdrive'
+import crypto from 'bare-crypto'
+
+let store = null
+let drive = null
+
+export const relayPath = (relayKey) => `/${relayKey}`
+export const relayFilePath = (relayKey, fileHash) => `${relayPath(relayKey)}/${fileHash}`
 
 /**
  * Initialize a Hyperdrive instance for this worker.
@@ -8,8 +16,19 @@
  * @returns {Promise<void>}
  */
 export async function initializeHyperdrive(config) {
-  // TODO: create Corestore at config.storage and open a Hyperdrive.
-  // TODO: persist the drive.key to config.driveKey so it can be shared with peers.
+  store = new Corestore(config.storage)
+  drive = new Hyperdrive(store)
+  await drive.ready()
+  config.driveKey = drive.key.toString('hex')
+
+  if (Array.isArray(config.relays)) {
+    for (const { relayKey } of config.relays) {
+      if (!relayKey) continue
+      try {
+        await drive.mkdir(relayPath(relayKey))
+      } catch (_) {}
+    }
+  }
 }
 
 /**
@@ -20,7 +39,11 @@ export async function initializeHyperdrive(config) {
  * @param {object} metadata - Additional metadata (e.g. mime type).
  */
 export async function storeFile(relayKey, fileHash, data, metadata) {
-  // TODO: write file and metadata to Hyperdrive using drive.put.
+  const hash = crypto.createHash('sha256').update(data).digest('hex')
+  if (hash !== fileHash) {
+    throw new Error('Hash mismatch')
+  }
+  await drive.put(relayFilePath(relayKey, fileHash), data, { metadata })
 }
 
 /**
@@ -30,7 +53,7 @@ export async function storeFile(relayKey, fileHash, data, metadata) {
  * @returns {Promise<Uint8Array|null>}
  */
 export async function getFile(relayKey, fileHash) {
-  // TODO: read file from Hyperdrive using drive.get.
-  return null;
+  const entry = await drive.get(relayFilePath(relayKey, fileHash))
+  return entry ? entry.value : null
 }
 
