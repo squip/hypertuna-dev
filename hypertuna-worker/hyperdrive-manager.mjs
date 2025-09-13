@@ -43,7 +43,11 @@ export async function storeFile(relayKey, fileHash, data, metadata) {
   if (hash !== fileHash) {
     throw new Error('Hash mismatch')
   }
-  await drive.put(relayFilePath(relayKey, fileHash), data, { metadata })
+
+  const path = relayFilePath(relayKey, fileHash)
+  if (await drive.exists(path)) return
+
+  await drive.put(path, data, { metadata })
 }
 
 /**
