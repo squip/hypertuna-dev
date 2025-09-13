@@ -8,6 +8,7 @@
 import WebSocketRelayManager from './WebSocketRelayManager.js';
 import NostrEvents from './NostrEvents.js';
 import { NostrUtils } from './NostrUtils.js';
+import { prepareFileAttachment } from './FileAttachmentHelper.js';
 
 class NostrGroupClient {
     constructor(debugMode = true) {
@@ -2629,13 +2630,25 @@ async fetchMultipleProfiles(pubkeys) {
             this.user.pubkey
         );
         
+        // Prepare file attachment if provided
+        const relayKey = this.publicToInternalMap.get(groupId) || null;
+        let attachment = null;
+        if (filePath) {
+            try {
+                attachment = await prepareFileAttachment(filePath, relayKey);
+            } catch (err) {
+                console.error('Failed to prepare file attachment:', err);
+            }
+        }
+
         // Create message event
-        const { event, fileId, fileDataHash } = await NostrEvents.createGroupMessage(
+        const { event } = await NostrEvents.createGroupMessage(
             groupId,
             content,
             previousRefs,
             this.user.privateKey,
-            filePath
+            attachment,
+            relayKey
         );
         
         // Publish only to the group's relay
@@ -2646,20 +2659,6 @@ async fetchMultipleProfiles(pubkeys) {
             throw new Error('Group relay not connected');
         }
         
-        // If a file was attached, send upload instruction to worker
-        if (fileId && window.workerPipe) {
-            const relayKey = this.publicToInternalMap.get(groupId) || null;
-            const msg = {
-                type: 'upload-file',
-                data: { relayKey, filePath, fileId, fileHash: fileDataHash }
-            };
-            try {
-                window.workerPipe.write(JSON.stringify(msg) + '\n');
-            } catch (e) {
-                console.error('Failed to send upload-file to worker', e);
-            }
-        }
-
         return event;
     }
     
