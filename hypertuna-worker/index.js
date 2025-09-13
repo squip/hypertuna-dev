@@ -38,6 +38,7 @@ const relayMembers = new Map()
 const relayMemberAdds = new Map()
 const relayMemberRemoves = new Map()
 let config = null
+let configPath = null
 
 // Store configuration received from the parent process
 let configReceived = false
@@ -64,11 +65,11 @@ function getUserKey(config) {
   }
   
 // Load or create configuration
-async function loadOrCreateConfig() {
-  const configDir = Pear.config.storage || __dirname
+async function loadOrCreateConfig(customDir = null) {
+  const configDir = customDir || Pear.config.storage || __dirname
   await fs.mkdir(configDir, { recursive: true })
 
-  const configPath = join(configDir, 'relay-config.json')
+  configPath = join(configDir, 'relay-config.json')
 
   const defaultConfig = {
     port: 1945,
@@ -77,13 +78,14 @@ async function loadOrCreateConfig() {
     registerWithGateway: true,
     registerInterval: 300000,
     relays: [],
-    driveKey: null // TODO: populate with Hyperdrive public key
+    driveKey: null
   }
 
   try {
     const configData = await fs.readFile(configPath, 'utf8')
     console.log('[Worker] Loaded existing config from:', configPath)
-    return JSON.parse(configData)
+    const loadedConfig = JSON.parse(configData)
+    return { ...defaultConfig, ...loadedConfig }
   } catch (err) {
     console.log('[Worker] Creating new config at:', configPath)
     defaultConfig.storage = configDir
@@ -617,13 +619,25 @@ async function main() {
 
         await loadRelayMembers();
         await loadRelayKeyMappings();
-        // TODO: initialize Hyperdrive for per-relay file storage and replication
-        await initializeHyperdrive(config);
       }
-    
+
+    global.userConfig = global.userConfig || { storage: config.storage };
+
+    const hadDriveKey = !!config.driveKey;
+    const hyperdriveConfig = { ...config, storage: global.userConfig.storage };
+    await initializeHyperdrive(hyperdriveConfig);
+    config.driveKey = hyperdriveConfig.driveKey;
+    if (!hadDriveKey && config.driveKey) {
+      try {
+        await fs.writeFile(configPath, JSON.stringify(config, null, 2));
+      } catch (err) {
+        console.error('[Worker] Failed to persist driveKey:', err);
+      }
+    }
+
     if (workerPipe) {
-      sendMessage({ 
-        type: 'status', 
+      sendMessage({
+        type: 'status',
         message: 'Loading relay server...',
         config: {
           port: config.port,
