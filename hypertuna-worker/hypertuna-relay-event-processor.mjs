@@ -176,12 +176,32 @@ export default class NostrRelay extends Autobee {
                 await b.put(b4a.from(createdAtKey, 'utf8'), event.id);
 
                 // Store tag references
+                let fileKeyHash = null
+                let driveKey = null
+
                 for (const tag of event.tags) {
                     if (tag.length >= 2 && /^[a-zA-Z]$/.test(tag[0])) {
                         const tagKey = NostrRelay.constructIndexKeyTagKey(event, tag[0], tag[1]);
                         logWithTimestamp(`NostrRelay.apply: Storing tag index for event ${event.id} under key: ${tagKey}`);
                         await b.put(b4a.from(tagKey, 'utf8'), event.id);
                     }
+
+                    if (tag[0] === 'filekey' && tag[1]) fileKeyHash = tag[1]
+                    if (tag[0] === 'drivekey' && tag[1]) driveKey = tag[1]
+                }
+
+                if (fileKeyHash && driveKey) {
+                    const fileKey = NostrRelay.constructIndexKeyFilekey(event, fileKeyHash, driveKey)
+                    logWithTimestamp(`NostrRelay.apply: Storing filekey index for event ${event.id} under key: ${fileKey}`)
+                    const fileKeyValue = {
+                        filekey: fileKeyHash,
+                        drivekey: driveKey,
+                        pubkey: event.pubkey
+                    }
+                    await b.put(
+                        b4a.from(fileKey, 'utf8'),
+                        b4a.from(JSON.stringify(fileKeyValue), 'utf8')
+                    )
                 }
             } else {
                 logWithTimestamp(`NostrRelay.apply: Invalid event, not storing. ID: ${event.id}`);
@@ -216,6 +236,10 @@ export default class NostrRelay extends Autobee {
 
   static constructIndexKeyPubkey(event) {
     return `pubkey:${event.pubkey}:created_at:${NostrRelay.padTimestamp(event.created_at)}:id:${event.id}`;
+  }
+
+  static constructIndexKeyFilekey(event, filekey, driveKey) {
+    return `filekey:${filekey}:drivekey:${driveKey}:pubkey:${event.pubkey}`;
   }
 
   // ENHANCEMENT: logic is required to extract element 1 from each tag array and pass to 
@@ -537,6 +561,79 @@ export default class NostrRelay extends Autobee {
     const gte = b4a.from(`pubkey:${author}:created_at:${this.padTimestamp(since)}:id:`, 'utf8');
     const lte = b4a.from(`pubkey:${author}:created_at:${this.padTimestamp(until)}:id:#`, 'utf8');
     return { gte, lte };
+  }
+
+  static constructFilekeyRangeQuery({ filekey, drivekey, pubkey } = {}) {
+    if (filekey && drivekey && pubkey) {
+      return {
+        key: b4a.from(
+          `filekey:${filekey}:drivekey:${drivekey}:pubkey:${pubkey}`,
+          'utf8'
+        )
+      };
+    }
+
+    if (filekey && drivekey) {
+      const gte = b4a.from(
+        `filekey:${filekey}:drivekey:${drivekey}:pubkey:`,
+        'utf8'
+      );
+      const lte = b4a.from(
+        `filekey:${filekey}:drivekey:${drivekey}:pubkey:#`,
+        'utf8'
+      );
+      return { gte, lte };
+    }
+
+    if (filekey) {
+      const gte = b4a.from(`filekey:${filekey}:`, 'utf8');
+      const lte = b4a.from(`filekey:${filekey}:#`, 'utf8');
+      return { gte, lte };
+    }
+
+    const gte = b4a.from('filekey:', 'utf8');
+    const lte = b4a.from('filekey:#', 'utf8');
+    return { gte, lte };
+  }
+
+  async executeFilekeyQuery(query) {
+    if (query.key) {
+      const node = await this.view.get(query.key);
+      if (node && node.value) {
+        try {
+          return [JSON.parse(node.value.toString())];
+        } catch (err) {
+          logWithTimestamp('executeFilekeyQuery: Error parsing entry', err);
+          return [];
+        }
+      }
+      return [];
+    }
+
+    const results = [];
+    for await (const entry of this.view.createReadStream(query)) {
+      if (!entry || !entry.value) continue;
+      try {
+        results.push(JSON.parse(entry.value.toString()));
+      } catch (err) {
+        logWithTimestamp('executeFilekeyQuery: Error parsing entry', err);
+      }
+    }
+    return results;
+  }
+
+  async queryFilekeyIndex(options = {}) {
+    const query = this.constructor.constructFilekeyRangeQuery(options);
+    const entries = await this.executeFilekeyQuery(query);
+    const filekeyMap = new Map();
+
+    for (const { filekey, drivekey, pubkey } of entries) {
+      if (!filekeyMap.has(filekey)) filekeyMap.set(filekey, new Map());
+      const drives = filekeyMap.get(filekey);
+      drives.set(drivekey, pubkey);
+    }
+
+    return filekeyMap;
   }
   
   constructTagQueries(filter, since, until) {
