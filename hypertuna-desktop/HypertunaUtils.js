@@ -308,23 +308,26 @@ export class HypertunaUtils {
      * @param {Object} config - Hypertuna configuration
      */
     static async saveConfig(config) {
+        const existing = await this.loadConfig();
+        const merged = { ...(existing || {}), ...config };
+
         ConfigLogger.log('SAVE', {
             module: 'HypertunaUtils',
             method: 'saveConfig',
             key: this.STORAGE_KEY,
-            dataSize: ConfigLogger.getDataSize(config)
+            dataSize: ConfigLogger.getDataSize(merged)
         });
-        
+
         // Save to localStorage
         try {
-            localStorage.setItem(this.STORAGE_KEY, JSON.stringify(config));
+            localStorage.setItem(this.STORAGE_KEY, JSON.stringify(merged));
             ConfigLogger.log('SAVE', {
                 module: 'HypertunaUtils',
                 method: 'saveConfig',
                 filepath: 'localStorage',
                 key: this.STORAGE_KEY,
                 success: true,
-                dataSize: ConfigLogger.getDataSize(config)
+                dataSize: ConfigLogger.getDataSize(merged)
             });
         } catch (e) {
             ConfigLogger.log('SAVE', {
@@ -342,25 +345,25 @@ export class HypertunaUtils {
             try {
                 const { promises: fs } = await import('fs');
                 const { join } = await import('path');
-                
+
                 await fs.mkdir(Pear.config.storage, { recursive: true });
                 const filePath = join(Pear.config.storage, 'relay-config.json');
-                
+
                 ConfigLogger.log('SAVE', {
                     module: 'HypertunaUtils',
                     method: 'saveConfig',
                     filepath: filePath,
-                    dataSize: ConfigLogger.getDataSize(config)
+                    dataSize: ConfigLogger.getDataSize(merged)
                 });
-                
-                await fs.writeFile(filePath, JSON.stringify(config, null, 2));
-                
+
+                await fs.writeFile(filePath, JSON.stringify(merged, null, 2));
+
                 ConfigLogger.log('SAVE', {
                     module: 'HypertunaUtils',
                     method: 'saveConfig',
                     filepath: filePath,
                     success: true,
-                    dataSize: ConfigLogger.getDataSize(config)
+                    dataSize: ConfigLogger.getDataSize(merged)
                 });
             } catch (e) {
                 ConfigLogger.log('SAVE', {
@@ -486,8 +489,12 @@ export class HypertunaUtils {
                     config.nostr_nsec = NostrUtils.hexToNsec(config.nostr_nsec_hex);
                 }
             }
+
+            if (typeof config.driveKey === 'undefined') {
+                config.driveKey = null;
+            }
         }
-        
+
         return config;
     }
     

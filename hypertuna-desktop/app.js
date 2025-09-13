@@ -7,6 +7,7 @@
 import { promises as fs } from 'fs'
 import { join } from 'path'
 import { ConfigLogger } from './ConfigLogger.js';
+import { HypertunaUtils } from './HypertunaUtils.js';
 
 console.log('[App] app.js loading started at:', new Date().toISOString());
 
@@ -416,9 +417,9 @@ async function stopWorker() {
 }
 
 // Handle messages from worker
-function handleWorkerMessage(message) {
+async function handleWorkerMessage(message) {
   console.log('[App] Received worker message:', message)
-  
+
   switch (message.type) {
     case 'status':
         addLog(`Worker: ${message.message}`, 'status')
@@ -446,7 +447,26 @@ function handleWorkerMessage(message) {
                 updateWorkerStatus('running', 'Running')
         }
         break
-      
+
+    case 'drive-key':
+      try {
+        const cfg = (await HypertunaUtils.loadConfig()) || {}
+        cfg.driveKey = message.driveKey
+        await HypertunaUtils.saveConfig(cfg)
+        if (window.App && window.App.currentUser && window.App.currentUser.hypertunaConfig) {
+          window.App.currentUser.hypertunaConfig.driveKey = message.driveKey
+          if (typeof window.App.saveUserToLocalStorage === 'function') {
+            window.App.saveUserToLocalStorage()
+          }
+          if (typeof window.App.updateHypertunaDisplay === 'function') {
+            window.App.updateHypertunaDisplay()
+          }
+        }
+      } catch (e) {
+        console.error('[App] Failed to persist drive key', e)
+      }
+      break
+
     case 'heartbeat':
       // Update last heartbeat time
       updateWorkerStatus('running', `Running (${new Date(message.timestamp).toLocaleTimeString()})`)

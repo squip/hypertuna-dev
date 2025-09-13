@@ -85,6 +85,10 @@ async function loadOrCreateConfig(customDir = null) {
     const configData = await fs.readFile(configPath, 'utf8')
     console.log('[Worker] Loaded existing config from:', configPath)
     const loadedConfig = JSON.parse(configData)
+    if (!('driveKey' in loadedConfig)) {
+      loadedConfig.driveKey = null
+      await fs.writeFile(configPath, JSON.stringify(loadedConfig, null, 2))
+    }
     return { ...defaultConfig, ...loadedConfig }
   } catch (err) {
     console.log('[Worker] Creating new config at:', configPath)
@@ -633,6 +637,10 @@ async function main() {
       } catch (err) {
         console.error('[Worker] Failed to persist driveKey:', err);
       }
+    }
+
+    if (config.driveKey) {
+      sendMessage({ type: 'drive-key', driveKey: config.driveKey });
     }
 
     if (workerPipe) {
