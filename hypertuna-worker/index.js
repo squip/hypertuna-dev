@@ -25,6 +25,7 @@ import {
   queuePendingAuthUpdate,
   applyPendingAuthUpdates
 } from './pending-auth.mjs';
+import { initializeHyperdrive } from './hyperdrive-manager.mjs';
 
 // In Pear, use the config.dir for the application directory
 const __dirname = Pear.config.dir || '.'
@@ -75,7 +76,8 @@ async function loadOrCreateConfig() {
     proxy_server_address: 'hypertuna.com',
     registerWithGateway: true,
     registerInterval: 300000,
-    relays: []
+    relays: [],
+    driveKey: null // TODO: populate with Hyperdrive public key
   }
 
   try {
@@ -615,6 +617,8 @@ async function main() {
 
         await loadRelayMembers();
         await loadRelayKeyMappings();
+        // TODO: initialize Hyperdrive for per-relay file storage and replication
+        await initializeHyperdrive(config);
       }
     
     if (workerPipe) {
