@@ -5,7 +5,6 @@
  */
 
 import { NostrUtils } from './NostrUtils.js';
-import { HypertunaUtils } from './HypertunaUtils.js';
 
 class NostrEvents {
     /**
@@ -128,7 +127,7 @@ class NostrEvents {
      * @param {string} privateKey - Private key for signing
      * @returns {Promise<Object>} - Signed event
      */
-    static async createTextNote(content, tags, privateKey, filePath = '') {
+    static async createTextNote(content, tags, privateKey, attachment = null, relayKey = null) {
         const eventTags = Array.isArray(tags) ? [...tags] : [];
         const urls = NostrUtils.extractUrls(content);
         for (const url of urls) {
@@ -140,31 +139,38 @@ class NostrEvents {
         let fileId = null;
         let fileDataHash = null;
         let finalContent = content;
-        if (filePath) {
-            const { promises: fs } = await import('fs');
-            const fileBuffer = await fs.readFile(filePath);
-            fileDataHash = await NostrUtils.computeSha256(fileBuffer);
-            const extPart = filePath.split('.').pop();
-            const ext = extPart && extPart !== filePath ? `.${extPart}` : '';
-            fileId = `${fileDataHash}${ext}`;
 
-            let gatewayDomain;
-            try {
-                gatewayDomain = new URL(HypertunaUtils.DEFAULT_GATEWAY_URL).hostname;
-            } catch (e) {
-                gatewayDomain = HypertunaUtils.DEFAULT_GATEWAY_URL.replace(/^https?:\/\//, '');
+        if (attachment) {
+            fileId = attachment.fileId;
+            fileDataHash = attachment.fileHash;
+            // add tags for file URL and info
+            if (Array.isArray(attachment.tags)) {
+                attachment.tags.forEach(tag => eventTags.push(tag));
             }
 
-            const publicIdentifier = eventTags.find(t => t[0] === 'h')?.[1] || '';
-            const fileUrl = `https://${gatewayDomain}/drive/${publicIdentifier}/${fileId}`;
-            eventTags.push(['r', fileUrl, 'hypertuna:drive']);
-            eventTags.push(['i', 'hypertuna:drive']);
-
-            // Append the file URL to the content so media loads in the UI
+            // ensure file URL is in content so UI can render media
             if (finalContent && !/\s$/.test(finalContent)) {
                 finalContent += ' ';
             }
-            finalContent += fileUrl;
+            finalContent += attachment.fileUrl;
+
+            // send file data to worker if available
+            if (window.workerPipe && relayKey) {
+                const msg = {
+                    type: 'upload-file',
+                    data: {
+                        relayKey,
+                        fileHash: attachment.fileHash,
+                        metadata: attachment.metadata,
+                        buffer: attachment.buffer.toString('base64')
+                    }
+                };
+                try {
+                    window.workerPipe.write(JSON.stringify(msg) + '\n');
+                } catch (err) {
+                    console.error('Failed to send upload-file message:', err);
+                }
+            }
         }
 
         const event = await this.createEvent(
@@ -185,7 +191,7 @@ class NostrEvents {
      * @param {string} privateKey - Private key for signing
      * @returns {Promise<Object>} - Signed event
      */
-    static async createGroupMessage(groupId, content, previousEvents, privateKey, filePath = '') {
+    static async createGroupMessage(groupId, content, previousEvents, privateKey, attachment = null, relayKey = null) {
         console.log(`Creating group message for group ${groupId.substring(0, 8)}...`);
         console.log(`Message content length: ${content.length}`);
         
@@ -203,7 +209,7 @@ class NostrEvents {
             });
         }
         
-        return this.createTextNote(content, tags, privateKey, filePath);
+        return this.createTextNote(content, tags, privateKey, attachment, relayKey);
     }
     
     /**
