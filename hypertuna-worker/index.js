@@ -9,6 +9,7 @@ import process from 'bare-process'
 import { promises as fs } from 'bare-fs'
 import { join } from 'bare-path'
 import crypto from 'bare-crypto'
+import b4a from 'b4a'
 import {
   getAllRelayProfiles,
   getRelayProfileByKey,
@@ -53,10 +54,34 @@ let configPath = null
 let configReceived = false
 let storedParentConfig = null
 
+async function appendFilekeyDbEntry (relayKey, fileHash) {
+  if (!config?.driveKey || !config?.nostr_pubkey_hex) return
+  const relayManager = activeRelays.get(relayKey)
+  if (!relayManager?.relay) return
+
+  const fileKey = `filekey:${fileHash}:drivekey:${config.driveKey}:pubkey:${config.nostr_pubkey_hex}`
+  const fileKeyValue = {
+    filekey: fileHash,
+    drivekey: config.driveKey,
+    pubkey: config.nostr_pubkey_hex
+  }
+
+  try {
+    await relayManager.relay.put(
+      b4a.from(fileKey, 'utf8'),
+      b4a.from(JSON.stringify(fileKeyValue), 'utf8')
+    )
+    console.log(`[Worker] Stored filekey index for ${fileHash} on relay ${relayKey}`)
+  } catch (err) {
+    console.error('[Worker] Failed to store filekey index:', err)
+  }
+}
+
 async function publishFilekeyEvent (relayKey, fileHash) {
   if (!config?.nostr_pubkey_hex || !config?.nostr_nsec_hex || !config?.driveKey) return
   const relayManager = activeRelays.get(relayKey)
   if (!relayManager) return
+  await appendFilekeyDbEntry(relayKey, fileHash)
   const event = {
     kind: 1,
     content: '',
