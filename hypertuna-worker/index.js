@@ -20,12 +20,18 @@ import {
   calculateMembers,
   calculateAuthorizedUsers
 } from './hypertuna-relay-profile-manager-bare.mjs'
-import { loadRelayKeyMappings } from './hypertuna-relay-manager-adapter.mjs'
+import { loadRelayKeyMappings, activeRelays } from './hypertuna-relay-manager-adapter.mjs'
 import {
   queuePendingAuthUpdate,
   applyPendingAuthUpdates
 } from './pending-auth.mjs';
-import { initializeHyperdrive, ensureRelayFolder } from './hyperdrive-manager.mjs';
+import {
+  initializeHyperdrive,
+  ensureRelayFolder,
+  storeFile,
+  getFile,
+  fetchFileFromDrive
+} from './hyperdrive-manager.mjs';
 
 // In Pear, use the config.dir for the application directory
 const __dirname = Pear.config.dir || '.'
@@ -37,6 +43,7 @@ let isShuttingDown = false
 const relayMembers = new Map()
 const relayMemberAdds = new Map()
 const relayMemberRemoves = new Map()
+const seenFileHashes = new Map()
 let config = null
 let configPath = null
 
@@ -197,6 +204,62 @@ async function addAuthInfoToRelays(relays) {
   } catch (err) {
     console.error('[Worker] Failed to add auth info to relays:', err)
     return relays
+  }
+}
+
+async function reconcileRelayFiles() {
+  for (const [relayKey, manager] of activeRelays.entries()) {
+    let fileMap
+    try {
+      fileMap = await manager.relay.queryFilekeyIndex()
+    } catch (err) {
+      console.error(`[Worker] Failed to query filekey index for ${relayKey}:`, err)
+      continue
+    }
+
+    const seen = seenFileHashes.get(relayKey) || new Set()
+
+    for (const [fileHash, driveMap] of fileMap.entries()) {
+      if (seen.has(fileHash)) continue
+
+      let exists = null
+      try {
+        exists = await getFile(relayKey, fileHash)
+      } catch (err) {
+        console.error(`[Worker] Error checking file ${fileHash} for relay ${relayKey}:`, err)
+      }
+
+      if (exists) {
+        console.log(`[Worker] Deduped file ${fileHash} for relay ${relayKey}`)
+        seen.add(fileHash)
+        continue
+      }
+
+      let stored = false
+      for (const [driveKey] of driveMap.entries()) {
+        for (let attempt = 0; attempt < 3 && !stored; attempt++) {
+          try {
+            const data = await fetchFileFromDrive(driveKey, relayKey, fileHash)
+            if (!data) throw new Error('File not found')
+            await storeFile(relayKey, fileHash, data, { sourceDrive: driveKey })
+            stored = true
+            break
+          } catch (err) {
+            console.error(`[Worker] Failed to download ${fileHash} from ${driveKey} (attempt ${attempt + 1}):`, err)
+          }
+        }
+        if (stored) break
+      }
+
+      if (stored) {
+        console.log(`[Worker] Stored file ${fileHash} for relay ${relayKey}`)
+        seen.add(fileHash)
+      } else {
+        console.warn(`[Worker] Unable to retrieve file ${fileHash} for relay ${relayKey}`)
+      }
+    }
+
+    seenFileHashes.set(relayKey, seen)
   }
 }
 
@@ -701,7 +764,13 @@ async function main() {
         })
       }
     }
-    
+
+    setInterval(() => {
+      if (!isShuttingDown) {
+        reconcileRelayFiles().catch(err => console.error('[Worker] File reconciliation error:', err))
+      }
+    }, 60000)
+
     // Keep the process alive with heartbeat
     const heartbeatInterval = setInterval(() => {
       if (isShuttingDown) {

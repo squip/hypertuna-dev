@@ -7,6 +7,10 @@ import crypto from 'bare-crypto'
 let store = null
 let drive = null
 
+export function getCorestore() {
+  return store
+}
+
 export function normalizeRelayKey(key) {
   if (!key) return ''
   if (typeof key === 'string') return key.toLowerCase()
@@ -76,5 +80,20 @@ export async function storeFile(relayKey, fileHash, data, metadata) {
 export async function getFile(relayKey, fileHash) {
   const entry = await drive.get(relayFilePath(relayKey, fileHash))
   return entry ? entry.value : null
+}
+
+export async function fetchFileFromDrive(driveKey, relayKey, fileHash) {
+  const remote = new Hyperdrive(store, driveKey)
+  await remote.ready()
+  try {
+    const entry = await remote.get(relayFilePath(relayKey, fileHash))
+    return entry ? entry.value : null
+  } catch (_) {
+    return null
+  } finally {
+    try {
+      await remote.close()
+    } catch (_) {}
+  }
 }
 
