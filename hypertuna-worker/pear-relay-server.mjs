@@ -42,6 +42,8 @@ import {
   calculateAuthorizedUsers
 } from './hypertuna-relay-profile-manager-bare.mjs';
 
+import { getFile } from './hyperdrive-manager.mjs';
+
 
 // Global state
 let config = null;
@@ -1384,13 +1386,13 @@ function setupProtocolHandlers(protocol) {
     };
   });
 
-  // Serve files from a relay's Hyperblobs storage
+  // Serve files stored in Hyperdrive
   protocol.handle('/drive/:identifier/:file', async (request) => {
     const identifier = request.params.identifier;
     const fileId = request.params.file;
-  
+
     console.log(`[RelayServer] Drive file requested: ${identifier}/${fileId}`);
-  
+
     try {
       let relayKey = identifier;
       if (identifier.includes(':')) {
@@ -1404,24 +1406,10 @@ function setupProtocolHandlers(protocol) {
           };
         }
       }
-  
-      const { activeRelays } = await import('./hypertuna-relay-manager-adapter.mjs');
-      const relayManager = activeRelays.get(relayKey);
-      if (!relayManager || !relayManager.relay) {
-        updateMetrics(false);
-        return {
-          statusCode: 404,
-          headers: { 'content-type': 'application/json' },
-          body: b4a.from(JSON.stringify({ error: 'Relay not found' }))
-        };
-      }
-  
-      // Extract hash from fileId (remove extension if present)
+
       const hash = fileId.split('.')[0];
-      console.log(`[RelayServer] Fetching blob with hash: ${hash}`);
-      
-      const blob = await relayManager.relay.getBlob(hash);
-      if (!blob || !blob.data) {
+      const fileBuffer = await getFile(relayKey, hash);
+      if (!fileBuffer) {
         updateMetrics(false);
         return {
           statusCode: 404,
@@ -1429,14 +1417,10 @@ function setupProtocolHandlers(protocol) {
           body: b4a.from(JSON.stringify({ error: 'File not found' }))
         };
       }
-  
-      console.log(`[RelayServer] Retrieved blob ${hash} (${blob.size} bytes)`);
-  
-      // Determine content type from metadata or fileId
+
+      // Determine content type from file extension
       let contentType = 'application/octet-stream';
-      if (blob.metadata?.mimeType) {
-        contentType = blob.metadata.mimeType;
-      } else if (fileId.includes('.')) {
+      if (fileId.includes('.')) {
         const ext = fileId.split('.').pop().toLowerCase();
         const mimeTypes = {
           'jpg': 'image/jpeg',
@@ -1448,18 +1432,18 @@ function setupProtocolHandlers(protocol) {
         };
         contentType = mimeTypes[ext] || contentType;
       }
-  
+
       updateMetrics(true);
       return {
         statusCode: 200,
-        headers: { 
+        headers: {
           'content-type': contentType,
-          'content-length': blob.size.toString()
+          'content-length': fileBuffer.length.toString()
         },
-        body: blob.data // Should already be a buffer
+        body: b4a.from(fileBuffer)
       };
     } catch (error) {
-      console.error('[RelayServer] Error fetching blob file:', error);
+      console.error('[RelayServer] Error fetching drive file:', error);
       updateMetrics(false);
       return {
         statusCode: 500,
