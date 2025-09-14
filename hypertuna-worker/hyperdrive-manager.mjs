@@ -97,3 +97,23 @@ export async function fetchFileFromDrive(driveKey, relayKey, fileHash) {
   }
 }
 
+export function watchDrive (onChange) {
+  if (!drive) throw new Error('Hyperdrive not initialized')
+  const watcher = drive.watch('/')
+  ;(async () => {
+    for await (const [curr, prev] of watcher) {
+      for await (const diff of curr.diff(prev)) {
+        const entry = diff.right || diff.left
+        if (!entry) continue
+        const type = diff.right && !diff.left ? 'add' : diff.left && !diff.right ? 'del' : 'update'
+        try {
+          await onChange({ type, path: entry.key })
+        } catch (err) {
+          console.error('[Hyperdrive] watch callback error:', err)
+        }
+      }
+    }
+  })().catch(err => console.error('[Hyperdrive] watch error:', err))
+  return watcher
+}
+
