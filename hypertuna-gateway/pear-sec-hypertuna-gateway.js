@@ -25,8 +25,9 @@ const {
   forwardMessageToPeerHyperswarm,
   getEventsFromPeerHyperswarm,
   forwardJoinRequestToPeer,
-  forwardCallbackToPeer
-} = require('./sushi-hypertuna-gateway-client');
+  forwardCallbackToPeer,
+  requestFileFromPeer
+} = require('./pear-sec-hypertuna-gateway-client');
 
 let nostrClient = null;
 let directoryUpdater = null;
@@ -1057,21 +1058,21 @@ app.post('/callback/finalize-auth/:identifier', async (req, res) => {
 });
 
 app.get('/drive/:identifier/:file', async (req, res) => {
-  const { identifier } = req.params;
+  const { identifier, file } = req.params;
   try {
     const peer = await findHealthyPeerForRelay(identifier);
     if (!peer) {
       return res.status(503).json({ error: 'No healthy peers available for this relay' });
     }
 
-    const response = await forwardRequestToPeer(peer, req, connectionPool);
+    const stream = await requestFileFromPeer(peer, identifier, file, connectionPool);
 
-    Object.entries(response.headers).forEach(([key, value]) => {
+    Object.entries(stream.headers).forEach(([key, value]) => {
       res.setHeader(key, value);
     });
 
-    res.status(response.statusCode);
-    Readable.from(response.body).pipe(res);
+    res.status(stream.statusCode);
+    stream.pipe(res);
 
     peer.lastSeen = Date.now();
   } catch (error) {

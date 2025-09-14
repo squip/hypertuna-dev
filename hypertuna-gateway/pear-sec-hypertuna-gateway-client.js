@@ -2,7 +2,8 @@
 const Hyperswarm = require('hyperswarm');
 const crypto = require('hypercore-crypto');
 const c = require('compact-encoding');
-const RelayProtocol = require('./sushi-hypertuna-gateway-protocol.js');
+const { Readable } = require('stream');
+const RelayProtocol = require('./pear-sec-hypertuna-gateway-protocol.js');
 
 class HyperswarmConnection {
   constructor(publicKey, swarm, pool) {
@@ -639,7 +640,28 @@ async function forwardCallbackToPeer(peer, path, requestData, connectionPool) {
     throw error;
   }
 }
- 
+
+async function requestFileFromPeer(peer, identifier, file, connectionPool) {
+  try {
+    console.log(`[RequestFile] Requesting ${identifier}/${file} from peer ${peer.publicKey.substring(0, 8)}...`);
+
+    const connection = await connectionPool.getConnection(peer.publicKey);
+
+    const response = await connection.sendRequest({
+      method: 'GET',
+      path: `/drive/${identifier}/${file}`
+    });
+
+    const stream = Readable.from(response.body);
+    stream.headers = response.headers;
+    stream.statusCode = response.statusCode;
+    return stream;
+  } catch (error) {
+    console.error(`[RequestFile] Error:`, error.message);
+    throw error;
+  }
+}
+
 async function getEventsFromPeerHyperswarm(peerPublicKey, relayKey, connectionKey, connectionPool, authToken = null) {
   try {
     console.log(`[GetEvents] Checking for events - relay: ${relayKey}, connection: ${connectionKey}`);
@@ -679,6 +701,7 @@ async function getEventsFromPeerHyperswarm(peerPublicKey, relayKey, connectionKe
   forwardMessageToPeerHyperswarm,
   getEventsFromPeerHyperswarm,
   forwardJoinRequestToPeer,
-  forwardCallbackToPeer
+  forwardCallbackToPeer,
+  requestFileFromPeer
 };
  
