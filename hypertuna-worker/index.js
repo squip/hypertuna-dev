@@ -25,7 +25,7 @@ import {
   queuePendingAuthUpdate,
   applyPendingAuthUpdates
 } from './pending-auth.mjs';
-import { initializeHyperdrive } from './hyperdrive-manager.mjs';
+import { initializeHyperdrive, ensureRelayFolder } from './hyperdrive-manager.mjs';
 
 // In Pear, use the config.dir for the application directory
 const __dirname = Pear.config.dir || '.'
@@ -260,6 +260,7 @@ if (workerPipe) {
                   // Call the relay server's create relay function
                   const result = await relayServer.createRelay(message.data);
                   relayMembers.set(result.relayKey, result.profile?.members || [])
+                  await ensureRelayFolder(result.relayKey)
                   await applyPendingAuthUpdates(updateRelayAuthToken, result.relayKey, result.profile?.public_identifier);
 
                   sendMessage({
@@ -298,6 +299,7 @@ if (workerPipe) {
                   // Call the relay server's join relay function
                   const result = await relayServer.joinRelay(message.data)
                   relayMembers.set(result.relayKey, result.profile?.members || [])
+                  await ensureRelayFolder(result.relayKey)
                   await applyPendingAuthUpdates(updateRelayAuthToken, result.relayKey, result.profile?.public_identifier);
 
                   sendMessage({
