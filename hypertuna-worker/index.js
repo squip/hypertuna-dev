@@ -9,6 +9,7 @@ import process from 'bare-process'
 import { promises as fs } from 'bare-fs'
 import { join } from 'bare-path'
 import crypto from 'bare-crypto'
+import b4a from 'b4a'
 import {
   getAllRelayProfiles,
   getRelayProfileByKey,
@@ -30,8 +31,10 @@ import {
   ensureRelayFolder,
   storeFile,
   getFile,
-  fetchFileFromDrive
+  fetchFileFromDrive,
+  watchDrive
 } from './hyperdrive-manager.mjs';
+import { NostrUtils } from './nostr-utils.js';
 
 // In Pear, use the config.dir for the application directory
 const __dirname = Pear.config.dir || '.'
@@ -50,6 +53,87 @@ let configPath = null
 // Store configuration received from the parent process
 let configReceived = false
 let storedParentConfig = null
+
+async function appendFilekeyDbEntry (relayKey, fileHash) {
+  if (!config?.driveKey || !config?.nostr_pubkey_hex) return
+  const relayManager = activeRelays.get(relayKey)
+  if (!relayManager?.relay) return
+
+  const fileKey = `filekey:${fileHash}:drivekey:${config.driveKey}:pubkey:${config.nostr_pubkey_hex}`
+  const fileKeyValue = {
+    filekey: fileHash,
+    drivekey: config.driveKey,
+    pubkey: config.nostr_pubkey_hex
+  }
+
+  try {
+    await relayManager.relay.put(
+      b4a.from(fileKey, 'utf8'),
+      b4a.from(JSON.stringify(fileKeyValue), 'utf8')
+    )
+    console.log(`[Worker] Stored filekey index for ${fileHash} on relay ${relayKey}`)
+  } catch (err) {
+    console.error('[Worker] Failed to store filekey index:', err)
+  }
+}
+
+async function publishFilekeyEvent (relayKey, fileHash) {
+  if (!config?.nostr_pubkey_hex || !config?.nostr_nsec_hex || !config?.driveKey) return
+  const relayManager = activeRelays.get(relayKey)
+  if (!relayManager) return
+  await appendFilekeyDbEntry(relayKey, fileHash)
+  const event = {
+    kind: 1,
+    content: '',
+    created_at: Math.floor(Date.now() / 1000),
+    tags: [
+      ['filekey', fileHash],
+      ['drivekey', config.driveKey]
+    ],
+    pubkey: config.nostr_pubkey_hex
+  }
+  try {
+    const signed = await NostrUtils.signEvent(event, config.nostr_nsec_hex)
+    await relayManager.publishEvent(signed)
+    console.log(`[Worker] Published filekey event for ${fileHash} on relay ${relayKey}`)
+  } catch (err) {
+    console.error('[Worker] Failed to publish filekey event:', err)
+  }
+}
+
+async function publishFileDeletionEvent (relayKey, fileHash) {
+  if (!config?.nostr_pubkey_hex || !config?.nostr_nsec_hex || !config?.driveKey) return
+  const relayManager = activeRelays.get(relayKey)
+  if (!relayManager) return
+  const event = {
+    kind: 1,
+    content: '',
+    created_at: Math.floor(Date.now() / 1000),
+    tags: [
+      ['filekey', fileHash],
+      ['drivekey', config.driveKey],
+      ['deleted', '1']
+    ],
+    pubkey: config.nostr_pubkey_hex
+  }
+  try {
+    const signed = await NostrUtils.signEvent(event, config.nostr_nsec_hex)
+    await relayManager.publishEvent(signed)
+    console.log(`[Worker] Published tombstone for ${fileHash} on relay ${relayKey}`)
+  } catch (err) {
+    console.error('[Worker] Failed to publish tombstone:', err)
+  }
+}
+
+function startDriveWatcher () {
+  watchDrive(async ({ type, path }) => {
+    const parts = path.split('/').filter(Boolean)
+    if (parts.length !== 2) return
+    const [relayKey, fileHash] = parts
+    if (type === 'add') await publishFilekeyEvent(relayKey, fileHash)
+    else if (type === 'del') await publishFileDeletionEvent(relayKey, fileHash)
+  })
+}
 
 
 function getUserKey(config) {
@@ -707,6 +791,8 @@ async function main() {
     if (config.driveKey) {
       sendMessage({ type: 'drive-key', driveKey: config.driveKey });
     }
+
+    startDriveWatcher()
 
     if (workerPipe) {
       sendMessage({
