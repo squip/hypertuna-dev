@@ -7,6 +7,7 @@ import NostrRelay from './hypertuna-relay-event-processor.mjs';
 import b4a from 'b4a';
 import c from 'compact-encoding';
 import Protomux from 'protomux';
+import Autobee from './hypertuna-relay-helper.mjs';
 import { nobleSecp256k1 } from './crypto-libraries.js';
 import { NostrUtils } from './nostr-utils.js';
 import { setTimeout } from 'bare-timers';
@@ -120,15 +121,26 @@ export class RelayManager {
         
         this.relay = new NostrRelay(this.store, this.bootstrap, {
           apply: async (batch, view, base) => {
+            const kvOps = []
+            const eventOps = []
+
             for (const node of batch) {
-              const op = node.value;
+              const op = node.value
               if (op.type === 'addWriter') {
-                console.log('\rAdding writer', op.key);
-                await base.addWriter(b4a.from(op.key, 'hex'));
-                continue;
+                console.log('\rAdding writer', op.key)
+                await base.addWriter(b4a.from(op.key, 'hex'))
+                continue
               }
+              if (op.type === 'put' || op.type === 'del') kvOps.push(node)
+              else eventOps.push(node)
             }
-            await NostrRelay.apply(batch, view, base);
+
+            if (kvOps.length) {
+              await Autobee.apply(kvOps, view, base)
+            }
+            if (eventOps.length) {
+              await NostrRelay.apply(eventOps, view, base)
+            }
           },
           valueEncoding: c.any,
           verifyEvent: this.verifyEvent.bind(this)
@@ -278,7 +290,7 @@ export class RelayManager {
         }
         
         console.log(`[${new Date().toISOString()}] RelayManager: Updating subscriptions for connection ${connectionKey}`);
-        console.log('Updated subscription data:', JSON.stringify(activeSubscriptionsUpdated, null, 2));
+        // console.log('Updated subscription data:', JSON.stringify(activeSubscriptionsUpdated, null, 2));
         
         const result = await this.relay.updateSubscriptions(connectionKey, activeSubscriptionsUpdated);
         console.log(`[${new Date().toISOString()}] RelayManager: Successfully updated subscriptions`);

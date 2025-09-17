@@ -1394,9 +1394,11 @@ function setupProtocolHandlers(protocol) {
     console.log(`[RelayServer] Drive file requested: ${identifier}/${fileId}`);
 
     try {
-      let relayKey = identifier;
-      if (identifier.includes(':')) {
-        relayKey = await getRelayKeyFromPublicIdentifier(identifier);
+      const hash = fileId.split('.')[0];
+      // Prefer new layout using publicIdentifier path; fall back to legacy relayKey path
+      let fileBuffer = await getFile(identifier, hash);
+      if (!fileBuffer && identifier.includes(':')) {
+        const relayKey = await getRelayKeyFromPublicIdentifier(identifier);
         if (!relayKey) {
           updateMetrics(false);
           return {
@@ -1405,10 +1407,8 @@ function setupProtocolHandlers(protocol) {
             body: b4a.from(JSON.stringify({ error: 'Relay not found' }))
           };
         }
+        fileBuffer = await getFile(relayKey, hash);
       }
-
-      const hash = fileId.split('.')[0];
-      const fileBuffer = await getFile(relayKey, hash);
       if (!fileBuffer) {
         updateMetrics(false);
         return {

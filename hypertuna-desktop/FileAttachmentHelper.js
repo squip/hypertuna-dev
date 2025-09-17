@@ -18,7 +18,7 @@ function mimeFromExtension(ext) {
   return map[ext.toLowerCase()] || 'application/octet-stream';
 }
 
-export async function prepareFileAttachment(filePath, relayKey) {
+export async function prepareFileAttachment(filePath, identifier) {
   const buffer = await fs.readFile(filePath);
   const fileHash = await NostrUtils.computeSha256(buffer);
   const ext = extname(filePath);
@@ -31,7 +31,8 @@ export async function prepareFileAttachment(filePath, relayKey) {
     gatewayDomain = HypertunaUtils.DEFAULT_GATEWAY_URL.replace(/^https?:\/\//, '');
   }
 
-  const fileUrl = `https://${gatewayDomain}/drive/${relayKey}/${fileId}`;
+  // Build URL using publicIdentifier (npub:alias) when provided
+  const fileUrl = `https://${gatewayDomain}/drive/${identifier}/${fileId}`;
   const metadata = {
     mimeType: mimeFromExtension(ext),
     filename: basename(filePath)

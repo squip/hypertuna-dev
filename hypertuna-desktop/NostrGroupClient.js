@@ -2635,7 +2635,8 @@ async fetchMultipleProfiles(pubkeys) {
         let attachment = null;
         if (filePath) {
             try {
-                attachment = await prepareFileAttachment(filePath, relayKey);
+                // Build file URL using publicIdentifier (groupId)
+                attachment = await prepareFileAttachment(filePath, groupId);
             } catch (err) {
                 console.error('Failed to prepare file attachment:', err);
             }

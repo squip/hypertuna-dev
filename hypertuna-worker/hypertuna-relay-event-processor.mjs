@@ -32,7 +32,7 @@ async function getEventHash(event) {
 }
 
 function validateEvent(event) {
-  logWithTimestamp('validateEvent: Validating event:', JSON.stringify(event, null, 2));
+  // logWithTimestamp('validateEvent: Validating event:', JSON.stringify(event, null, 2));
   
   if (!event.id) {
     logWithTimestamp('validateEvent: Event is missing id');
@@ -208,7 +208,7 @@ export default class NostrRelay extends Autobee {
             }
         } else if (op.type === 'subscriptions') {
             const subscriptionData = JSON.parse(op.subscriptions);
-            logWithTimestamp('NostrRelay.apply: Processing subscription data:', subscriptionData);
+            // logWithTimestamp('NostrRelay.apply: Processing subscription data:', subscriptionData);
             const key = b4a.from(subscriptionData.connection, 'hex');
             logWithTimestamp(`NostrRelay.apply: Storing subscription data for connection: ${subscriptionData.connection}`);
             await b.put(key, op.subscriptions);
@@ -255,7 +255,7 @@ export default class NostrRelay extends Autobee {
   // function to verify event object structure and attributes are valid + append valid event objects to hyperbee log
   // note: apply() method will take objects appended to hyperbee log + handle the final processes to 'put' new entries into the db.
   async publishEvent(event) {
-    logWithTimestamp('publishEvent: Attempting to publish event:', JSON.stringify(event, null, 2));
+    // logWithTimestamp('publishEvent: Attempting to publish event:', JSON.stringify(event, null, 2));
     
     if (!this.writable) {
       logWithTimestamp('publishEvent: Error - Not writable');
@@ -445,10 +445,10 @@ export default class NostrRelay extends Autobee {
   }
 
   async queryEvents(filter, last_returned_event_timestamp) {
-    logWithTimestamp(`queryEvents: Starting query with filter:`, JSON.stringify(filter, null, 2));
+    // logWithTimestamp(`queryEvents: Starting query with filter:`, JSON.stringify(filter, null, 2));
     logWithTimestamp(`queryEvents: Last returned event timestamp:`, last_returned_event_timestamp);
     const queries = this.constructQueries(filter, last_returned_event_timestamp);
-    logWithTimestamp(`queryEvents: Constructed query groups:`, JSON.stringify(queries, null, 2));
+    // logWithTimestamp(`queryEvents: Constructed query groups:`, JSON.stringify(queries, null, 2));
     
     const results = await this.executeQueries(queries);
     logWithTimestamp(`queryEvents: Raw query results count:`, results.length);
@@ -462,10 +462,10 @@ export default class NostrRelay extends Autobee {
   }
   
   constructQueries(filter, last_returned_event_timestamp) {
-    logWithTimestamp(
-      `constructQueries: Constructing queries for filter:`,
-      JSON.stringify(filter, null, 2)
-    );
+    // logWithTimestamp(
+    //   `constructQueries: Constructing queries for filter:`,
+    //   JSON.stringify(filter, null, 2)
+    // );
     logWithTimestamp(
       `constructQueries: Using timestamp:`,
       last_returned_event_timestamp
@@ -492,7 +492,7 @@ export default class NostrRelay extends Autobee {
       !this.hasTagFilters(filter)
     ) {
       const query = this.constructor.constructTimeRangeQuery(since, until);
-      logWithTimestamp(`constructQueries: Constructed time-based query:`, query);
+      // logWithTimestamp(`constructQueries: Constructed time-based query:`, query);
       groups.push([query]);
       return groups;
     }
@@ -502,7 +502,7 @@ export default class NostrRelay extends Autobee {
       const kindGroup = [];
       for (const kind of filter.kinds) {
         const query = this.constructor.constructKindRangeQuery(kind, since, until);
-        logWithTimestamp(`constructQueries: Constructed kind query for ${kind}:`, query);
+        // logWithTimestamp(`constructQueries: Constructed kind query for ${kind}:`, query);
         kindGroup.push(query);
       }
       groups.push(kindGroup);
@@ -513,10 +513,10 @@ export default class NostrRelay extends Autobee {
       const authorGroup = [];
       for (const author of filter.authors) {
         const query = this.constructor.constructAuthorRangeQuery(author, since, until);
-        logWithTimestamp(
-          `constructQueries: Constructed author query for ${author}:`,
-          query
-        );
+        // logWithTimestamp(
+        //   `constructQueries: Constructed author query for ${author}:`,
+        //   query
+        // );
         authorGroup.push(query);
       }
       groups.push(authorGroup);
@@ -546,6 +546,7 @@ export default class NostrRelay extends Autobee {
 // Static methods for constructing specific range queries
   static constructTimeRangeQuery(since, until) {
     const gte = b4a.from(`created_at:${this.padTimestamp(since)}:id:`, 'utf8');
+    // Use a high-sentinel to include all keys under the prefix range
     const lte = b4a.from(`created_at:${this.padTimestamp(until)}:id:#`, 'utf8');
     return { gte, lte };
   }
@@ -564,6 +565,11 @@ export default class NostrRelay extends Autobee {
   }
 
   static constructFilekeyRangeQuery({ filekey, drivekey, pubkey } = {}) {
+    // To select all keys with a given prefix in Hyperbee, use an upper bound
+    // that is the prefix plus a 0xFF byte (max byte) — not '#', which sorts
+    // before digits/letters and inadvertently excludes valid keys.
+    const MAX_BYTE = b4a.from([0xff]);
+
     if (filekey && drivekey && pubkey) {
       return {
         key: b4a.from(
@@ -574,25 +580,25 @@ export default class NostrRelay extends Autobee {
     }
 
     if (filekey && drivekey) {
-      const gte = b4a.from(
+      const prefix = b4a.from(
         `filekey:${filekey}:drivekey:${drivekey}:pubkey:`,
         'utf8'
       );
-      const lte = b4a.from(
-        `filekey:${filekey}:drivekey:${drivekey}:pubkey:#`,
-        'utf8'
-      );
+      const gte = prefix;
+      const lte = b4a.concat([prefix, MAX_BYTE]);
       return { gte, lte };
     }
 
     if (filekey) {
-      const gte = b4a.from(`filekey:${filekey}:`, 'utf8');
-      const lte = b4a.from(`filekey:${filekey}:#`, 'utf8');
+      const prefix = b4a.from(`filekey:${filekey}:`, 'utf8');
+      const gte = prefix;
+      const lte = b4a.concat([prefix, MAX_BYTE]);
       return { gte, lte };
     }
 
-    const gte = b4a.from('filekey:', 'utf8');
-    const lte = b4a.from('filekey:#', 'utf8');
+    const prefix = b4a.from(`filekey:`, 'utf8');
+    const gte = prefix;
+    const lte = b4a.concat([prefix, MAX_BYTE]);
     return { gte, lte };
   }
 
@@ -633,6 +639,16 @@ export default class NostrRelay extends Autobee {
       drives.set(drivekey, pubkey);
     }
 
+    // Debug: dump a small sample
+    try {
+      const sample = [];
+      for (const [fh, dm] of filekeyMap.entries()) {
+        sample.push({ fileHash: fh, drives: Array.from(dm.keys()) });
+        if (sample.length >= 5) break;
+      }
+      logWithTimestamp(`queryFilekeyIndex: entries=${entries.length}, uniqueFilekeys=${filekeyMap.size}, sample=${JSON.stringify(sample)}`);
+    } catch (_) {}
+
     return filekeyMap;
   }
   
@@ -650,10 +666,10 @@ export default class NostrRelay extends Autobee {
             since,
             until
           );
-          logWithTimestamp(
-            `constructTagQueries: Constructed query for tag ${tagName}=${tagValue}:`,
-            query
-          );
+          // logWithTimestamp(
+          //   `constructTagQueries: Constructed query for tag ${tagName}=${tagValue}:`,
+          //   query
+          // );
           group.push(query);
         }
         tagGroups.push(group);
@@ -776,7 +792,7 @@ async handleSubscription(connectionKey) {
         return [[], null];
     }
 
-    logWithTimestamp(`handleSubscription: Active subscriptions:`, JSON.stringify(activeSubscriptions, null, 2));
+    // logWithTimestamp(`handleSubscription: Active subscriptions:`, JSON.stringify(activeSubscriptions, null, 2));
     const eventsForClient = [];
     let activeSubscriptionsUpdated = JSON.parse(JSON.stringify(activeSubscriptions));
 
@@ -847,7 +863,7 @@ async handleSubscription(connectionKey) {
 
 
 async publishSubscription(connectionKey, reqMessage, activeSubscriptions = null) {
-    logWithTimestamp('publishSubscription: Attempting to publish subscription:', JSON.stringify(reqMessage, null, 2));
+    // logWithTimestamp('publishSubscription: Attempting to publish subscription:', JSON.stringify(reqMessage, null, 2));
     
     if (!this.writable) {
       logWithTimestamp('publishSubscription: Error - Not writable');
@@ -892,7 +908,7 @@ async publishSubscription(connectionKey, reqMessage, activeSubscriptions = null)
   }
 
  async updateSubscriptions(connectionKey, activeSubscriptionsUpdated) {
-    logWithTimestamp('updateSubscriptions: Updating subscriptions:', JSON.stringify(activeSubscriptionsUpdated, null, 2));
+    // logWithTimestamp('updateSubscriptions: Updating subscriptions:', JSON.stringify(activeSubscriptionsUpdated, null, 2));
     
     if (!this.writable) {
       logWithTimestamp('updateSubscriptions: Error - Not writable');
@@ -944,7 +960,7 @@ async publishSubscription(connectionKey, reqMessage, activeSubscriptions = null)
 
   // Update handleMessage to work with the new subscription structure
 async handleMessage(message, sendResponse, connectionKey) {
-    logWithTimestamp(`handleMessage: Received message:`, JSON.stringify(message, null, 2));
+    // logWithTimestamp(`handleMessage: Received message:`, JSON.stringify(message, null, 2));
     try {
       const [type, ...params] = message;
   

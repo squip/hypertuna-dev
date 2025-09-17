@@ -31,10 +31,14 @@ import {
   ensureRelayFolder,
   storeFile,
   getFile,
+  fileExists,
   fetchFileFromDrive,
-  watchDrive
+  watchDrive,
+  getReplicationHealth
 } from './hyperdrive-manager.mjs';
+import { ensureMirrorsForProviders, stopAllMirrors } from './mirror-sync-manager.mjs';
 import { NostrUtils } from './nostr-utils.js';
+import { getRelayKeyFromPublicIdentifier } from './relay-lookup-utils.mjs';
 
 // In Pear, use the config.dir for the application directory
 const __dirname = Pear.config.dir || '.'
@@ -49,15 +53,23 @@ const relayMemberRemoves = new Map()
 const seenFileHashes = new Map()
 let config = null
 let configPath = null
+let healthLogPath = null
+let healthIntervalHandle = null
 
 // Store configuration received from the parent process
 let configReceived = false
 let storedParentConfig = null
 
 async function appendFilekeyDbEntry (relayKey, fileHash) {
-  if (!config?.driveKey || !config?.nostr_pubkey_hex) return
+  if (!config?.driveKey || !config?.nostr_pubkey_hex) {
+    console.warn(`[Worker] appendFilekeyDbEntry skipped: missing driveKey or nostr_pubkey_hex (driveKey=${!!config?.driveKey}, pub=${!!config?.nostr_pubkey_hex})`)
+    return
+  }
   const relayManager = activeRelays.get(relayKey)
-  if (!relayManager?.relay) return
+  if (!relayManager?.relay) {
+    console.warn(`[Worker] appendFilekeyDbEntry skipped: no active relay manager for key=${relayKey}`)
+    return
+  }
 
   const fileKey = `filekey:${fileHash}:drivekey:${config.driveKey}:pubkey:${config.nostr_pubkey_hex}`
   const fileKeyValue = {
@@ -71,6 +83,14 @@ async function appendFilekeyDbEntry (relayKey, fileHash) {
       b4a.from(fileKey, 'utf8'),
       b4a.from(JSON.stringify(fileKeyValue), 'utf8')
     )
+    // Ensure the view applies this operation before any immediate queries
+    try {
+      await relayManager.relay.update()
+      const v = relayManager?.relay?.view?.version
+      console.log(`[Index] put applied (viewVersion=${v}) key=${fileKey} value=${JSON.stringify(fileKeyValue)}`)
+    } catch (e) {
+      console.warn('[Index] relay.update after put failed:', e?.message || e)
+    }
     console.log(`[Worker] Stored filekey index for ${fileHash} on relay ${relayKey}`)
   } catch (err) {
     console.error('[Worker] Failed to store filekey index:', err)
@@ -80,21 +100,8 @@ async function appendFilekeyDbEntry (relayKey, fileHash) {
 async function publishFilekeyEvent (relayKey, fileHash) {
   if (!config?.nostr_pubkey_hex || !config?.nostr_nsec_hex || !config?.driveKey) return
   const relayManager = activeRelays.get(relayKey)
-  if (!relayManager) return
-  await appendFilekeyDbEntry(relayKey, fileHash)
-  const event = {
-    kind: 1,
-    content: '',
-    created_at: Math.floor(Date.now() / 1000),
-    tags: [
-      ['filekey', fileHash],
-      ['drivekey', config.driveKey]
-    ],
-    pubkey: config.nostr_pubkey_hex
-  }
   try {
-    const signed = await NostrUtils.signEvent(event, config.nostr_nsec_hex)
-    await relayManager.publishEvent(signed)
+    await appendFilekeyDbEntry(relayKey, fileHash)
     console.log(`[Worker] Published filekey event for ${fileHash} on relay ${relayKey}`)
   } catch (err) {
     console.error('[Worker] Failed to publish filekey event:', err)
@@ -102,34 +109,37 @@ async function publishFilekeyEvent (relayKey, fileHash) {
 }
 
 async function publishFileDeletionEvent (relayKey, fileHash) {
-  if (!config?.nostr_pubkey_hex || !config?.nostr_nsec_hex || !config?.driveKey) return
+  if (!config?.driveKey || !config?.nostr_pubkey_hex) return
   const relayManager = activeRelays.get(relayKey)
-  if (!relayManager) return
-  const event = {
-    kind: 1,
-    content: '',
-    created_at: Math.floor(Date.now() / 1000),
-    tags: [
-      ['filekey', fileHash],
-      ['drivekey', config.driveKey],
-      ['deleted', '1']
-    ],
-    pubkey: config.nostr_pubkey_hex
-  }
+  if (!relayManager?.relay) return
+
+  const fileKey = `filekey:${fileHash}:drivekey:${config.driveKey}:pubkey:${config.nostr_pubkey_hex}`
   try {
-    const signed = await NostrUtils.signEvent(event, config.nostr_nsec_hex)
-    await relayManager.publishEvent(signed)
-    console.log(`[Worker] Published tombstone for ${fileHash} on relay ${relayKey}`)
+    await relayManager.relay.del(b4a.from(fileKey, 'utf8'))
+    try { await relayManager.relay.update() } catch (_) {}
+    console.log(`[Worker] Deleted filekey index for ${fileHash} on relay ${relayKey}`)
   } catch (err) {
-    console.error('[Worker] Failed to publish tombstone:', err)
+    console.error('[Worker] Failed to delete filekey index:', err)
   }
 }
 
+
+function isHex64 (s) { return typeof s === 'string' && /^[a-fA-F0-9]{64}$/.test(s) }
+
 function startDriveWatcher () {
   watchDrive(async ({ type, path }) => {
+    console.log(`[DriveWatch] change type=${type} path=${path}`)
     const parts = path.split('/').filter(Boolean)
     if (parts.length !== 2) return
-    const [relayKey, fileHash] = parts
+    const [identifier, fileHash] = parts
+    let relayKey = identifier
+    try {
+      if (!isHex64(identifier) && identifier.includes(':')) {
+        const mapped = await getRelayKeyFromPublicIdentifier(identifier)
+        if (mapped) relayKey = mapped
+        else console.warn(`[Worker] watchDrive: could not resolve relayKey for identifier ${identifier}`)
+      }
+    } catch (_) {}
     if (type === 'add') await publishFilekeyEvent(relayKey, fileHash)
     else if (type === 'del') await publishFileDeletionEvent(relayKey, fileHash)
   })
@@ -231,6 +241,23 @@ const sendMessage = (message) => {
   }
 }
 
+async function logToFile (filepath, line) {
+  try {
+    await fs.mkdir(barePathDirname(filepath), { recursive: true }).catch(() => {})
+  } catch (_) {}
+  try {
+    await fs.appendFile(filepath, line + '\n')
+  } catch (err) {
+    console.error('[Worker] Failed to append health log:', err)
+  }
+}
+
+function barePathDirname (p) {
+  const parts = p.split('/').filter(Boolean)
+  parts.pop()
+  return '/' + parts.join('/')
+}
+
 function addMembersToRelays(relays) {
   return relays.map(r => ({
     ...r,
@@ -301,14 +328,30 @@ async function reconcileRelayFiles() {
       continue
     }
 
+    // Debug sample of filekey index
+    try {
+      const sample = []
+      for (const [fh, dm] of fileMap.entries()) {
+        sample.push({ fileHash: fh, drives: Array.from(dm.keys()) })
+        if (sample.length >= 5) break
+      }
+      console.log(`[Reconcile] relay ${relayKey}: filekey sample ${JSON.stringify(sample)}`)
+    } catch (_) {}
+
     const seen = seenFileHashes.get(relayKey) || new Set()
+    // Prefer publicIdentifier path if available for this relay
+    let identifier = relayKey
+    try {
+      const profile = await getRelayProfileByKey(relayKey)
+      if (profile?.public_identifier) identifier = profile.public_identifier
+    } catch (_) {}
 
     for (const [fileHash, driveMap] of fileMap.entries()) {
       if (seen.has(fileHash)) continue
 
       let exists = null
       try {
-        exists = await getFile(relayKey, fileHash)
+        exists = await getFile(identifier, fileHash)
       } catch (err) {
         console.error(`[Worker] Error checking file ${fileHash} for relay ${relayKey}:`, err)
       }
@@ -321,11 +364,12 @@ async function reconcileRelayFiles() {
 
       let stored = false
       for (const [driveKey] of driveMap.entries()) {
+        console.log(`[Reconcile] attempt fetch file=${fileHash} from drive=${driveKey} folder=/${identifier}`)
         for (let attempt = 0; attempt < 3 && !stored; attempt++) {
           try {
-            const data = await fetchFileFromDrive(driveKey, relayKey, fileHash)
+            const data = await fetchFileFromDrive(driveKey, identifier, fileHash)
             if (!data) throw new Error('File not found')
-            await storeFile(relayKey, fileHash, data, { sourceDrive: driveKey })
+            await storeFile(identifier, fileHash, data, { sourceDrive: driveKey })
             stored = true
             break
           } catch (err) {
@@ -345,6 +389,200 @@ async function reconcileRelayFiles() {
 
     seenFileHashes.set(relayKey, seen)
   }
+}
+
+async function ensureMirrorsForAllRelays() {
+  const total = activeRelays.size
+  console.log(`[Mirror] scanning active relays: ${total}`)
+  for (const [relayKey, manager] of activeRelays.entries()) {
+    console.log(`[Mirror] relay ${relayKey}: collecting providers from filekey index`)
+    // Collect all provider drive keys for this relay from the filekey index
+    let fileMap
+    try {
+      fileMap = await manager.relay.queryFilekeyIndex()
+    } catch (err) {
+      console.error(`[Worker] Mirror: Failed to query filekey index for ${relayKey}:`, err)
+      continue
+    }
+
+    console.log(`[Mirror] relay ${relayKey}: filekey index size=${fileMap.size}`)
+    const providers = new Set()
+    for (const [_fileHash, driveMap] of fileMap.entries()) {
+      for (const [driveKey] of driveMap.entries()) providers.add(driveKey)
+    }
+    console.log(`[Mirror] relay ${relayKey}: providers=${providers.size}`)
+    try {
+      console.log(`[Mirror] relay ${relayKey}: providers list ${JSON.stringify(Array.from(providers))}`)
+      const sample = []
+      for (const [fh, dm] of fileMap.entries()) {
+        sample.push({ fileHash: fh, drives: Array.from(dm.keys()) })
+        if (sample.length >= 5) break
+      }
+      console.log(`[Mirror] relay ${relayKey}: filekey sample ${JSON.stringify(sample)}`)
+    } catch (_) {}
+
+    // Determine identifier path (prefer public identifier)
+    let identifier = relayKey
+    try {
+      const profile = await getRelayProfileByKey(relayKey)
+      if (profile?.public_identifier) identifier = profile.public_identifier
+    } catch (_) {}
+
+    // If no providers indexed, try to backfill from local files, then re-evaluate
+    if (providers.size === 0) {
+      try { await backfillRelayFilekeyIndex(relayKey, identifier) } catch (e) { console.warn('[Mirror] backfill failed:', e) }
+      try {
+        const fm2 = await manager.relay.queryFilekeyIndex()
+        console.log(`[Mirror] relay ${relayKey}: re-check filekey index size=${fm2.size}`)
+        for (const [_fh, dm] of fm2.entries()) {
+          for (const [driveKey] of dm.entries()) providers.add(driveKey)
+        }
+        console.log(`[Mirror] relay ${relayKey}: providers after backfill=${providers.size}`)
+        const sample2 = []
+        for (const [fh2, dm2] of fm2.entries()) {
+          sample2.push({ fileHash: fh2, drives: Array.from(dm2.keys()) })
+          if (sample2.length >= 5) break
+        }
+        console.log(`[Mirror] relay ${relayKey}: filekey sample after backfill ${JSON.stringify(sample2)}`)
+      } catch (e) {
+        console.warn('[Mirror] re-check providers failed:', e)
+      }
+    }
+    await ensureMirrorsForProviders(providers, identifier)
+  }
+}
+
+async function backfillRelayFilekeyIndex(relayKey, identifier) {
+  if (!config?.driveKey) return
+  const pathPrefix = `/${identifier}`
+  const { getCorestore } = await import('./hyperdrive-manager.mjs')
+  const { default: Hyperdrive } = await import('hyperdrive')
+  const store = getCorestore()
+  if (!store) return
+  // Use the existing local drive from hyperdrive-manager via module cache
+  const { getLocalDrive } = await import('./hyperdrive-manager.mjs')
+  const localDrive = getLocalDrive()
+  if (!localDrive) return
+
+  let count = 0
+  for await (const entry of localDrive.list(pathPrefix, { recursive: false })) {
+    if (!entry?.value?.blob) continue
+    const fileHash = entry.key.split('/').pop()
+    console.log(`[Backfill] local entry key=${entry.key} hash=${fileHash}`)
+    try {
+      await appendFilekeyDbEntry(relayKey, fileHash)
+      count++
+    } catch (_) {}
+  }
+  console.log(`[Mirror] backfill for ${relayKey} (${identifier}) added ${count} index entries`)
+}
+
+async function collectRelayHealth(relayKey, manager, maxChecks = 200) {
+  // filekey index map: Map<fileHash, Map<driveKey,pubkey>>
+  let fileMap
+  try {
+    fileMap = await manager.relay.queryFilekeyIndex()
+  } catch (err) {
+    console.error(`[Worker] Health: queryFilekeyIndex failed for ${relayKey}:`, err)
+    return {
+      relayKey,
+      error: 'queryFilekeyIndex failed',
+      timestamp: Date.now()
+    }
+  }
+
+  const totalFiles = fileMap.size
+  let minProviders = Number.POSITIVE_INFINITY
+  let maxProviders = 0
+  let providerSum = 0
+
+  // Build a deterministic sample set (first N keys)
+  const hashes = Array.from(fileMap.keys())
+  const sample = hashes.slice(0, Math.max(0, Math.min(maxChecks, hashes.length)))
+  let presentLocal = 0
+
+  for (const h of hashes) {
+    const providers = fileMap.get(h) || new Map()
+    const count = providers.size
+    minProviders = Math.min(minProviders, count)
+    maxProviders = Math.max(maxProviders, count)
+    providerSum += count
+  }
+  if (!isFinite(minProviders)) minProviders = 0
+  const avgProviders = totalFiles > 0 ? providerSum / totalFiles : 0
+
+  for (const h of sample) {
+    try {
+      // Prefer public identifier for file path resolution
+      let identifier = relayKey
+      try {
+        const profile = await getRelayProfileByKey(relayKey)
+        if (profile?.public_identifier) identifier = profile.public_identifier
+      } catch (_) {}
+      if (await fileExists(identifier, h)) presentLocal++
+    } catch (_) {}
+  }
+
+  const health = getReplicationHealth()
+
+  const viewVersion = manager?.relay?.view?.version || null
+
+  return {
+    relayKey,
+    timestamp: Date.now(),
+    totals: {
+      filesIndexed: totalFiles,
+      sampleChecked: sample.length,
+      samplePresentLocal: presentLocal
+    },
+    providers: {
+      min: minProviders,
+      avg: Number.isFinite(avgProviders) ? Number(avgProviders.toFixed(2)) : 0,
+      max: maxProviders
+    },
+    drive: {
+      driveKey: health.driveKey,
+      discoveryKey: health.discoveryKey
+    },
+    swarm: {
+      openConnections: health.openConnections,
+      totalConnections: health.totalConnections,
+      topicsJoined: health.topicsJoined
+    },
+    relayView: {
+      version: viewVersion
+    }
+  }
+}
+
+async function logReplicationHealthOnce() {
+  if (!config || !healthLogPath) return
+  const entries = []
+  for (const [relayKey, manager] of activeRelays.entries()) {
+    try {
+      const entry = await collectRelayHealth(relayKey, manager)
+      entries.push(entry)
+    } catch (err) {
+      entries.push({ relayKey, timestamp: Date.now(), error: err.message })
+    }
+  }
+  const line = JSON.stringify({ type: 'replication-health', at: Date.now(), entries })
+  await logToFile(healthLogPath, line)
+}
+
+function startHealthLogger(intervalMs = 60000) {
+  if (!config) return
+  if (!healthLogPath) {
+    const baseDir = config.storage || '.'
+    healthLogPath = join(baseDir, 'hyperdrive-replication-health.log')
+  }
+  if (healthIntervalHandle) clearInterval(healthIntervalHandle)
+  // Stagger slightly from reconcile to spread IO
+  healthIntervalHandle = setInterval(() => {
+    if (!isShuttingDown) {
+      logReplicationHealthOnce().catch(err => console.error('[Worker] Health log error:', err))
+    }
+  }, intervalMs)
 }
 
 // Make pipe and sendMessage globally available for the relay server
@@ -384,6 +622,55 @@ if (workerPipe) {
           }
           
           switch (message.type) {
+            case 'get-replication-health': {
+              try {
+                const entries = []
+                for (const [relayKey, manager] of activeRelays.entries()) {
+                  entries.push(await collectRelayHealth(relayKey, manager, message.maxChecks || 200))
+                }
+                sendMessage({ type: 'replication-health', data: { entries, logPath: healthLogPath } })
+              } catch (err) {
+                sendMessage({ type: 'error', message: `get-replication-health failed: ${err.message}` })
+              }
+              break
+            }
+
+            case 'set-replication-health-interval': {
+              const ms = Math.max(5000, Number(message.intervalMs) || 60000)
+              startHealthLogger(ms)
+              sendMessage({ type: 'replication-health-interval-set', intervalMs: ms, logPath: healthLogPath })
+              break
+            }
+            case 'upload-file': {
+              try {
+                const { relayKey, identifier: idFromMsg, publicIdentifier, fileHash, metadata, buffer } = message.data || {}
+                const identifier = idFromMsg || publicIdentifier || relayKey
+                if (!identifier || !fileHash || !buffer) throw new Error('Missing identifier/publicIdentifier, fileHash, or buffer')
+                console.log(`[Upload] begin relayKey=${relayKey} identifier=${identifier} fileHash=${fileHash} metaKeys=${metadata ? Object.keys(metadata) : 'none'} bufLen=${buffer?.length}`)
+                const data = b4a.from(buffer, 'base64')
+                await ensureRelayFolder(identifier)
+                await storeFile(identifier, fileHash, data, metadata || null)
+                // Resolve relayKey for DB indexing
+                let resolvedRelayKey = relayKey
+                if (!resolvedRelayKey && identifier && !/^[a-fA-F0-9]{64}$/.test(identifier)) {
+                  try { resolvedRelayKey = await getRelayKeyFromPublicIdentifier(identifier) } catch (_) {}
+                }
+                if (resolvedRelayKey) {
+                  await appendFilekeyDbEntry(resolvedRelayKey, fileHash)
+                  // After indexing, try to (re)start mirrors to pick up the new provider
+                  ensureMirrorsForAllRelays().catch(err => console.warn('[Mirror] ensure after upload failed:', err))
+                } else {
+                  console.warn('[Worker] upload-file: could not resolve relayKey for identifier', identifier)
+                }
+                console.log(`[Upload] complete relayKey=${resolvedRelayKey || relayKey} identifier=${identifier} fileHash=${fileHash}`)
+                sendMessage({ type: 'upload-file-complete', relayKey: resolvedRelayKey || null, identifier, fileHash })
+              } catch (err) {
+                console.error('[Worker] upload-file error:', err)
+                sendMessage({ type: 'error', message: `upload-file failed: ${err.message}` })
+              }
+              break
+            }
+
             case 'shutdown':
               console.log('[Worker] Shutdown requested')
               isShuttingDown = true
@@ -407,7 +694,8 @@ if (workerPipe) {
                   // Call the relay server's create relay function
                   const result = await relayServer.createRelay(message.data);
                   relayMembers.set(result.relayKey, result.profile?.members || [])
-                  await ensureRelayFolder(result.relayKey)
+                  // Ensure hyperdrive folder using public identifier if available
+                  await ensureRelayFolder(result.profile?.public_identifier || result.relayKey)
                   await applyPendingAuthUpdates(updateRelayAuthToken, result.relayKey, result.profile?.public_identifier);
 
                   sendMessage({
@@ -446,7 +734,8 @@ if (workerPipe) {
                   // Call the relay server's join relay function
                   const result = await relayServer.joinRelay(message.data)
                   relayMembers.set(result.relayKey, result.profile?.members || [])
-                  await ensureRelayFolder(result.relayKey)
+                  // Ensure hyperdrive folder using public identifier if available
+                  await ensureRelayFolder(result.profile?.public_identifier || result.relayKey)
                   await applyPendingAuthUpdates(updateRelayAuthToken, result.relayKey, result.profile?.public_identifier);
 
                   sendMessage({
@@ -682,6 +971,9 @@ async function cleanup() {
     console.log('[Worker] Stopping relay server...')
     await relayServer.shutdownRelayServer()
   }
+
+  // Stop all mirror watchers
+  try { await stopAllMirrors() } catch (_) {}
   
   if (workerPipe) {
     workerPipe.end()
@@ -794,6 +1086,11 @@ async function main() {
 
     startDriveWatcher()
 
+    // Start periodic replication health logger
+    startHealthLogger(60000)
+    // Kick off mirror setup for all known relays/providers
+    await ensureMirrorsForAllRelays().catch(err => console.error('[Worker] Mirror setup error:', err))
+
     if (workerPipe) {
       sendMessage({
         type: 'status',
@@ -853,7 +1150,9 @@ async function main() {
 
     setInterval(() => {
       if (!isShuttingDown) {
+        // Keep the legacy reconcilation for now, and also refresh mirrors to discover new providers
         reconcileRelayFiles().catch(err => console.error('[Worker] File reconciliation error:', err))
+        ensureMirrorsForAllRelays().catch(err => console.error('[Worker] Mirror refresh error:', err))
       }
     }, 60000)
 

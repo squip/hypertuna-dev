@@ -127,7 +127,7 @@ class NostrEvents {
      * @param {string} privateKey - Private key for signing
      * @returns {Promise<Object>} - Signed event
      */
-    static async createTextNote(content, tags, privateKey, attachment = null, relayKey = null) {
+    static async createTextNote(content, tags, privateKey, attachment = null, relayKey = null, identifier = null) {
         const eventTags = Array.isArray(tags) ? [...tags] : [];
         const urls = NostrUtils.extractUrls(content);
         for (const url of urls) {
@@ -160,6 +160,8 @@ class NostrEvents {
                     type: 'upload-file',
                     data: {
                         relayKey,
+                        // Include public-facing identifier for namespacing when available
+                        identifier: identifier || null,
                         fileHash: attachment.fileHash,
                         metadata: attachment.metadata,
                         buffer: attachment.buffer.toString('base64')
@@ -209,7 +211,7 @@ class NostrEvents {
             });
         }
         
-        return this.createTextNote(content, tags, privateKey, attachment, relayKey);
+        return this.createTextNote(content, tags, privateKey, attachment, relayKey, groupId);
     }
     
     /**
